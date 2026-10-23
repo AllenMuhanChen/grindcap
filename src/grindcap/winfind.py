@@ -71,11 +71,22 @@ def is_minimized(hwnd) -> bool:
     return bool(u and u.IsIconic(hwnd))
 
 
+BROWSERS_ETC = ("google chrome", "mozilla firefox", "microsoft edge", "opera", "brave", "discord",
+                "visual studio code", "notepad", "file explorer", "grindcap", "obs ")
+
+
 def find_game_window(title: str):
-    """(handle, exact title, client rect) of the largest window whose title contains `title`."""
-    t = title.lower()
-    hits = [(hwnd, name, rect) for name, rect, hwnd in list_windows()
-            if t in name.lower() and "grindcap" not in name.lower()]
+    """(handle, exact title, client rect) of the game window.
+
+    A window titled exactly `title` wins. Otherwise the largest window whose title contains it,
+    skipping browsers and other apps that often have the game's name in a tab or file title.
+    """
+    t = title.lower().strip()
+    wins = [(hwnd, name, rect) for name, rect, hwnd in list_windows()]
+    exact = [w for w in wins if w[1].lower().strip() == t]
+    if exact:
+        return max(exact, key=lambda h: h[2]["width"] * h[2]["height"])
+    hits = [w for w in wins if t in w[1].lower() and not any(b in w[1].lower() for b in BROWSERS_ETC)]
     if not hits:
         return None
     return max(hits, key=lambda h: h[2]["width"] * h[2]["height"])

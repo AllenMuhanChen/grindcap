@@ -138,6 +138,7 @@ class GameWindow:
         if sys.platform != "win32":
             raise CaptureError("Game-window capture only works on Windows.")
         hwnd, exact, rect = self.find()
+        self.window_title = self.window_title if self._wgc else exact
         if winfind.is_minimized(hwnd):
             raise CaptureError("The game is minimized, so it isn't drawing anything. Restore it "
                                "(it can stay behind other windows).")

@@ -49,7 +49,10 @@ def cmd_windows(cfg, a):
         print(f"{r['width']:>5}x{r['height']:<5} at ({r['left']}, {r['top']})  {title}")
     t = cfg["capture"].get("window_title")
     if t:
-        print(f"\ncapture.window_title = {t!r} -> " + ("found" if find_game(t) else "NOT found"))
+        from .winfind import find_game_window
+
+        hit = find_game_window(t)
+        print(f"\ncapture.window_title = {t!r} -> " + (f"uses the window titled {hit[1]!r}" if hit else "NOT found"))
 
 
 def cmd_test_capture(cfg, a):
@@ -62,7 +65,8 @@ def cmd_test_capture(cfg, a):
     out.mkdir(exist_ok=True)
     p = out / "test_capture.png"
     cv2.imwrite(str(p), img)
-    print(f"Captured {img.shape[1]}x{img.shape[0]} using '{src.method}'. Saved {p}")
+    title = src.game.window_title if src.game and src.game.window_title else "(screen)"
+    print(f"Captured {img.shape[1]}x{img.shape[0]} of {title!r} using '{src.method}'. Saved {p}")
     if src.method == "screen":
         print("That was a plain screenshot: it only shows the game when the game is in front. "
               "Install windows-capture (pip install windows-capture) to capture it behind other windows.")
