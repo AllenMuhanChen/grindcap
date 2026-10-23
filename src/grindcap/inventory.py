@@ -191,6 +191,15 @@ class Catalog:
             it["npc_price"] = price
         self.save()
 
+    def remove(self, iid: str):
+        """Forget an item completely: catalog entry, icon picture and icon signatures."""
+        self.items.pop(iid, None)
+        for f in list(self.icons_dir.glob(f"{iid}.png")) + list(self.icons_dir.glob(f"{iid}.npy")) + \
+                list(self.icons_dir.glob(f"{iid}.alt*.npy")):
+            f.unlink(missing_ok=True)
+        self._sigs = [(i, s) for i, s in self._sigs if i != iid]
+        self.save()
+
     def price(self, iid: str):
         """Mesos each: your own price if you set one, else the NPC sell price, else None.
         Your price ("price") never replaces the NPC price ("npc_price"); clear it to go back."""

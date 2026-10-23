@@ -66,7 +66,7 @@ button:hover { border-color: var(--accent); }
   <div class="bar">
     <h1>grindcap review</h1>
     <label>Session <select id="session"></select></label>
-    <label class="muted"><input type="checkbox" id="showall"> also show items I fixed or deleted</label>
+    <label class="muted"><input type="checkbox" id="showall"> also show unchanged items I fixed</label>
   </div>
   <div class="stats" id="stats"></div>
 </header>
@@ -85,9 +85,15 @@ button:hover { border-color: var(--accent); }
   <section>
     <h2>Items that changed</h2>
     <table id="items"></table>
-    <p class="hint">Click a row to see the slots it was read from. Delete removes a misread item from this session
-      (Restore brings it back); to drop just one slot, use "Ignore this slot" there. Names and prices you set apply to every session;
-      slot fixes apply to this session's snapshots only.</p>
+    <p class="hint">Click a row to see the slots it was read from. Delete moves a misread item to the list below; to drop
+      just one slot, use "Ignore this slot" there. Names and prices you set apply to every session; slot fixes apply to this
+      session's snapshots only.</p>
+  </section>
+  <section id="deletedSec" hidden>
+    <h2>Deleted from this session</h2>
+    <table id="deleted"></table>
+    <p class="hint">Not counted in this session. Restore puts an item back. Purge removes it for good: from your item list
+      and its saved icons, so it isn't counted in any session.</p>
   </section>
 </main>
 <div id="msg"></div>
@@ -145,7 +151,24 @@ function render() {
     (cov[snap].length ? cov[snap].map(sl => slotBox(none, snap, sl)).join("") : `<p class="muted">None.</p>`) + `</div>`).join("");
   wireSlots($("#covered"));
 
-  const rows = D.items.filter(it => it.change !== 0 || $("#showall").checked);
+  const del = D.items.filter(it => it.deleted);
+  $("#deletedSec").hidden = !del.length;
+  $("#deleted").innerHTML = `<tr><th></th><th class="l">Item</th><th>Read before</th><th>Read after</th>
+      <th><button id="purgeall">Purge all ${del.length}</button></th></tr>` +
+    del.map(it => `<tr><td><img class="icon" src="/icon?id=${encodeURIComponent(it.id)}" alt=""></td>
+      <td class="l">${esc(it.name || it.id)} <span class="muted">${esc(it.name ? it.id : "")}</span></td>
+      <td>${fmt(it.read_before)}</td><td>${fmt(it.read_after)}</td>
+      <td><button class="undel" data-id="${esc(it.id)}">Restore</button>
+          <button class="purge" data-id="${esc(it.id)}">Purge</button></td></tr>`).join("");
+  const dt = $("#deleted");
+  dt.querySelectorAll("button.undel").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: false}, "Restored"));
+  dt.querySelectorAll("button.purge").forEach(b => b.onclick = () =>
+    confirm("Remove this item for good (from your item list and every session)?") && edit({op: "purge", id: b.dataset.id}, "Purged"));
+  const pa = $("#purgeall");
+  if (pa) pa.onclick = () => confirm(`Remove all ${del.length} deleted items for good (from your item list and every session)?`)
+    && edit({op: "purge_deleted"}, "Purged");
+
+  const rows = D.items.filter(it => !it.deleted && (it.change !== 0 || $("#showall").checked));
   let h = `<tr><th></th><th class="l">Item</th><th>Before</th><th>After</th><th>Change</th><th>Per hr</th><th>Price</th><th>Value</th><th></th></tr>`;
   for (const it of rows) {
     const tags = [];
@@ -153,8 +176,7 @@ function render() {
     if (it.candidates.length > 1) tags.push(`<span class="tag warn">${it.candidates.length} items share this icon</span>`);
     if (it.auto_named) tags.push(`<span class="tag" title="matched ${it.db_match.ratio}x better than ${esc(it.db_match.runner_up)}">auto</span>`);
     const fixed = [...it.slots.start, ...it.slots.end].filter(x => x.fixed).length;
-    if (it.deleted) tags.push(`<span class="tag warn">deleted from this session</span>`);
-    else if (fixed) tags.push(`<span class="tag">${fixed} slot fix${fixed > 1 ? "es" : ""}</span>`);
+    if (fixed) tags.push(`<span class="tag">${fixed} slot fix${fixed > 1 ? "es" : ""}</span>`);
     h += `<tr class="item" data-id="${esc(it.id)}">
       <td><img class="icon" src="/icon?id=${encodeURIComponent(it.id)}" alt=""></td>
       <td class="l"><input class="name" data-id="${esc(it.id)}" value="${esc(it.name)}" placeholder="${esc(it.id)}"> ${tags.join("")}</td>
@@ -166,8 +188,7 @@ function render() {
           ${it.custom_price != null ? `<div><button class="npc" data-id="${esc(it.id)}">${it.npc_price != null ? "use NPC " + it.npc_price : "clear"}</button></div>`
                                     : `<div class="muted" style="font-size:11px">${it.npc_price != null ? "NPC price" : ""}</div>`}</td>
       <td>${fmt(it.value)}</td>
-      <td>${it.deleted ? `<button class="undel" data-id="${esc(it.id)}">Restore</button>`
-                       : `<button class="del" data-id="${esc(it.id)}" title="A misread: don't count it in this session">Delete</button>`}</td></tr>`;
+      <td><button class="del" data-id="${esc(it.id)}" title="A misread: don't count it in this session">Delete</button></td></tr>`;
     if (open.has(it.id)) h += `<tr class="detail"><td colspan="9">${detail(it)}</td></tr>`;
   }
   if (!rows.length) h += `<tr><td colspan="9" class="l muted">No item counts changed.</td></tr>`;
@@ -182,8 +203,7 @@ function render() {
   t.querySelectorAll("select.cand").forEach(s => s.onchange = () => s.value && edit({op: "item_db", id: s.dataset.id, db_id: s.value}));
   t.querySelectorAll("button.npc").forEach(b => b.onclick = () => edit({op: "item", id: b.dataset.id, price: ""}, "Back to the NPC price"));
   t.querySelectorAll("button.del").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: true},
-    "Deleted from this session. Tick 'also show items I fixed or deleted' to restore it."));
-  t.querySelectorAll("button.undel").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: false}));
+    "Deleted: moved to the list at the bottom"));
   wireSlots(t);
 }
 

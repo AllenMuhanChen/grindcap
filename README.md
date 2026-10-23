@@ -122,7 +122,7 @@ grindcap review            # latest session; pick older ones from the Session me
 It opens in your browser and lists only the items whose count changed. Everything saves as you go:
 
 - **Name and price:** type a name, or your own price (e.g. what a potion saves you). The NPC sell price is always kept: clear your price, or press "use NPC", to go back to it.
-- **Delete:** a misread item that shouldn't count. Restore brings it back.
+- **Delete:** a misread item that shouldn't count. It moves to a "Deleted" list at the bottom, where **Restore** brings it back and **Purge** (or **Purge all**) removes it for good: from your item list and its saved icons, in every session.
 - **Click a row** to see the slots it was read from, as pictures from the start and end screenshots. Per slot: fix the count, say what the item really is (pick from your items or search the game's item list), or ignore that one slot.
 - **Same icon, different items** (scrolls, cakes): the row says how many items share the icon. Pick one for the whole row, or set each slot.
 - **Slots hidden under a tooltip** aren't counted. If a later page showed them, they're filled in from it; otherwise they're listed so you can say what they were.

@@ -34,8 +34,9 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
 review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
              items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
-             ignore_item/item/item_db), local http.server + data/review.html. Slot/status fixes live in
-             <snapshot>/fixes.json, applied by snapshot.apply_fixes in compare(). Prices: catalog "price"
+             ignore_item/purge/purge_deleted/item/item_db), local http.server + data/review.html. Slot/status fixes live in
+             <snapshot>/fixes.json ("slots", "status", "deleted" item ids), applied by snapshot.apply_fixes in
+             compare(); compare() also skips ids no longer in the catalog (purged). Prices: catalog "price"
              = user's, "npc_price" = NPC; Catalog.price() picks. Slots under a tooltip (is_covered) are
              UNKNOWN "?": not counted, ignored when matching pages, filled from an overlapping page.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,

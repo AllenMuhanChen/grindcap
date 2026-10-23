@@ -153,6 +153,8 @@ def apply_fixes(snap: dict) -> dict:
             if iid and iid != "?":
                 items[iid] = items.get(iid, 0) + int(n)
         out["items"] = items
+    if fx.get("deleted"):
+        out["items"] = {k: v for k, v in out["items"].items() if k not in set(fx["deleted"])}
     return out
 
 
@@ -181,6 +183,8 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
     hours = (minutes / 60) if minutes else (end["time"] - start["time"]) / 3600
     per_hr = (lambda v: round(v / hours, 1)) if hours > 0 else (lambda v: None)
     ids = sorted(set(start["items"]) | set(end["items"]))
+    if catalog.items:
+        ids = [i for i in ids if i in catalog.items]   # items purged from the catalog don't count
     rows = []
     for iid in ids:
         a, b = start["items"].get(iid, 0), end["items"].get(iid, 0)

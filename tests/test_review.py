@@ -65,6 +65,27 @@ def test_fixing_a_slot_deleting_a_misread_and_status(tmp_path):
     assert {it["id"]: it["change"] for it in r["items"]} == {"item-001": -40, "item-002": 38, "item-003": 7}
 
 
+def test_delete_works_without_slot_records_and_purge_removes_item(tmp_path):
+    cat, root, s, e = setup(tmp_path)
+    for f in (s, e):   # a snapshot saved before slots were recorded
+        d = json.loads((f / "snapshot.json").read_text())
+        d.pop("slots")
+        (f / "snapshot.json").write_text(json.dumps(d))
+    apply_edit(s, e, cat, None, {"op": "ignore_item", "id": "item-003"})
+    r = compare(load_snapshot(s), load_snapshot(e), cat)
+    assert "item-003" not in {it["id"] for it in r["items"]}
+    d = review_data(s, e, cat)
+    dl = next(it for it in d["items"] if it["id"] == "item-003")
+    assert dl["deleted"] and (dl["read_before"], dl["read_after"]) == (0, 7)
+    (cat.icons_dir).mkdir(parents=True, exist_ok=True)
+    (cat.icons_dir / "item-003.png").write_bytes(b"x")
+    apply_edit(s, e, cat, None, {"op": "purge_deleted"})
+    cat = Catalog(tmp_path / "data")
+    assert "item-003" not in cat.items and not (cat.icons_dir / "item-003.png").exists()
+    assert "item-003" not in {it["id"] for it in review_data(s, e, cat)["items"]}
+    assert "deleted" not in load_snapshot(e)["fixes"]
+
+
 def test_custom_price_keeps_npc_price(tmp_path):
     cat, root, s, e = setup(tmp_path)
     apply_edit(s, e, cat, None, {"op": "item", "id": "item-001", "price": "50"})

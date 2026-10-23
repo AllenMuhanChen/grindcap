@@ -73,6 +73,9 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
             for iid in (orig, f.get("item")):
                 if iid and iid != "?" and iid not in ids:
                     ids.append(iid)
+    deleted = set((s.get("fixes") or {}).get("deleted", [])) | set((e.get("fixes") or {}).get("deleted", []))
+    ids += [i for i in sorted(deleted) if i not in ids]
+    ids = [i for i in ids if i in catalog.items]        # purged items are gone
     rows = {it["id"]: it for it in r["items"]}
     es, ee = apply_fixes(s), apply_fixes(e)
     items = []
@@ -95,8 +98,10 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
             "per_hr": base.get("per_hr"), "value": base.get("value"),
             "slots": {"start": _snap_slots(s, iid), "end": _snap_slots(e, iid)},
         })
-        sl_all = items[-1]["slots"]["start"] + items[-1]["slots"]["end"]
-        items[-1]["deleted"] = bool(sl_all) and all(x["ignored"] for x in sl_all)
+        items[-1]["deleted"] = iid in deleted
+        if iid in deleted:   # what was read, so you can see what you deleted
+            raw = [apply_fixes({**x, "fixes": {**(x.get("fixes") or {}), "deleted": []}}) for x in (s, e)]
+            items[-1]["read_before"], items[-1]["read_after"] = (r_["items"].get(iid, 0) for r_ in raw)
     # slots a tooltip covered and that you haven't said what they are yet
     covered = {name: [x for x in _snap_slots(snap, "?") if x["item"] in ("?", None) and not x["ignored"]]
                for name, snap in (("start", s), ("end", e))}
@@ -159,25 +164,32 @@ def apply_edit(start_dir, end_dir, catalog: Catalog, itemdb, edit: dict) -> None
                     slots.pop(ref, None)
         save_fixes(folder, fixes)
     elif op == "ignore_item":
-        # Delete a misread item from this session: ignore every slot it was read in (or undo that).
+        # Delete a misread item from this session (or restore it). Recorded per snapshot, so it works
+        # for every snapshot, including ones saved before slots were recorded.
         iid, on = edit["id"], bool(edit.get("ignore", True))
         for folder in folders.values():
-            snap = load_snapshot(folder)
-            fixes = snap.get("fixes") or {}
-            slots = fixes.setdefault("slots", {})
-            for sl in snap.get("slots", []):
-                f = dict(slots.get(sl["ref"], {}))
-                if f.get("item", sl["item"]) != iid:
-                    continue
-                if on:
-                    f["ignore"] = True
-                else:
-                    f.pop("ignore", None)
-                if f:
-                    slots[sl["ref"]] = f
-                else:
-                    slots.pop(sl["ref"], None)
+            fixes = load_snapshot(folder).get("fixes") or {}
+            deleted = [x for x in fixes.get("deleted", []) if x != iid] + ([iid] if on else [])
+            fixes["deleted"] = deleted
+            if not deleted:
+                fixes.pop("deleted")
             save_fixes(folder, fixes)
+    elif op in ("purge", "purge_deleted"):
+        # Remove items from the catalog for good (their icons too). Snapshots that still mention
+        # them simply don't count them any more.
+        if op == "purge":
+            ids = [edit["id"]]
+        else:
+            ids = sorted({x for f in folders.values() for x in (load_snapshot(f).get("fixes") or {}).get("deleted", [])})
+        for iid in ids:
+            catalog.remove(iid)
+            for folder in folders.values():
+                fixes = load_snapshot(folder).get("fixes") or {}
+                if iid in fixes.get("deleted", []):
+                    fixes["deleted"].remove(iid)
+                    if not fixes["deleted"]:
+                        fixes.pop("deleted")
+                    save_fixes(folder, fixes)
     elif op == "item":
         iid = edit["id"]
         it = catalog.items[iid]
