@@ -27,7 +27,7 @@ class Tracker:
                  on_event: Callable[[Event], None] | None = None):
         self.cfg = cfg
         self.source = source
-        self.readers = build_readers(cfg)
+        self.readers = build_readers(cfg, strict=True)
         self.detector = EventDetector(cfg)
         self.events: list[Event] = []
         self.out_path = out_path
@@ -53,7 +53,7 @@ class Tracker:
                     from .anchors import shifted
 
                     try:
-                        self.readers = build_readers(shifted(self.cfg, frame))
+                        self.readers = build_readers(shifted(self.cfg, frame), strict=True)
                     except LookupError as e:
                         print(f"Warning: {e} Using the calibrated positions.")
                     located = True

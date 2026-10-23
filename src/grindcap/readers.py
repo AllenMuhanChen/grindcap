@@ -103,8 +103,12 @@ class TextReader:
         return self._last
 
 
-def build_readers(cfg) -> dict:
-    """Create a reader for every configured box."""
+def build_readers(cfg, strict: bool = False) -> dict:
+    """Create a reader for every configured box.
+
+    strict=True (live tracking) requires max_hp/max_mp for bar readers; otherwise an HP/MP bar without
+    a max just reports how full it is (0-1), which is fine for checking calibration.
+    """
     out = {}
     ch = cfg["character"]
     for name, rc in cfg.configured_readers().items():
@@ -112,9 +116,9 @@ def build_readers(cfg) -> dict:
             if not rc.get("fill_rgb"):
                 raise ValueError(f"Reader '{name}' is a bar but has no fill_rgb. Run `grindcap calibrate`.")
             scale = {"hp": ch.get("max_hp"), "mp": ch.get("max_mp")}.get(name)
-            if name in ("hp", "mp") and not scale:
-                raise ValueError(f"Reader '{name}' is a bar, so character.max_{name} must be set "
-                                 "(the bar gives a fraction; max turns it into points).")
+            if strict and name in ("hp", "mp") and not scale:
+                raise ValueError(f"Live tracking reads HP/MP from the bar, so set your max {name.upper()} "
+                                 f"in config.yaml under character: max_{name}: <number>.")
             out[name] = BarReader(rc["box"], rc["fill_rgb"], rc.get("tol", 45), scale)
         else:
             out[name] = TextReader(rc["box"], cfg["session"].get("tesseract_cmd"))
