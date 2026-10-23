@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import traceback
 import webbrowser
 from pathlib import Path
@@ -56,10 +57,22 @@ def main(config_path: str = "config.yaml"):
     b_fin = ttk.Button(frm, text="Finish (F10)", command=lambda: run_bg(do_finish))
     b_cancel = ttk.Button(frm, text="Cancel", command=lambda: cancel())
     b_review = ttk.Button(frm, text="Review / fix sessions", command=lambda: review())
+    b_discard = ttk.Button(frm, text="Discard", command=lambda: discard())
+    timer = tk.StringVar(value="")
+    timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"))
+    session = {"run": None}   # the start snapshot waiting for its end, if any
+
+    def refresh_running():
+        from .sessions import running
+
+        try:
+            session["run"] = running(cfg["inventory"]["snapshot_dir"])
+        except Exception:
+            session["run"] = None
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
 
     def layout(collecting: bool):
-        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review):
+        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, timer_lbl, b_discard):
             w.grid_remove()
         if collecting:
             b_page.grid(row=2, column=0, sticky="ew", padx=2)
@@ -67,10 +80,40 @@ def main(config_path: str = "config.yaml"):
             b_cancel.grid(row=2, column=2, sticky="ew", padx=2)
             chk.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
         else:
+            refresh_running()
+            run = session["run"]
             b_start.grid(row=2, column=0, sticky="ew", padx=2)
             b_end.grid(row=2, column=1, sticky="ew", padx=2)
             b_cmp.grid(row=2, column=2, sticky="ew", padx=2)
             b_review.grid(row=3, column=0, columnspan=3, sticky="ew", padx=2, pady=(4, 0))
+            # One session at a time: while one is running, Start is greyed out and a timer shows.
+            b_start.state(["disabled"] if run else ["!disabled"])
+            b_end.state(["!disabled"] if run else ["disabled"])
+            if run:
+                timer_lbl.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+                b_discard.grid(row=4, column=2, sticky="e", pady=(6, 0))
+            update_timer()
+
+    def update_timer():
+        run = session["run"]
+        if not run:
+            timer.set("")
+            return
+        secs = int(time.time() - run["time"])
+        where = f" · {run['map']}" if run.get("map") else ""
+        timer.set(f"Session running {secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}{where}")
+
+    def discard():
+        """Throw away a start snapshot taken by mistake, so a new session can be started."""
+        import shutil
+        from tkinter import messagebox
+
+        run = session["run"]
+        if run and messagebox.askyesno("Discard session", "Discard the running session's start snapshot?",
+                                       parent=root):
+            shutil.rmtree(run["folder"], ignore_errors=True)
+            status.set("Discarded. Start a new session when you're ready.")
+            layout(False)
 
     # --- work that touches the screen or OCR runs off the UI thread ---
     busy = threading.Lock()
@@ -182,6 +225,8 @@ def main(config_path: str = "config.yaml"):
                     handle(payload)
         except queue.Empty:
             pass
+        if not flow.collecting:
+            update_timer()
         if waiting and not busy.locked():
             fn, args = waiting.pop(0)
             run_bg(fn, *args)

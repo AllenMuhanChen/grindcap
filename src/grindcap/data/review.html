@@ -25,6 +25,8 @@ main { padding: 16px 20px 60px; max-width: 1150px; }
 .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 120px; }
 .stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
 .stat span { color: var(--muted); font-size: 12px; }
+.stat.big { min-width: 190px; border-color: var(--accent); }
+.stat.big b { font-size: 24px; color: var(--accent); }
 section { margin-top: 18px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 8px; }
 table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -187,10 +189,11 @@ function renderSession() {
 
 function render() {
   const s = D.summary;
-  $("#stats").innerHTML = [
-    ["Minutes", s.minutes], ["EXP", s.exp], ["EXP / hr", s.exp_per_hr], ["Mesos / hr", s.mesos_per_hr],
-    ["Items gained", s.items_gained_value], ["Items used", s.items_used_value], ["Net / hr incl. items", s.net_per_hr]
-  ].map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
+  const hm = m => m == null ? "–" : `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
+  $("#stats").innerHTML =
+    `<div class="stat big"><b>${fmt(s.net_per_hr)}</b><span>Net mesos / hr incl. items</span></div>
+     <div class="stat big"><b>${fmt(s.exp_per_hr)}</b><span>EXP / hr</span></div>
+     <div class="stat"><b>${hm(s.minutes)}</b><span>Time (h:mm)</span></div>`;
 
   const st = D.status;
   const field = (snap, f) => {

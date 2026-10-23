@@ -299,13 +299,13 @@ def format_compare(r: dict) -> str:
     def f(v):
         return "-" if v is None else (f"{v:,.0f}" if isinstance(v, (int, float)) else str(v))
 
+    m = r["minutes"] or 0
     lines = [
-        f"Time            {r['minutes']} min",
-        f"EXP             {f(r['exp'])}  ({f(r['exp_per_hr'])}/hr){'  +' + str(r['levels']) + ' level(s)' if r['levels'] else ''}",
-        f"Mesos           {f(r['mesos'])}  ({f(r['mesos_per_hr'])}/hr)",
-        f"Items gained    {f(r['items_gained_value'])} mesos of value",
-        f"Items used      {f(r['items_used_value'])} mesos of value",
-        f"Net incl items  {f(r['net_mesos_incl_items'])}  ({f(r['net_per_hr'])}/hr)",
+        f"NET MESOS / HR  {f(r['net_per_hr'])}   (incl. items)",
+        f"EXP / HR        {f(r['exp_per_hr'])}{'   +' + str(r['levels']) + ' level(s)' if r['levels'] else ''}",
+        f"Time            {int(m // 60)}:{int(round(m % 60)):02d}",
+        "",
+        f"  mesos {f(r['mesos'])}, items gained {f(r['items_gained_value'])}, used {f(r['items_used_value'])}",
         "",
         f"{'Item':<28}{'Before':>8}{'After':>8}{'Change':>8}{'Per hr':>9}{'Value':>10}",
     ]

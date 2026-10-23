@@ -35,6 +35,19 @@ def _info(p: Path) -> dict | None:
     return {"time": d.get("time", 0), "map": d.get("map")}
 
 
+def running(root) -> dict | None:
+    """The start snapshot still waiting for its end snapshot (newer than every end), or None."""
+    root = Path(root)
+    starts = [(i["time"], p, i) for p in root.glob("start-*") if (i := _info(p))]
+    if not starts:
+        return None
+    t, p, i = max(starts, key=lambda x: x[0])
+    ends = [i2["time"] for q in root.glob("end-*") if (i2 := _info(q))]
+    if ends and max(ends) >= t:
+        return None
+    return {"folder": str(p), "time": t, "map": (i.get("map") or {}).get("name")}
+
+
 def default_name(map_name: str | None, start_time: float, minutes: float) -> str:
     when = datetime.fromtimestamp(start_time).strftime("%b %d %H:%M") if start_time else "?"
     return f"{map_name or 'Unknown map'} · {when} · {minutes:.0f} min"
