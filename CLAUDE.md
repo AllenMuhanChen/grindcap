@@ -29,6 +29,11 @@ cli.py       calibrate | snapshot | watch | run | replay | summarize | export |
              snap start/end | compare | items | label | teach-digits
 anchors.py   Template-matched anchors (inventory title bar, status-bar label) found per frame; boxes that
              belong to that window are shifted by the anchor's offset (shifted()). User wants minimal manual input.
+wincap.py    GameWindow: capture the game window by title. Windows Graphics Capture (works when covered,
+             not when minimized) -> PrintWindow -> plain screenshot. winfind.py: Win32 window lookup.
+app.py       SnapFlow: toolkit-free snapshot workflow (start, add_page, poll with PageWatcher, finish, compare).
+gui.py       tkinter always-on-top control window over SnapFlow; work runs in threads, button presses take
+             priority over auto-capture polls. Entry point grindcap-gui (no console).
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```
@@ -55,7 +60,11 @@ Snapshot mode specifics to check on the real game: icon match threshold (same it
 captures, different items must not), empty-slot detection threshold, the stack-number colour (the
 teach step tries white then black), and whether hover highlights change icons.
 
-The user's preferred first workflow is snapshots (start/end), not live tracking.
+The user's preferred first workflow is snapshots (start/end) from the control window, not live tracking.
+The user has one monitor and wants as little manual input as possible. HP/MP are read as numbers (cur/max);
+the slash often OCRs as a digit, handled in TextReader.parse_pair.
+
+gui.py was only smoke-tested headless with a fake tkinter; wincap.py has not run on Windows yet.
 
 ## Next steps
 

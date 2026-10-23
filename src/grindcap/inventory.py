@@ -195,6 +195,8 @@ def merge_pages(pages: list[list[list[Slot]]]) -> list[list[Slot]]:
         return []
     merged = [list(r) for r in pages[0]]
     for page in pages[1:]:
+        if _contained(merged, page):
+            continue  # scrolled back up to rows already counted
         best = 0
         for k in range(min(len(merged), len(page)), 0, -1):
             a = [_row_key(r) for r in merged[-k:]]
@@ -204,6 +206,70 @@ def merge_pages(pages: list[list[list[Slot]]]) -> list[list[Slot]]:
                 break
         merged.extend(list(r) for r in page[best:])
     return merged
+
+
+def _contained(merged, page) -> bool:
+    """True if every row of `page` already appears, in order and contiguously, in `merged`."""
+    if not any(iid for r in page for iid, _ in r):
+        return False
+    pk = [_row_key(r) for r in page]
+    mk = [_row_key(r) for r in merged]
+    n = len(pk)
+    return any(mk[i:i + n] == pk for i in range(len(mk) - n + 1))
+
+
+class PageWatcher:
+    """Decides when to capture an inventory page automatically.
+
+    Feed it frames a few times a second. It finds the inventory (by its landmark), looks at the item
+    grid, and returns True once the grid has changed and then held still for `stable` frames, i.e.
+    you scrolled or switched tabs and stopped. Frames where the inventory isn't visible are ignored.
+    """
+
+    def __init__(self, cfg, stable: int = 2, diff: float = 4.0):
+        self.cfg = cfg
+        self.stable = stable
+        self.diff = diff
+        self._last = None
+        self._count = 0
+        self._captured = None
+
+    def grid_signature(self, frame):
+        import cv2
+
+        from .anchors import shifted
+
+        try:
+            fc = shifted(self.cfg, frame, ("inventory",))
+        except LookupError:
+            return None
+        g = Grid.from_cfg(fc["inventory"])
+        boxes = g.slot_boxes()
+        x0, y0 = boxes[0][0][0], boxes[0][0][1]
+        x1 = boxes[-1][-1][0] + boxes[-1][-1][2]
+        y1 = boxes[-1][-1][1] + boxes[-1][-1][3]
+        crop = frame[max(0, y0):y1, max(0, x0):x1]
+        if crop.size == 0:
+            return None
+        small = cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (48, 72), interpolation=cv2.INTER_AREA)
+        return small.astype(np.float32)
+
+    def _same(self, a, b) -> bool:
+        return a is not None and b is not None and float(np.abs(a - b).mean()) < self.diff
+
+    def feed(self, frame) -> bool:
+        sig = self.grid_signature(frame)
+        if sig is None:
+            self._last, self._count = None, 0
+            return False
+        if self._same(sig, self._last):
+            self._count += 1
+        else:
+            self._last, self._count = sig, 1
+        if self._count >= self.stable and not self._same(sig, self._captured):
+            self._captured = sig
+            return True
+        return False
 
 
 def totals(tabs: dict[str, list[list[Slot]]]) -> dict[str, int]:

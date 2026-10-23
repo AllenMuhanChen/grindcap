@@ -15,6 +15,23 @@ From those it works out the numbers Grind Ledger needs you to fill in by hand: *
 
 It only reads the screen. It never sends keys or clicks to the game.
 
+## Quick start: the control window
+
+```
+pip install -e ".[ocr,dev]"
+grindcap-gui
+```
+
+A small window opens and stays on top of everything. It captures the MapleStory window directly, even when other windows cover it (the game just can't be minimized).
+
+1. Click **Start snapshot**. It reads your EXP and mesos right away and shows them, so you can check.
+2. In the game, open your inventory and scroll through every tab, top to bottom. Pages are captured automatically each time you stop scrolling. You can also press **F8** to capture a page by hand.
+3. Click **Finish** (or press **F10**).
+4. Grind. Then do the same with **End snapshot**.
+5. Click **Compare** to see EXP/hr, mesos/hr and items gained or used, plus a report with item icons.
+
+Check the capture works with `grindcap test-capture`: it saves `captures/test_capture.png` and says which method it used. If your game's window title doesn't contain "MapleStory", run `grindcap windows` and set `capture.window_title` in `config.yaml`.
+
 ## Two ways to use it
 
 - **Before/after snapshots (start here).** Take a snapshot of your EXP, mesos and whole inventory, grind, take another, compare. Gives EXP/hr, mesos/hr, and every item gained or used per hour (potions drunk show as negative). No live tracking needed.

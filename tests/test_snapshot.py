@@ -179,3 +179,62 @@ def test_missing_window_is_reported(tmp_path):
     save_anchor(c, "inventory", inventory_screen([]), (X0 - 6, Y0 - 40, 176, 28))
     with pytest.raises(LookupError):
         locate(c, "inventory", np.full((460, 380, 3), (70, 60, 55), np.uint8))
+
+
+def test_merge_skips_page_scrolled_back_to():
+    a = [[("i1", 1)], [("i2", 3)], [("i3", 5)]]
+    b = [[("i3", 5)], [("i4", 2)], [("i5", 1)]]
+    back = [[("i2", 3)], [("i3", 5)], [("i4", 2)]]   # scrolled back up one row
+    merged = merge_pages([a, b, back])
+    assert [r[0][0] for r in merged] == ["i1", "i2", "i3", "i4", "i5"]
+
+
+def test_page_watcher_captures_once_per_settled_page(tmp_path):
+    from grindcap.anchors import save_anchor
+    from grindcap.inventory import PageWatcher
+
+    c = cfg()
+    c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
+    items = [(s, s) for s in range(1, 41)]
+    save_anchor(c, "inventory", inventory_screen(items), (X0 - 6, Y0 - 40, 176, 28))
+    w = PageWatcher(c, stable=2)
+    closed = np.full((460, 380, 3), (70, 60, 55), np.uint8)
+    seq = ([closed] * 2                                   # inventory closed: nothing
+           + [inventory_screen(items, 0)] * 4             # page 1 settles: capture once
+           + [inventory_screen(items, 2)] * 1             # mid-scroll frame
+           + [inventory_screen(items, 4, ox=30)] * 3      # page 2 (window also moved): capture once
+           + [inventory_screen(items, 4, ox=30)] * 3)     # still the same: nothing
+    caps = [i for i, f in enumerate(seq) if w.feed(f)]
+    assert caps == [3, 8]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_snapflow_auto_pages_start_end_compare(tmp_path):
+    from grindcap.anchors import save_anchor
+    from grindcap.app import SnapFlow
+
+    c = cfg()
+    c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
+    c.data["inventory"]["snapshot_dir"] = str(tmp_path / "snaps")
+    teach_digits(tmp_path / "data" / "digits.npz", c)
+    before = [(1, 13), (2, 1), (3, 40), (4, 7), (5, 1), (6, 25), (7, 3), (8, 1), (9, 15), (10, 2)] + [None] * 30
+    after = list(before)
+    after[0] = (1, 33)
+    after[2] = (3, 31)
+    save_anchor(c, "inventory", inventory_screen(before), (X0 - 6, Y0 - 40, 176, 28))
+
+    def run(items, which):
+        frames = iter([inventory_screen(items)]                        # status grab (inventory open)
+                      + [inventory_screen(items, 0)] * 3 + [inventory_screen(items, 4)] * 3)
+        flow = SnapFlow(c, lambda: next(frames))
+        flow.start(which)
+        caught = sum(flow.poll() for _ in range(6))
+        assert caught == 2
+        return flow.finish(), flow
+
+    info, _ = run(before, "start")
+    assert info["count"] == sum(q for x in before if x for _, q in [x])
+    _, flow = run(after, "end")
+    text, report = flow.compare(minutes=30)
+    assert report.exists()
+    assert "+20" in text and "-9" in text

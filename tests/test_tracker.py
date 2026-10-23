@@ -42,6 +42,14 @@ def test_bar_reader_with_text_overlay(hp):
     assert abs(got - hp) <= MAX_HP / HP_BOX[2]  # within one pixel column
 
 
+def test_hp_pair_slash_misread():
+    assert (TextReader.parse_pair("112741127").value, TextReader.parse_pair("112741127").max) == (1127, 1127)
+    assert TextReader.parse_pair("85411127").value == 854        # 854/1127
+    assert TextReader.parse_pair("85411127").max == 1127
+    assert TextReader.parse_pair("3124450").max == 450            # 312/450, slash read as 4
+    assert TextReader.parse_pair("312/450").value == 312
+
+
 def test_text_parse():
     assert TextReader.parse("53.791").value == 53791       # comma misread as a period
     assert TextReader.parse("53 791").value == 53791

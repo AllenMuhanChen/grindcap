@@ -89,7 +89,8 @@ class TextReader:
 
     NUM = re.compile(r"\d[\d,]*")
 
-    def __init__(self, box, tesseract_cmd: str | None = None, upscale: int | None = None):
+    def __init__(self, box, tesseract_cmd: str | None = None, upscale: int | None = None, pair: bool = False):
+        self.pair = pair  # "cur/max" numbers like HP and MP
         self._tess = setup_tesseract(tesseract_cmd)
         self.box = box
         self.upscale = upscale
@@ -109,6 +110,30 @@ class TextReader:
         return cv2.copyMakeBorder(th, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
 
     THOUSANDS = re.compile(r"(?<=\d)[.,' ](?=\d{3}(?!\d))")
+
+    @classmethod
+    def parse_pair(cls, text: str) -> Reading:
+        """Parse "cur/max" (HP, MP). The slash in the game's font often OCRs as 4, 1, 7 or |,
+        e.g. "1127/1127" -> "112741127". Without a slash, split the digits at the character that
+        makes cur <= max with the two halves closest in length."""
+        r = cls.parse(text)
+        if "/" in text or r.value is None:
+            return r
+        digits = re.sub(r"\D", "", cls.THOUSANDS.sub("", text))
+        best = None
+        for k in range(1, len(digits) - 1):
+            if digits[k] not in "4171|":
+                continue
+            a, b = digits[:k], digits[k + 1:]
+            if b.startswith("0") or a.startswith("0") and len(a) > 1:
+                continue
+            if int(a) <= int(b):
+                score = (abs(len(a) - len(b)), int(b) - int(a))
+                if best is None or score < best[0]:
+                    best = (score, int(a), int(b))
+        if best:
+            return Reading(best[1], best[2], raw=text)
+        return r
 
     @classmethod
     def parse(cls, text: str) -> Reading:
@@ -143,7 +168,7 @@ class TextReader:
         for f, interp in tries:
             text = self._tess.image_to_string(
                 self.preprocess(c, f, interp), config="--psm 7 -c tessedit_char_whitelist=0123456789/,.%[]()")
-            reads.append(self.parse(text.strip()))
+            reads.append(self.parse_pair(text.strip()) if self.pair else self.parse(text.strip()))
         counts = Counter(r.value for r in reads if r.value is not None)
         if not counts:
             return reads[0]
@@ -172,5 +197,5 @@ def build_readers(cfg, strict: bool = False) -> dict:
                                  f"in config.yaml under character: max_{name}: <number>.")
             out[name] = BarReader(rc["box"], rc["fill_rgb"], rc.get("tol", 45), scale)
         else:
-            out[name] = TextReader(rc["box"], cfg["session"].get("tesseract_cmd"))
+            out[name] = TextReader(rc["box"], cfg["session"].get("tesseract_cmd"), pair=name in ("hp", "mp"))
     return out
