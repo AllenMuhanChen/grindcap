@@ -30,16 +30,37 @@ def _looks_blank(img: np.ndarray | None) -> bool:
     return img is None or img.size == 0 or float(img.std()) < 2.0
 
 
+def _check_size(img, hwnd, client) -> None:
+    """Reject a frame that can't be the game window (e.g. a different window got captured)."""
+    import ctypes
+    from ctypes import wintypes
+
+    r = wintypes.RECT()
+    ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(r))
+    h, w = img.shape[:2]
+    sizes = [(client["width"], client["height"]), (r.right - r.left, r.bottom - r.top)]
+    if not any(abs(w - sw) <= 20 and abs(h - sh) <= 40 for sw, sh in sizes):
+        raise CaptureError(f"got a {w}x{h} picture but the game window is "
+                           f"{client['width']}x{client['height']}: probably a different window")
+
+
 class _WGC:
     """A running Windows Graphics Capture session that keeps the latest frame."""
 
-    def __init__(self, title: str):
+    def __init__(self, title: str, hwnd=None):
+        import inspect
+
         from windows_capture import WindowsCapture  # pip install windows-capture
 
         self._lock = threading.Lock()
         self._frame = None
         self._closed = False
-        cap = WindowsCapture(cursor_capture=False, draw_border=False, window_name=title)
+        params = inspect.signature(WindowsCapture.__init__).parameters
+        if hwnd is not None and "window_hwnd" in params:
+            # By handle: window_name is a substring match and can pick e.g. a browser tab about the game.
+            cap = WindowsCapture(cursor_capture=False, draw_border=False, window_hwnd=int(hwnd))
+        else:
+            cap = WindowsCapture(cursor_capture=False, draw_border=False, window_name=title)
 
         @cap.event
         def on_frame_arrived(frame, capture_control):
@@ -149,10 +170,11 @@ class GameWindow:
                     if self._wgc is None or self.window_title != exact:
                         if self._wgc:
                             self._wgc.stop()
-                        self._wgc, self.window_title = _WGC(exact), exact
+                        self._wgc, self.window_title = _WGC(exact, hwnd), exact
                     img = self._wgc.latest()
                     if _looks_blank(img):
                         raise CaptureError("no frame")
+                    _check_size(img, hwnd, rect)
                 elif m == "printwindow":
                     img = _printwindow(hwnd)
                     if _looks_blank(img):
@@ -186,10 +208,17 @@ class GameWindow:
                                   f"{'minimized' if winfind.is_minimized(hwnd) else 'not minimized'}, "
                                   f"{'in front' if winfind.is_foreground(hwnd) else 'behind other windows'}"))
         try:
-            w = _WGC(exact)
+            w = _WGC(exact, hwnd)
             img = w.latest(3.0)
             w.stop()
-            out.append(("wgc", img, "ok" if not _looks_blank(img) else "no picture (blank or no frame)"))
+            if _looks_blank(img):
+                out.append(("wgc", img, "no picture (blank or no frame)"))
+            else:
+                try:
+                    _check_size(img, hwnd, rect)
+                    out.append(("wgc", img, f"ok, {img.shape[1]}x{img.shape[0]}"))
+                except CaptureError as e:
+                    out.append(("wgc", img, str(e)))
         except ImportError as e:
             out.append(("wgc", None, f"windows-capture is not installed ({e}). Run: pip install windows-capture"))
         except Exception as e:
