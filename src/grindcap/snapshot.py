@@ -136,7 +136,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     inv = cfg["inventory"]
     digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
     itemdb = open_itemdb(cfg)
-    from .inventory import detect_tab
+    from .inventory import detect_tab, tab_from_items
 
     say = progress or (lambda text: None)
     skip = set(inv.get("skip_tabs") or [])
@@ -152,17 +152,20 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
             key = f"{given}_{i:02d}"              # = the screenshot's file name in the snapshot folder
             if first_page is None:
                 first_page = (f, fc)
-            tab = detect_tab(f, grid) or given    # the open tab, from the highlighted tab button
+            looks = detect_tab(f, grid) or given   # the open tab, from the highlighted tab button
+            sig = _grid_crop_sig(f, grid)
+            if sig is not None and any(float(np.abs(sig - o).mean()) < 1.0 for o in seen):
+                continue                          # the very same view captured twice: nothing new
+            seen.append(sig)
+            say(f"Reading page {done} of {total} ({looks})")
+            page = read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
+                             itemdb, page_key=key)
+            # What's in the page decides the tab when it can (a tab with new items flashes, which
+            # can fool the button check); the button is the fallback (e.g. Cash items aren't in the data).
+            tab = tab_from_items(page, catalog, itemdb) or looks
             if tab in skip:
                 skipped[tab] = skipped.get(tab, 0) + 1
                 continue
-            sig = _grid_crop_sig(f, grid)
-            if sig is not None and any(t == tab and float(np.abs(sig - o).mean()) < 1.0 for t, o in seen):
-                continue                          # the very same view captured twice: nothing new
-            seen.append((tab, sig))
-            say(f"Reading page {done} of {total} ({tab})")
-            page = read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
-                             itemdb, page_key=key)
             by_tab.setdefault(tab, []).append(page)
             for r, row in enumerate(grid.slot_boxes()):
                 for c, b in enumerate(row):

@@ -48,6 +48,18 @@ class SnapFlow:
             return None
         return max(0.0, wait - ((now or time.time()) - self.last_page_at))
 
+    def _catalog(self):
+        if getattr(self, "_cat", None) is None:
+            self._cat = Catalog(self.cfg["inventory"]["catalog_dir"])
+        return self._cat
+
+    def _itemdb(self):
+        if getattr(self, "_db", None) is None:
+            from .snapshot import open_itemdb
+
+            self._db = open_itemdb(self.cfg, download=False) or False
+        return self._db or None
+
     def grind_time(self) -> float:
         if self.which == "start":
             return self.last_page_at or time.time()
@@ -65,6 +77,7 @@ class SnapFlow:
         self.which, self.pages, self.status_frame = which, [], frame
         self.pressed_at = time.time()
         self.tabs_seen, self.last_page_at = set(), None
+        self._cat = None                 # re-read: the last snapshot may have added items
         try:
             fc = shifted(self.cfg, self.status_frame)
         except LookupError:
@@ -78,13 +91,18 @@ class SnapFlow:
 
     def add_page(self, frame=None) -> int:
         from .anchors import shifted
-        from .inventory import Grid, detect_tab
+        from .inventory import Grid, detect_tab, quick_tab
 
         frame = frame if frame is not None else self.grab()
         self.pages.append(frame)
         self.last_page_at = time.time()
         try:
-            tab = detect_tab(frame, Grid.from_cfg(shifted(self.cfg, frame, ("inventory",))["inventory"]))
+            fc = shifted(self.cfg, frame, ("inventory",))
+            grid = Grid.from_cfg(fc["inventory"])
+            # the items on the page say which tab it is; the tab buttons (which flash when a tab
+            # has new items) are only the fallback
+            tab = quick_tab(frame, grid, self._catalog(), self._itemdb(), fc["inventory"]["match_threshold"],
+                            fc["inventory"]["empty_std"]) or detect_tab(frame, grid)
         except Exception:
             tab = None
         if tab:

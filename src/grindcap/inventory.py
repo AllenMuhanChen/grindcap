@@ -82,12 +82,64 @@ def detect_tab(frame: np.ndarray, grid: "Grid") -> str | None:
         return None
     b, g, r = band[..., 0], band[..., 1], band[..., 2]
     red = (r > 180) & (r - g > 60) & (r - b > 40)
-    cols = np.flatnonzero(red.sum(axis=0) > max(5, band.shape[0] // 5))
-    if cols.size < 0.4 * px:          # no tab-sized red block: not found
+    on = red.sum(axis=0) > max(5, band.shape[0] // 5)
+    # Separate red blocks: a tab with new items flashes, so more than one tab can look highlighted.
+    # Keep the block with the most red in it (the open tab is drawn solid).
+    blocks, start = [], None
+    for x, v in enumerate(list(on) + [False]):
+        if v and start is None:
+            start = x
+        elif not v and start is not None:
+            if x - start >= 0.4 * px:
+                blocks.append((int(red[:, start:x].sum()), start, x))
+            start = None
+    if not blocks:
         return None
-    cx = (cols.min() + cols.max()) / 2 + max(0, xa)
+    _, a, z = max(blocks)
+    cx = (a + z - 1) / 2 + max(0, xa)
     i = round(((cx - x0) / px - 0.385) / 0.9)
     return TABS[i] if 0 <= i < len(TABS) else None
+
+
+def quick_tab(frame, grid: "Grid", catalog: "Catalog", itemdb, threshold: float = 12.0,
+              empty_std: float = 6.0) -> str | None:
+    """tab_from_items without reading the page: each slot's icon is only matched against items
+    already in your catalog (fast). For telling which tab a page is while you're still capturing."""
+    if itemdb is None:
+        return None
+    page = []
+    for row in grid.slot_boxes():
+        line = []
+        for (x, y, w, h) in row:
+            img = frame[max(0, y):y + h, max(0, x):x + w]
+            if img.size == 0 or is_covered(img) or is_empty(img, grid.qty_box, empty_std):
+                line.append((None, 0))
+                continue
+            c = catalog.candidates(signature(img, grid.qty_box), threshold)
+            line.append((c[0] if c else None, 0))
+        page.append(line)
+    return tab_from_items(page, catalog, itemdb)
+
+
+def tab_from_items(page, catalog: "Catalog", itemdb) -> str | None:
+    """The tab a page belongs to, from what's in it: items named from the item data carry their
+    category (Etc items only live in the Etc tab, and so on). Needs 2+ named items, 70% agreeing.
+    Doesn't depend on how the tab buttons look (a flashing tab can fool the colour check)."""
+    if itemdb is None:
+        return None
+    from collections import Counter
+
+    votes = Counter()
+    for row in page:
+        for s in row:
+            db = (catalog.items.get(s[0]) or {}).get("db") if s[0] and s[0] != UNKNOWN else None
+            cat = (itemdb.items.get(int(db["id"])) or {}).get("category") if db else None
+            if cat:
+                votes[cat] += 1
+    if not votes:
+        return None
+    tab, n = votes.most_common(1)[0]
+    return tab if n >= 2 and n >= 0.7 * sum(votes.values()) else None
 
 
 UNKNOWN = "?"   # item id for a slot something was drawn over (an item tooltip): not counted

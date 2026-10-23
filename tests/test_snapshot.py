@@ -426,3 +426,18 @@ def test_snapflow_finishes_itself_after_every_tab_and_times_the_grind(tmp_path, 
     t = flow.last_page_at
     assert flow.finish_in(t + 1) == pytest.approx(2) and flow.finish_in(t + 5) == 0
     assert flow.grind_time() == t                        # the session starts at the last page
+
+
+def test_tab_comes_from_the_items_on_the_page(tmp_path):
+    from grindcap.inventory import tab_from_items
+
+    db = fake_itemdb(tmp_path / "db", {4000001: ("Snail Shell", 1), 4000002: ("Blue Snail Shell", 2),
+                                       2000000: ("Red Potion", 3)})
+    db.items[2000000]["category"] = "Use"
+    cat = Catalog(tmp_path / "data")
+    for iid, dbid in (("item-001", 4000001), ("item-002", 4000002), ("item-003", 2000000)):
+        cat.items[iid] = {"name": "x", "db": {"id": dbid}}
+    etc_page = [[("item-001", 3), ("item-002", 1), (None, 0)], [("item-001", 9), ("?", 0), (None, 0)]]
+    assert tab_from_items(etc_page, cat, db) == "Etc"
+    mixed = [[("item-001", 3), ("item-003", 1)]]            # 1 vs 1: not sure, use the tab button
+    assert tab_from_items(mixed, cat, db) is None

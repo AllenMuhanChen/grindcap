@@ -34,7 +34,10 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
              Categories Etc/Use/Setup/Equip (non-cash, ~2470 icons); rank() first shortlists 120 icons by
              half-size matching (true best ranked <= 57 on fixtures). inventory.detect_tab reads the active
-             (pink) tab button; build_snapshot groups pages by tab, skips inventory.skip_tabs (Cash, Deco).
+             (pink) tab button (largest red block: a tab with new items flashes), but the items decide
+             first: tab_from_items (db category of named items, 2+ and 70%) after reading, quick_tab
+             (catalog signatures only) while capturing; build_snapshot groups pages by tab, skips
+             inventory.skip_tabs (Cash, Deco).
              merge rows agree only on same item AND count (repeated stacks of one item otherwise collapse).
 review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
              items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
