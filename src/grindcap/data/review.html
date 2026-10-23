@@ -27,6 +27,9 @@ main { padding: 16px 20px 60px; max-width: 1150px; }
 .stat span { color: var(--muted); font-size: 12px; }
 .stat.big { min-width: 190px; border-color: var(--accent); }
 .stat.big b { font-size: 24px; color: var(--accent); }
+.stat.small { align-self: flex-end; padding: 4px 8px; min-width: 0; }
+.stat.small b { font-size: 13px; }
+.stat.small span { font-size: 11px; }
 section { margin-top: 18px; }
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 8px; }
 table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -193,7 +196,8 @@ function render() {
   $("#stats").innerHTML =
     `<div class="stat big"><b>${fmt(s.net_per_hr)}</b><span>Net mesos / hr incl. items</span></div>
      <div class="stat big"><b>${fmt(s.exp_per_hr)}</b><span>EXP / hr</span></div>
-     <div class="stat"><b>${hm(s.minutes)}</b><span>Time (h:mm)</span></div>`;
+     <div class="stat"><b>${hm(s.minutes)}</b><span>Time (h:mm)</span></div>
+     <div class="stat small"><b>${fmt(s.mesos)}</b><span>Raw mesos gained (${fmt(s.mesos_per_hr)}/hr)</span></div>`;
 
   const st = D.status;
   const field = (snap, f) => {
