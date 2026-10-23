@@ -21,15 +21,39 @@ from .readers import TextReader
 
 
 def read_status(cfg, frame) -> dict:
-    """EXP, level and meso total from one frame (whichever boxes are calibrated)."""
+    """EXP, level and meso total from one frame (whichever boxes are calibrated).
+
+    Level comes from the orange level tiles and EXP from "53,791 [97.98%]"; the two are checked
+    against the EXP table (statusbar.py), which also fixes a misread level digit."""
+    from .statusbar import read_exp_texts, read_level, resolve_many
+
     out = {}
     tess = cfg["session"].get("tesseract_cmd")
-    for key in ("exp", "level", "mesos"):
-        rc = cfg["readers"].get(key) or {}
-        if rc.get("box"):
-            r = TextReader(rc["box"], tess).read(frame)
-            out[key] = r.value
-            out[f"{key}_raw"] = r.raw
+    lv_box = (cfg["readers"].get("level") or {}).get("box")
+    exp_box = (cfg["readers"].get("exp") or {}).get("box")
+    level = None
+    if lv_box:
+        level = read_level(frame, lv_box, tess)
+        if level is None:                       # no orange tiles found: plain OCR as before
+            level = TextReader(lv_box, tess).read(frame).value
+        out["level"] = level
+    if exp_box:
+        texts = read_exp_texts(frame, exp_box, tess)
+        r = resolve_many(texts, level, prior=cfg["character"].get("level"))
+        out["exp"], out["exp_pct"] = r["exp"], r["pct"]
+        out["exp_raw"] = " | ".join(texts)
+        out["exp_checked"] = r["checked"]
+        if out["exp"] is None:                  # no "[xx.xx%]" read: plain OCR of the box as before
+            t = TextReader(exp_box, tess).read(frame)
+            out["exp"], out["exp_raw"] = t.value, t.raw
+        if r["checked"] and r["level"] is not None:
+            if level is not None and r["level"] != level:
+                out["level_raw"] = f"read {level}, EXP fits {r['level']}"
+            out["level"] = r["level"]
+    rc = cfg["readers"].get("mesos") or {}
+    if rc.get("box"):
+        m = TextReader(rc["box"], tess).read(frame)
+        out["mesos"], out["mesos_raw"] = m.value, m.raw
     return out
 
 
@@ -61,10 +85,11 @@ def open_itemdb(cfg, download: bool = True, progress=print):
         return None
     db = ItemDB(Path(inv["catalog_dir"]) / "itemdb", opt.get("region", "MCW"), str(opt.get("version", "1")),
                 min_ratio=opt.get("min_ratio", 1.25))
-    if not db.ready and download:
-        progress("Downloading item names and icons from maplestory.io (once, about a minute)...")
+    if download and (not db.ready or db.missing_categories()):
+        todo = db.missing_categories() if db.ready else None
+        progress("Downloading item names and icons from maplestory.io (once, a minute or two)...")
         try:
-            db.download(progress=progress)
+            db.download(categories=todo, progress=progress) if todo else db.download(progress=progress)
         except Exception as e:
             progress(f"Couldn't download item data ({e}); items keep their item-NNN ids for now.")
             return None
@@ -79,20 +104,30 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     inv = cfg["inventory"]
     digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
     itemdb = open_itemdb(cfg)
-    tabs, first_page, boxes, merge_log = {}, None, {}, {}
-    for tab, frames in tab_pages.items():
-        pages = []
+    from .inventory import detect_tab
+
+    skip = set(inv.get("skip_tabs") or [])
+    by_tab: dict[str, list] = {}
+    first_page, boxes, merge_log, skipped = None, {}, {}, {}
+    for given, frames in tab_pages.items():
         for i, f in enumerate(frames, 1):
             fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
             grid = Grid.from_cfg(fc["inventory"])
-            key = f"{tab}_{i:02d}"                # = the screenshot's file name in the snapshot folder
-            pages.append(read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
-                                   itemdb, page_key=key))
+            key = f"{given}_{i:02d}"              # = the screenshot's file name in the snapshot folder
+            if first_page is None:
+                first_page = (f, fc)
+            tab = detect_tab(f, grid) or given    # the open tab, from the highlighted tab button
+            if tab in skip:
+                skipped[tab] = skipped.get(tab, 0) + 1
+                continue
+            page = read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
+                             itemdb, page_key=key)
+            by_tab.setdefault(tab, []).append(page)
             for r, row in enumerate(grid.slot_boxes()):
                 for c, b in enumerate(row):
                     boxes[f"{key}:r{r + 1}c{c + 1}"] = [int(v) for v in b]
-            if first_page is None:
-                first_page = (f, fc)
+    tabs = {}
+    for tab, pages in by_tab.items():         # pages of one tab are stitched together, tabs separately
         tabs[tab] = merge_pages(pages, log := [])
         merge_log[tab] = log
     status = {}
@@ -114,13 +149,16 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "exp": status.get("exp"),
         "mesos": status.get("mesos"),
         "status_raw": {k: v for k, v in status.items() if k.endswith("_raw")},
+        "exp_pct": status.get("exp_pct"),
+        "exp_checked": status.get("exp_checked"),
         "map": where,
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},
         "items": totals(tabs),
         "merge_log": merge_log,
+        "skipped_tabs": skipped,
         # every counted slot, so single slots can be corrected later (see apply_fixes)
-        "slots": [{"ref": s[2], "item": s[0], "qty": s[1], "box": boxes.get(s[2])}
-                  for rows in tabs.values() for row in rows for s in row if s[0] and len(s) > 2],
+        "slots": [{"ref": s[2], "item": s[0], "qty": s[1], "box": boxes.get(s[2]), "tab": tab}
+                  for tab, rows in tabs.items() for row in rows for s in row if s[0] and len(s) > 2],
     }
 
 

@@ -32,6 +32,10 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              by min_ratio 1.25. inventory._identify_slot: catalog signature -> fast re-check against the
              item's db icon + its stored look-alike neighbours -> else full identify; one catalog id per
              db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
+             Categories Etc/Use/Setup/Equip (non-cash, ~2470 icons); rank() first shortlists 120 icons by
+             half-size matching (true best ranked <= 57 on fixtures). inventory.detect_tab reads the active
+             (pink) tab button; build_snapshot groups pages by tab, skips inventory.skip_tabs (Cash, Deco).
+             merge rows agree only on same item AND count (repeated stacks of one item otherwise collapse).
 review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
              items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
              ignore_item/purge/purge_deleted/item/item_db), local http.server + data/review.html. Slot/status fixes live in
@@ -45,6 +49,10 @@ sessions.py  list_sessions (each end snapshot + latest start before it; id = end
 mapname.py   Minimap map name: template-match data/minimap_header.png ("MINI MAP" bar, 1920x1080; scaled
              by frame height), Tesseract on the street + map lines, snapped to MCW map names (maps.json in
              <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Stored as snapshot["map"].
+statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one digit per tile, vote),
+             read_exp_texts (box widened right for "[xx.xx%]"), resolve: try every exp/pct split ("["
+             often OCRs as 1) and keep the one where exp/EXP_TO_NEXT[level]*100 rounds to pct (+-0.0051);
+             level -> nearest fitting level. Verified on both fixtures (26/53791, 27/10).
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

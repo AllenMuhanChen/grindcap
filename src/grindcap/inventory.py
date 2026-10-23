@@ -67,6 +67,29 @@ def signature(slot_img: np.ndarray, qty_box) -> np.ndarray:
     return cv2.resize(img, (SIG, SIG), interpolation=cv2.INTER_AREA)
 
 
+TABS = ("Equip", "Use", "Setup", "Etc", "Cash", "Deco")
+
+
+def detect_tab(frame: np.ndarray, grid: "Grid") -> str | None:
+    """Which inventory tab is open: the active tab button above the grid is pink-red.
+    Tab buttons are 0.9 slot pitches apart, the first centred 0.385 pitches right of the grid's left."""
+    px, py = grid.pitch()
+    x0, y0 = grid.first[0], grid.first[1]
+    ya, yb = int(y0 - 0.75 * py), int(y0 - 0.15 * py)
+    xa, xb = int(x0 - 0.3 * px), int(x0 + 5.6 * px)
+    band = frame[max(0, ya):max(0, yb), max(0, xa):max(0, xb)].astype(np.int16)
+    if band.size == 0:
+        return None
+    b, g, r = band[..., 0], band[..., 1], band[..., 2]
+    red = (r > 180) & (r - g > 60) & (r - b > 40)
+    cols = np.flatnonzero(red.sum(axis=0) > max(5, band.shape[0] // 5))
+    if cols.size < 0.4 * px:          # no tab-sized red block: not found
+        return None
+    cx = (cols.min() + cols.max()) / 2 + max(0, xa)
+    i = round(((cx - x0) / px - 0.385) / 0.9)
+    return TABS[i] if 0 <= i < len(TABS) else None
+
+
 UNKNOWN = "?"   # item id for a slot something was drawn over (an item tooltip): not counted
 
 
@@ -299,9 +322,9 @@ def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float, 
 
 
 def _rows_agree(a_rows, b_rows) -> bool:
-    """Do these rows show the same items? Compared by item id only (stack numbers can be misread),
-    over slots where either side has an item. Allows 1 in 5 slots to differ (a cursor or tooltip over
-    one slot, a hover highlight), but small overlaps must match exactly. Needs at least one item."""
+    """Do these rows show the same items? Compared by item and count, over slots where either side
+    has an item. Allows 1 in 5 slots to differ (a cursor over one slot, a misread number), but small
+    overlaps must match exactly. Slots under a tooltip don't count either way. Needs at least one item."""
     compared = mismatched = 0
     for ra, rb in zip(a_rows, b_rows):
         for sa, sb in zip(ra, rb):
@@ -310,7 +333,9 @@ def _rows_agree(a_rows, b_rows) -> bool:
                 continue                  # covered on one page: no evidence either way
             if ia or ib:
                 compared += 1
-                mismatched += ia != ib
+                # Same item AND same count. Ids alone let a page of look-alike rows (several
+                # stacks of the same arrows) pass for a page already seen, losing those stacks.
+                mismatched += ia != ib or (sa[1] != sb[1] and sa[1] and sb[1])
     return compared > 0 and mismatched <= compared // 5
 
 

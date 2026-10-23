@@ -239,8 +239,11 @@ def cmd_reread(cfg, a):
         print(f"{folder}: {n} pages, {len(snap['items'])} kinds of item, "
               f"{sum(snap['items'].values())} items (was {sum(old['items'].values())})")
         for tab, log in snap.get("merge_log", {}).items():
+            print(f"  {tab}:")
             for line in log:
-                print(f"  {line}")
+                print(f"    {line}")
+        for tab, n in (snap.get("skipped_tabs") or {}).items():
+            print(f"  {tab}: {n} page(s) not counted (inventory.skip_tabs)")
 
 
 def cmd_itemdb(cfg, a):

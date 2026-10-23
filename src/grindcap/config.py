@@ -62,6 +62,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Item catalog (icons, names, prices) and snapshot folders.
         "catalog_dir": "data",
         "snapshot_dir": "snapshots",
+        # Tabs not counted: nothing in them changes while grinding, and their icons (cash items,
+        # cosmetics) aren't in the item data, so they only add misreads. The open tab is detected
+        # from the highlighted tab button.
+        "skip_tabs": ["Cash", "Deco"],
         # Name new items by matching their icons with the game's data from maplestory.io
         # (region MCW = MapleStory Classic World). Downloaded once into <catalog_dir>/itemdb/.
         "itemdb": {"enabled": True, "region": "MCW", "version": "1", "min_ratio": 1.25},

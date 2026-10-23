@@ -134,7 +134,7 @@ Names and prices apply to every session. Slot and status fixes belong to that se
 
 If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.
 
-Pages are stitched together so every slot counts once: scroll overlap is matched by item icons, and a view captured twice (or a tab visited again) is skipped, even if one slot looks different because of the cursor. Each snapshot folder keeps its screenshots, so after an update `grindcap reread` reads the latest start and end snapshots again, and `grindcap compare` then uses the new readings.
+Each page is filed under the tab that was open (read from the highlighted tab button), and pages of one tab are stitched together so every slot counts once. The **Cash** and **Deco** tabs aren't counted (nothing there changes while grinding); change `inventory.skip_tabs` in `config.yaml` to count them. Within a tab: scroll overlap is matched by item icons, and a view captured twice (or a tab visited again) is skipped, even if one slot looks different because of the cursor. Each snapshot folder keeps its screenshots, so after an update `grindcap reread` reads the latest start and end snapshots again, and `grindcap compare` then uses the new readings.
 
 ## Track a session
 
@@ -166,4 +166,5 @@ grindcap export sessions/20261022-210000_Green_Mushroom.jsonl
 - **Snapshots:** don't hover over items while capturing, since tooltips cover slots.
 - **Stack numbers** are matched in the game's own pixels: the game draws at a lower resolution (e.g. 1366x768) and stretches it to the window, and grindcap undoes the stretch using the slot spacing. It was built on one 1920x1080 screenshot; if your window size gives wrong numbers, `teach-digits` with corrections fixes it.
 - **Regen vs potions is guessed by size.** Tune `hp_regen_max` and `mp_regen_max` to your character.
+- **Level and EXP check each other.** The level is read from its orange digit tiles; EXP and its percentage must fit the EXP table for that level, or the level is corrected to the nearest one that fits (10 EXP at 0.02% can only be level 25-27).
 - **Kill counting needs the EXP number visible** (or the EXP bar in `mode: bar`, which is too coarse at higher levels).

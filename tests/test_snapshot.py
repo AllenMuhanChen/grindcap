@@ -344,3 +344,40 @@ def test_map_name_from_minimap(name):
                          {"streetName": "Victoria Road", "name": "The Rain-Forest East of Henesys 2"}])
     assert (m["street"], m["name"], m["matched"]) == ("Victoria Road", "The Rain-Forest East of Henesys", True)
     assert read_map(np.zeros_like(frame)) is None      # no minimap on screen
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+@pytest.mark.parametrize("name,level,exp", [("game_frame.png", 26, 53791), ("use_tab_tooltip.png", 27, 10)])
+def test_level_and_exp_from_real_status_bar(name, level, exp):
+    from pathlib import Path
+
+    from grindcap.snapshot import read_status
+
+    c = cfg()
+    c.data["readers"]["level"] = {"box": [455, 1040, 50, 30], "mode": "text"}
+    c.data["readers"]["exp"] = {"box": [1050, 1035, 60, 18], "mode": "text"}
+    c.data["readers"]["mesos"] = {}
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / name))
+    st = read_status(c, frame)
+    assert (st["level"], st["exp"], st["exp_checked"]) == (level, exp, True)
+
+
+def test_exp_text_split_and_level_check():
+    from grindcap.statusbar import resolve
+
+    # "[" read as "1": 53,791 [97.98%] at level 26
+    assert (lambda r: (r["exp"], r["pct"], r["level"]))(resolve("53.791197.98%]", 26)) == (53791, 97.98, 26)
+    # the level read as 30, but 10 EXP showing 0.02% only fits levels 25-27: closest to 30 is 27
+    r = resolve("1010.02%1", 30)
+    assert (r["exp"], r["level"], r["level_fixed"]) == (10, 27, True)
+
+
+def test_merge_keeps_repeated_stacks_of_one_item():
+    """Several stacks of the same arrows: a later page can look like an earlier one by item alone."""
+    A, B = "xbow", "bow"
+    p1 = [[(A, 1000), (B, 1000), (A, 1000)], [(A, 1000), (B, 500), (None, 0)]]
+    p2 = [[(A, 337), (B, 1000), (A, 1000)], [(A, 250), (B, 500), (None, 0)]]     # next rows, other counts
+    merged = merge_pages([p1, p2])
+    assert len(merged) == 4
+    total = sum(s[1] for row in merged for s in row if s[0] == A)
+    assert total == 1000 + 1000 + 1000 + 337 + 1000 + 250

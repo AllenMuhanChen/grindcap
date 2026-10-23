@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 
 API = "https://maplestory.io/api"
-CATEGORIES = ("Etc", "Use", "Setup")   # the tabs with stacks; equipment can be added the same way
+CATEGORIES = ("Etc", "Use", "Setup", "Equip")   # Equip: non-cash only; Cash/Deco tabs aren't counted
 MIN_PIXELS = 40                        # icons with fewer opaque pixels are placeholders
 
 
@@ -69,6 +69,10 @@ class ItemDB:
     @property
     def base(self) -> str:
         return f"{API}/{self.region}/{self.version}"
+
+    def missing_categories(self, categories=CATEGORIES) -> list[str]:
+        have = {v.get("category") for v in self.items.values()}
+        return [c for c in categories if c not in have]
 
     @property
     def ready(self) -> bool:
@@ -159,7 +163,36 @@ class ItemDB:
                 out[iid] = float(r.min()) / float(mask.sum())
         return out
 
-    def rank(self, patch: np.ndarray) -> list[tuple[float, int]]:
+    def _small(self) -> dict:
+        """Half-size copies of every icon, for a quick first pass."""
+        import cv2
+
+        if getattr(self, "_sm", None) is None or len(self._sm) != len(self._load_icons()):
+            self._sm = {}
+            for iid, (img, mask) in self._load_icons().items():
+                h, w = img.shape[:2]
+                si = cv2.resize(img, (max(1, w // 2), max(1, h // 2)), interpolation=cv2.INTER_AREA)
+                sm = cv2.resize(mask, (max(1, w // 2), max(1, h // 2)), interpolation=cv2.INTER_AREA)
+                self._sm[iid] = (np.ascontiguousarray(si), np.ascontiguousarray((sm > 0.99).astype(np.float32)))
+        return self._sm
+
+    def shortlist(self, patch: np.ndarray, k: int = 120) -> list[int]:
+        """The k icons that fit best at half size: a quick first pass, so the exact comparison only
+        runs on a few icons."""
+        import cv2
+
+        h, w = patch.shape[:2]
+        sp = np.ascontiguousarray(cv2.resize(patch.astype(np.float32), (w // 2, h // 2), interpolation=cv2.INTER_AREA))
+        scored = []
+        for iid, (img, mask) in self._small().items():
+            if img.shape[0] > sp.shape[0] or img.shape[1] > sp.shape[1] or mask.sum() < 3:
+                continue
+            r = cv2.matchTemplate(sp, img, cv2.TM_SQDIFF, mask=mask)
+            scored.append((float(r.min()) / float(mask.sum()), iid))
+        scored.sort()
+        return [i for _, i in scored[:k]]
+
+    def rank(self, patch: np.ndarray, k: int | None = 120) -> list[tuple[float, int]]:
         """(score, item id) for every icon, best first. `patch` is native-resolution BGR around the
         slot, a few px larger than the icon. Stack digits drawn over the icon are simply part of the
         error; they cover too little of it to change which icon wins."""
@@ -167,7 +200,10 @@ class ItemDB:
 
         patch = np.ascontiguousarray(patch.astype(np.float32))
         out = []
-        for iid, (img, mask) in self._load_icons().items():
+        icons = self._load_icons()
+        ids = self.shortlist(patch, k) if k and len(icons) > k else list(icons)
+        for iid in ids:
+            img, mask = icons[iid]
             h, w = img.shape[:2]
             if h > patch.shape[0] or w > patch.shape[1]:
                 continue
