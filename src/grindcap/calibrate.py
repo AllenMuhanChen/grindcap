@@ -5,12 +5,16 @@ from pathlib import Path
 
 import numpy as np
 
+# What to box, depending on whether the reader measures a bar or reads a number.
 PROMPTS = {
-    "hp": "HP: drag a box tightly around the HP bar (or the HP numbers if you use text mode)",
-    "mp": "MP: drag a box around the MP bar (or the MP numbers)",
-    "exp": "EXP: drag a box around the EXP numbers (or the EXP bar if you use bar mode)",
-    "mesos": "Mesos: drag a box around the meso total in your inventory window",
-    "level": "Level: drag a box around your level number",
+    ("hp", "bar"): "HP: box the red HP bar",
+    ("hp", "text"): "HP: box just the HP number, e.g. 312/450",
+    ("mp", "bar"): "MP: box the blue MP bar",
+    ("mp", "text"): "MP: box just the MP number, e.g. 120/200",
+    ("exp", "text"): "EXP: box just your EXP number, e.g. 1234/20216",
+    ("exp", "bar"): "EXP: box the EXP bar",
+    ("mesos", "text"): "Mesos: box just the meso number in your inventory, e.g. 45,210",
+    ("level", "text"): "Level: box just your level number, e.g. 32",
 }
 
 
@@ -109,8 +113,7 @@ def calibrate_inventory(cfg, frame: np.ndarray) -> None:
             inv[key] = int(v)
     print(f"  inventory grid: first {inv['first_slot']}, last {inv['last_slot']}, {inv['cols']}x{inv['rows']}")
     calibrate_anchor(cfg, frame, "inventory",
-                     "Inventory anchor: box the inventory window's title bar (a part that never changes, "
-                     "not the tabs or items)")
+                     "Landmark: box the inventory window's title at the top of the window")
 
 
 def calibrate_anchor(cfg, frame: np.ndarray, name: str, prompt: str) -> None:
@@ -134,7 +137,7 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
             calibrate_inventory(cfg, frame)
             continue
         rc = cfg["readers"][name]
-        title = PROMPTS.get(name, name) + "  [Enter = confirm, C = skip]"
+        title = PROMPTS.get((name, rc.get("mode", "bar")), name) + "  [Enter = confirm, C = skip]"
         print(title)
         x, y, w, h = select_box(title, frame)
         if w == 0 or h == 0:
@@ -148,8 +151,7 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
             print(f"  {name}: box {rc['box']} (text)")
     if any(n in ("exp", "level", "hp", "mp") for n in names):
         calibrate_anchor(cfg, frame, "status",
-                         "Status-bar anchor: box a part of the status bar that never changes "
-                         "(e.g. the 'EXP' or 'LV' label, not the numbers)")
+                         "Landmark: box the word EXP (or LV) on the bottom bar, without the numbers")
 
 
 def overlay(cfg, frame: np.ndarray, readings: dict | None = None) -> np.ndarray:
