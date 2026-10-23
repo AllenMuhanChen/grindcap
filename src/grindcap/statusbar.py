@@ -42,12 +42,9 @@ def level_tiles(region: np.ndarray) -> list[tuple[int, int]]:
     return spans
 
 
-def read_level(frame, box, tesseract_cmd=None, margin: int = 25) -> int | None:
+def _read_tiles(reg, tesseract_cmd=None) -> int | None:
     import cv2
 
-    x, y, w, h = box
-    x0, y0 = max(0, x - margin), max(0, y - margin)
-    reg = frame[y0:y + h + margin, x0:x + w + margin]
     spans = level_tiles(reg)
     if not spans:
         return None
@@ -58,6 +55,9 @@ def read_level(frame, box, tesseract_cmd=None, margin: int = 25) -> int | None:
             group.append(s)
         else:
             break
+    widths = [b - a for a, b in group]
+    if len(group) > 3 or max(widths) > 3 * min(widths) or max(widths) > 40:
+        return None                          # not level tiles
     a, b = group[0][0], group[-1][1]
     sub = reg[:, a:b]
     r = sub.astype(np.int16)
@@ -72,20 +72,66 @@ def read_level(frame, box, tesseract_cmd=None, margin: int = 25) -> int | None:
         t = re.sub(r"\D", "", _ocr(img, "--psm 8 -c tessedit_char_whitelist=0123456789", tesseract_cmd))
         if t and len(t) == len(group):          # one digit per tile
             votes[int(t)] += 1
-    return votes.most_common(1)[0][0] if votes else None
+    v = votes.most_common(1)[0][0] if votes else None
+    return v if v is not None and 1 <= v <= 200 else None
+
+
+def read_level(frame, box=None, tesseract_cmd=None, margin: int = 25) -> int | None:
+    """Level from the orange tiles: inside the calibrated box (with a margin), else anywhere in the
+    left part of the status bar at the bottom of the window."""
+    if box:
+        x, y, w, h = box
+        reg = frame[max(0, y - margin):y + h + margin, max(0, x - margin):x + w + margin]
+        v = _read_tiles(reg, tesseract_cmd)
+        if v is not None:
+            return v
+    H, W = frame.shape[:2]
+    return _read_tiles(frame[int(H * 0.93):, :int(W * 0.4)], tesseract_cmd)
+
+
+EXP_LABEL = __import__("pathlib").Path(__file__).parent / "data" / "exp_label.png"
+
+
+def exp_text_box(frame) -> list[int] | None:
+    """Where "53,791 [97.98%]" is: just right of the "EXP." label on the status bar, found by template
+    matching (cut from a real 1920x1080 screenshot, scaled by window height). None if not found."""
+    import cv2
+
+    t = cv2.imread(str(EXP_LABEL))
+    H, W = frame.shape[:2]
+    s = H / 1080
+    if abs(s - 1) > 0.02:
+        t = cv2.resize(t, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+    y0 = int(H * 0.9)
+    strip = frame[y0:]
+    if strip.shape[0] < t.shape[0] or strip.shape[1] < t.shape[1]:
+        return None
+    r = cv2.matchTemplate(strip, t, cv2.TM_CCOEFF_NORMED)
+    _, score, _, (x, y) = cv2.minMaxLoc(r)
+    if score < 0.8:
+        return None
+    th, tw = t.shape[:2]
+    return [x + tw + int(2 * s), y0 + y - int(2 * s), int(140 * s), th + int(4 * s)]
 
 
 def read_exp_texts(frame, box, tesseract_cmd=None) -> list[str]:
-    """OCR of the EXP number and the "[xx.xx%]" after it, at a few sizes (the box is widened to the
-    right to take in the percentage)."""
+    """OCR of the EXP number and the "[xx.xx%]" after it, at a few sizes. Uses the place right of the
+    "EXP." label when that's found, else the calibrated box widened to the right."""
     import cv2
 
-    x, y, w, h = box
-    crop = frame[max(0, y):y + h, max(0, x):x + w + 8 * h]
+    auto = exp_text_box(frame)
+    if auto is not None:
+        x, y, w, h = auto
+        crop = frame[max(0, y):y + h, max(0, x):x + w]
+    elif box:
+        x, y, w, h = box
+        crop = frame[max(0, y):y + h, max(0, x):x + w + 8 * h]
+    else:
+        return []
     g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     out = []
     base = max(3, round(60 / max(1, g.shape[0])))
-    for f in (base, base + 1, base - 1):
+    for f in (base, base + 1, base - 1, base + 2):
         u = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
         _, th = cv2.threshold(u, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         if th.mean() < 127:
@@ -121,9 +167,9 @@ def exp_splits(text: str) -> list[tuple[int, float]]:
     return list(dict.fromkeys(out))
 
 
-def resolve_many(texts: list[str], level_read: int | None, prior: int | None = None) -> dict:
+def resolve_many(texts: list[str], level_read: int | None, prior: int | None = None, up: int = 5) -> dict:
     """resolve() over several OCR attempts: the answer most attempts agree on, among those that fit."""
-    rs = [resolve(t, level_read, prior) for t in texts]
+    rs = [resolve(t, level_read, prior, up) for t in texts]
     ok = [r for r in rs if r["checked"]]
     if not ok:
         return rs[0] if rs else {"exp": None, "pct": None, "level": level_read, "checked": False}
@@ -133,17 +179,28 @@ def resolve_many(texts: list[str], level_read: int | None, prior: int | None = N
     return {**r, "texts": texts}
 
 
-def resolve(text: str, level_read: int | None, prior: int | None = None) -> dict:
+def resolve(text: str, level_read: int | None, prior: int | None = None, up: int = 5) -> dict:
     """Best (exp, pct, level) for this EXP text and level reading.
 
-    Preference: the level read from the tiles if the EXP fits it; else the fitting level closest to
-    it (or to `prior`, e.g. the start snapshot's level). Returns what it used and whether it agreed.
+    `prior` is a level you were at before (the latest snapshot, or the configured level). Levels never
+    go down, so only prior..prior+up are considered when it's known.
+    Within those, the level read from the tiles wins if the EXP fits it; otherwise the fitting level
+    closest to it (or to the prior). Returns what it used and whether the EXP fitted.
     """
     splits = exp_splits(text)
-    target = level_read or prior
+    if level_read is not None:            # the tiles' reading, if the EXP fits it, settles it
+        fit = [(e, p) for e, p in splits if _fits(e, p, level_read)]
+        if fit:
+            e, p = max(fit)
+            return {"exp": e, "pct": p, "level": level_read, "checked": True, "level_ocr": level_read,
+                    "level_fixed": False, "level_options": []}
+    levels = list(EXP_TO_NEXT)
+    if prior:
+        levels = [lv for lv in levels if prior <= lv <= prior + up]
+    target = level_read if level_read in levels else (prior or level_read)
     best = None
     for exp, pct in splits:
-        for lv in EXP_TO_NEXT:
+        for lv in levels:
             if not _fits(exp, pct, lv):
                 continue
             key = (abs(lv - target) if target else 0, 0 if level_read == lv else 1, -exp)
@@ -151,7 +208,12 @@ def resolve(text: str, level_read: int | None, prior: int | None = None) -> dict
                 best = (key, exp, pct, lv)
     if best is None:
         exp = splits[0][0] if splits else None
-        return {"exp": exp, "pct": splits[0][1] if splits else None, "level": level_read, "checked": False}
+        lv = level_read if (not prior or level_read in levels) else prior
+        return {"exp": exp, "pct": splits[0][1] if splits else None, "level": lv, "checked": False,
+                "level_ocr": level_read}
     _, exp, pct, lv = best
+    options = [x for x in levels if _fits(exp, pct, x)]
     return {"exp": exp, "pct": pct, "level": lv, "checked": True, "level_ocr": level_read,
-            "level_fixed": level_read is not None and lv != level_read}
+            "level_fixed": level_read is not None and lv != level_read,
+            # several levels fit this EXP and the tiles didn't settle it: worth a look in the review
+            "level_options": options if len(options) > 1 and level_read not in options else []}

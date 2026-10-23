@@ -197,8 +197,16 @@ function render() {
     const v = st[snap][f];
     return `<input type="number" data-snap="${snap}" data-field="${f}" placeholder="${v.read ?? "not read"}" value="${v.fixed ?? ""}">`;
   };
+  const note = n => {
+    const x = st[n], out = [];
+    if (x.level_options && x.level_options.length)
+      out.push(`<span class="tag warn">level unclear: ${x.level_options.join(" or ")} fit the EXP shown; type the right one</span>`);
+    if (x.exp_checked === false && x.exp.read != null)
+      out.push(`<span class="tag warn" title="${esc(x.raw.exp_raw || "")}">EXP didn't match the level's EXP table; check it</span>`);
+    return out.join(" ");
+  };
   $("#status").innerHTML = `<tr><th class="l">Snapshot</th><th>Level</th><th>EXP</th><th>Mesos</th></tr>` +
-    ["start", "end"].map(n => `<tr><td class="l">${n} <span class="muted">${esc(st[n].when || "")}</span></td>
+    ["start", "end"].map(n => `<tr><td class="l">${n} <span class="muted">${esc(st[n].when || "")}</span> ${note(n)}</td>
       <td>${field(n, "level")}</td><td>${field(n, "exp")}</td><td>${field(n, "mesos")}</td></tr>`).join("");
   $("#status").querySelectorAll("input").forEach(i => i.onchange = () => edit({op: "status", snap: i.dataset.snap, field: i.dataset.field, value: i.value}));
 

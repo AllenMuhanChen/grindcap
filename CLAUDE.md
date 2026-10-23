@@ -49,10 +49,13 @@ sessions.py  list_sessions (each end snapshot + latest start before it; id = end
 mapname.py   Minimap map name: template-match data/minimap_header.png ("MINI MAP" bar, 1920x1080; scaled
              by frame height), Tesseract on the street + map lines, snapped to MCW map names (maps.json in
              <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Stored as snapshot["map"].
-statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one digit per tile, vote),
-             read_exp_texts (box widened right for "[xx.xx%]"), resolve: try every exp/pct split ("["
-             often OCRs as 1) and keep the one where exp/EXP_TO_NEXT[level]*100 rounds to pct (+-0.0051);
-             level -> nearest fitting level. Verified on both fixtures (26/53791, 27/10).
+statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one digit per tile, vote; in the
+             level box +-25 px, else searched in the bottom-left of the window), read_exp_texts (right of
+             the "EXP." label found by template data/exp_label.png; calibrated box only as fallback),
+             resolve: try every exp/pct split ("[" OCRs as 1) and keep one where exp/EXP_TO_NEXT[lv]*100
+             rounds to pct (+-0.0051). Tile level that fits wins; else levels prior..prior+5 (prior = latest
+             earlier snapshot with a confirmed level, or config level +69), several fitting -> level_options
+             shown on the review page. Verified on both fixtures (26/53791, 27/10), also with bad boxes.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

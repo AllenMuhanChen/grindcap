@@ -89,6 +89,9 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
         fx = (snap.get("fixes") or {}).get("status") or {}
         status[name] = {k: {"read": snap.get(k), "fixed": fx.get(k)} for k in ("level", "exp", "mesos")}
         status[name]["when"] = snap.get("when")
+        status[name]["level_options"] = [] if fx.get("level") else snap.get("level_options") or []
+        status[name]["exp_checked"] = snap.get("exp_checked")
+        status[name]["raw"] = snap.get("status_raw") or {}
     summary = {k: r[k] for k in ("minutes", "exp", "exp_per_hr", "levels", "mesos", "mesos_per_hr",
                                  "items_gained_value", "items_used_value", "net_mesos_incl_items",
                                  "net_per_hr")}

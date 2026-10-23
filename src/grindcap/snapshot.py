@@ -20,7 +20,29 @@ from .inventory import Catalog, Grid, merge_pages, read_page, totals
 from .readers import TextReader
 
 
-def read_status(cfg, frame) -> dict:
+def last_level(cfg, before: float | None = None) -> tuple[int | None, int]:
+    """(a level you were at before, how many levels you could have gained since): the latest snapshot
+    whose level was confirmed by its EXP (+5), else the configured level (which may be old: +69)."""
+    root = Path(cfg["inventory"]["snapshot_dir"])
+    best = None
+    for p in root.glob("*-*/snapshot.json"):
+        try:
+            d = json.loads(p.read_text())
+        except Exception:
+            continue
+        fx = p.parent / "fixes.json"
+        fixed = (json.loads(fx.read_text()).get("status") or {}).get("level") if fx.exists() else None
+        lv = fixed or d.get("level")
+        if before is not None and d.get("time", 0) >= before:
+            continue
+        if lv and (d.get("exp_checked") or fixed) and (best is None or d.get("time", 0) > best[0]):
+            best = (d.get("time", 0), int(lv))
+    if best:
+        return best[1], 5
+    return cfg["character"].get("level"), 69
+
+
+def read_status(cfg, frame, prior: int | None = None, when: float | None = None) -> dict:
     """EXP, level and meso total from one frame (whichever boxes are calibrated).
 
     Level comes from the orange level tiles and EXP from "53,791 [97.98%]"; the two are checked
@@ -31,19 +53,18 @@ def read_status(cfg, frame) -> dict:
     tess = cfg["session"].get("tesseract_cmd")
     lv_box = (cfg["readers"].get("level") or {}).get("box")
     exp_box = (cfg["readers"].get("exp") or {}).get("box")
-    level = None
-    if lv_box:
-        level = read_level(frame, lv_box, tess)
-        if level is None:                       # no orange tiles found: plain OCR as before
-            level = TextReader(lv_box, tess).read(frame).value
+    level = read_level(frame, lv_box, tess)      # also finds the tiles without a box
+    if level is not None:
         out["level"] = level
-    if exp_box:
-        texts = read_exp_texts(frame, exp_box, tess)
-        r = resolve_many(texts, level, prior=cfg["character"].get("level"))
+    texts = read_exp_texts(frame, exp_box, tess)   # finds the EXP text itself; the box is a fallback
+    if texts:
+        pr, up = (prior, 5) if prior is not None else last_level(cfg, when)
+        r = resolve_many(texts, level, prior=pr, up=up)
         out["exp"], out["exp_pct"] = r["exp"], r["pct"]
         out["exp_raw"] = " | ".join(texts)
         out["exp_checked"] = r["checked"]
-        if out["exp"] is None:                  # no "[xx.xx%]" read: plain OCR of the box as before
+        out["level_options"] = r.get("level_options") or []
+        if out["exp"] is None and exp_box:      # no "[xx.xx%]" read: plain OCR of the box as before
             t = TextReader(exp_box, tess).read(frame)
             out["exp"], out["exp_raw"] = t.value, t.raw
         if r["checked"] and r["level"] is not None:
@@ -132,7 +153,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         merge_log[tab] = log
     status = {}
     if status_frame is not None:
-        status = read_status(shifted(cfg, status_frame, ("status",)), status_frame)
+        status = read_status(shifted(cfg, status_frame, ("status",)), status_frame, when=when)
     map_frame = status_frame if status_frame is not None else (first_page[0] if first_page else None)
     where = read_map_safe(cfg, map_frame) if map_frame is not None else None
     if first_page is not None and (cfg["readers"].get("mesos") or {}).get("box"):
@@ -151,6 +172,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "status_raw": {k: v for k, v in status.items() if k.endswith("_raw")},
         "exp_pct": status.get("exp_pct"),
         "exp_checked": status.get("exp_checked"),
+        "level_options": status.get("level_options") or [],
         "map": where,
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},
         "items": totals(tabs),

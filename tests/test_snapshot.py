@@ -360,6 +360,11 @@ def test_level_and_exp_from_real_status_bar(name, level, exp):
     frame = cv2.imread(str(Path(__file__).parent / "fixtures" / name))
     st = read_status(c, frame)
     assert (st["level"], st["exp"], st["exp_checked"]) == (level, exp, True)
+    # boxes drawn badly (or not at all): both are found on the status bar anyway
+    c.data["readers"]["level"] = {"box": [600, 1000, 40, 20]}
+    c.data["readers"]["exp"] = {"box": [1300, 1000, 40, 20]}
+    st = read_status(c, frame)
+    assert (st["level"], st["exp"], st["exp_checked"]) == (level, exp, True)
 
 
 def test_exp_text_split_and_level_check():
@@ -381,3 +386,24 @@ def test_merge_keeps_repeated_stacks_of_one_item():
     assert len(merged) == 4
     total = sum(s[1] for row in merged for s in row if s[0] == A)
     assert total == 1000 + 1000 + 1000 + 337 + 1000 + 250
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_level_tiles_found_without_a_good_box():
+    from pathlib import Path
+
+    from grindcap.statusbar import read_level
+
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / "use_tab_tooltip.png"))
+    assert read_level(frame, [700, 1040, 50, 30]) == 27      # box somewhere else on the bar
+    assert read_level(frame, None) == 27
+
+
+def test_wrong_level_corrected_from_previous_level():
+    from grindcap.statusbar import resolve
+
+    # read as 50, last snapshot was level 26: only 26-31 are possible, and 10 EXP at 0.02% fits 26-27
+    r = resolve("1010.02%1", 50, prior=26)
+    assert r["exp"] == 10 and r["level"] in (26, 27) and r["level_options"] == [26, 27]
+    # read as 27 and it fits: no doubt
+    assert resolve("1010.02%1", 27, prior=26)["level_options"] == []
