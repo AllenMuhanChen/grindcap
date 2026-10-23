@@ -100,12 +100,16 @@ grindcap snap end
 grindcap compare
 ```
 
-`compare` prints EXP/hr, mesos/hr and an item table, and writes `report.html` with each item's icon. Items are recognised by icon, so new ones show as `item-001`, `item-002`. Name and price them once:
+`compare` prints EXP/hr, mesos/hr and an item table, and writes `report.html` with each item's icon.
+
+**Item names come automatically.** The first time an item is seen, its icon is matched against MapleStory Classic World's own item data from [maplestory.io](https://maplestory.io) (names, icons and NPC sell prices, downloaded once into `data/itemdb/`, about a minute; or run `grindcap itemdb` ahead of time). The NPC sell price becomes the item's price unless you set one. Look-alike icons (ores that differ only in colour) are told apart by colour. An icon that doesn't clearly match stays as `item-NNN`; name and price those by hand:
 
 ```
 grindcap items
 grindcap label item-001 --name "Green Mushroom Cap" --price 14
 ```
+
+`label` also overrides an automatic name or price (for potions you'd rather value at what they save you than at the NPC price). Snapshots taken before this update: `grindcap reread` names their items too.
 
 If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.
 

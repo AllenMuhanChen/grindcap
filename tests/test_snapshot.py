@@ -77,6 +77,7 @@ def cfg():
     c.data["readers"]["exp"]["box"] = [0, 5, 320, 50]
     c.data["readers"]["mesos"]["box"] = [0, 65, 320, 50]
     inv = c.data["inventory"]
+    inv["itemdb"]["enabled"] = False   # no downloads in tests
     inv["first_slot"] = [X0, Y0, SLOT, SLOT]
     inv["last_slot"] = [X0 + 3 * (SLOT + GAP), Y0 + 5 * (SLOT + GAP), SLOT, SLOT]
     return c
@@ -273,3 +274,58 @@ def test_snapflow_auto_pages_start_end_compare(tmp_path):
     text, report = flow.compare(minutes=30)
     assert report.exists()
     assert "+20" in text and "-9" in text
+
+
+def fake_itemdb(folder, entries):
+    """An ItemDB folder with the given {item_id: (name, seed)} icons (RGBA, transparent background)."""
+    import json as _json
+
+    from grindcap.itemdb import ItemDB
+
+    (folder / "icons").mkdir(parents=True)
+    items = {}
+    for iid, (name, seed) in entries.items():
+        rgb = icon(seed)
+        alpha = np.where((rgb != 235).any(axis=2), 255, 0).astype(np.uint8)
+        cv2.imwrite(str(folder / "icons" / f"{iid}.png"), np.dstack([rgb, alpha])[2:30, 2:30])
+        items[iid] = {"name": name, "category": "Etc", "price": iid % 100}
+    (folder / "items.json").write_text(_json.dumps(items))
+    return ItemDB(folder)
+
+
+def recolor(seed):
+    """Same icon as `seed` with its colours shifted: a look-alike (like Iron Ore vs Mithril Ore)."""
+    img = icon(seed).astype(int)
+    m = (img != 235).any(axis=2)
+    img[m] = np.clip(img[m][:, [2, 0, 1]], 0, 255)
+    return img.astype(np.uint8)
+
+
+def test_items_named_from_item_database(tmp_path):
+    from grindcap.digits import StackDigits
+    from grindcap.inventory import Grid, read_page
+
+    db = fake_itemdb(tmp_path / "db", {4000001: ("Snail Shell", 1), 4000002: ("Blue Snail Shell", 2),
+                                       4000003: ("Mushroom Spore", 3), 4000010: ("Pig's Ribbon", 4)})
+    # a look-alike of item 1 with different colours, under its own id
+    rgb = recolor(1)
+    alpha = np.where((rgb != 235).any(axis=2), 255, 0).astype(np.uint8)
+    cv2.imwrite(str(tmp_path / "db" / "icons" / "4000020.png"), np.dstack([rgb, alpha])[2:30, 2:30])
+    db.items[4000020] = {"name": "Iron Ore", "category": "Etc", "price": 20}
+    db._icons = None
+
+    items = [(1, 13), (2, 5), (3, 40), (1, 7), (4, 2), (99, 3)] + [None] * 18
+    img = inventory_screen(items)
+    x, y = X0 + 2 * (SLOT + GAP), Y0 + 1 * (SLOT + GAP)       # 7th slot (row 2, col 3): the look-alike
+    cell = recolor(1)
+    draw_number(cell, 9)
+    img[y:y + SLOT, x:x + SLOT] = cell
+    c = cfg()
+    cat = Catalog(tmp_path / "data")
+    rows = read_page(img, Grid.from_cfg(c["inventory"]), cat, StackDigits(), itemdb=db)
+    got = [(cat.name(i), n) for row in rows for i, n in row if i]
+    assert got[:5] == [("Snail Shell", 13), ("Blue Snail Shell", 5), ("Mushroom Spore", 40),
+                       ("Snail Shell", 7), ("Pig's Ribbon", 2)]
+    assert got[5][1] == 3 and got[5][0].startswith("item-")        # not in the database: stays unnamed
+    assert got[6] == ("Iron Ore", 9)                               # look-alike told apart by colour
+    assert cat.items[cat.by_db(4000001)]["price"] == 1             # NPC price filled in

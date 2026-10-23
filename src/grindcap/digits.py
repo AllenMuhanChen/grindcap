@@ -67,6 +67,7 @@ class NativeView:
     sy: float
     px: float = 0.0
     py: float = 0.0
+    color: np.ndarray | None = None   # same pixels in colour (BGR float32), if asked for
 
     def to_native(self, x: float, y: float) -> tuple[int, int]:
         """Screen point -> native pixel index (global)."""
@@ -95,7 +96,8 @@ def _resample(gray, u0, v0, nw, nh, sx, sy, px, py) -> np.ndarray:
                           borderMode=cv2.BORDER_REPLICATE)
 
 
-def native_view(frame: np.ndarray, box, sx: float, sy: float, steps: int = 10) -> NativeView:
+def native_view(frame: np.ndarray, box, sx: float, sy: float, steps: int = 10,
+                color: bool = False) -> NativeView:
     """Resample screen box [x, y, w, h] to native pixels, choosing the sharpest sub-pixel offset."""
     import cv2
 
@@ -103,7 +105,8 @@ def native_view(frame: np.ndarray, box, sx: float, sy: float, steps: int = 10) -
     x, y, w, h = box
     if sx == 1.0 and sy == 1.0:
         x0, y0 = max(0, int(x)), max(0, int(y))
-        return NativeView(gray[y0:int(y + h), x0:int(x + w)], x0, y0, 1.0, 1.0)
+        c = frame[y0:int(y + h), x0:int(x + w)].astype(np.float32) if color and frame.ndim == 3 else None
+        return NativeView(gray[y0:int(y + h), x0:int(x + w)], x0, y0, 1.0, 1.0, color=c)
     u0, v0 = int(np.floor(x / sx)), int(np.floor(y / sy))
     nw, nh = int(np.ceil(w / sx)) + 1, int(np.ceil(h / sy)) + 1
 
@@ -115,7 +118,26 @@ def native_view(frame: np.ndarray, box, sx: float, sy: float, steps: int = 10) -
     # The two directions are independent enough to search one at a time.
     px = max(offs_x, key=lambda p: sharp(_resample(gray, u0, v0, nw, nh, sx, sy, p, 0.0)))
     py = max(offs_y, key=lambda p: sharp(_resample(gray, u0, v0, nw, nh, sx, sy, px, p)))
-    return NativeView(_resample(gray, u0, v0, nw, nh, sx, sy, px, py), u0, v0, sx, sy, px, py)
+    c = (_resample(frame.astype(np.float32), u0, v0, nw, nh, sx, sy, px, py)
+         if color and frame.ndim == 3 else None)
+    return NativeView(_resample(gray, u0, v0, nw, nh, sx, sy, px, py), u0, v0, sx, sy, px, py, c)
+
+
+def slot_patch(view: NativeView, u: int, v: int, size: int = 32, pad: int = 4) -> np.ndarray | None:
+    """Colour pixels of one slot (native top-left u, v) plus `pad` px around it, edges replicated."""
+    import cv2
+
+    if view.color is None:
+        return None
+    h, w = view.color.shape[:2]
+    a, b = u - view.u0 - pad, v - view.v0 - pad
+    n = size + 2 * pad
+    crop = view.color[max(0, b):max(0, b + n), max(0, a):max(0, a + n)]
+    if crop.size == 0:
+        return None
+    top, left = max(0, -b), max(0, -a)
+    return cv2.copyMakeBorder(crop, top, n - top - crop.shape[0], left, n - left - crop.shape[1],
+                              cv2.BORDER_REPLICATE)
 
 
 # ---------------------------------------------------------------- templates
@@ -230,13 +252,14 @@ class StackDigits:
                     best, bs = (ox + dx, oy + dy), s
         return best
 
-    def page_view(self, frame, boxes: list[tuple[int, int, int, int]], pitch_x: float) -> NativeView:
+    def page_view(self, frame, boxes: list[tuple[int, int, int, int]], pitch_x: float,
+                  color: bool = False) -> NativeView:
         sx, sy = native_scale(pitch_x, frame.shape)
         x0 = min(b[0] for b in boxes) - 4 * sx
         y0 = min(b[1] for b in boxes) - 4 * sy
         x1 = max(b[0] + b[2] for b in boxes) + 4 * sx
         y1 = max(b[1] + b[3] for b in boxes) + 4 * sy
-        return native_view(frame, (x0, y0, x1 - x0, y1 - y0), sx, sy)
+        return native_view(frame, (x0, y0, x1 - x0, y1 - y0), sx, sy, color=color)
 
     def slot_origins(self, view: NativeView, boxes, pitch_x: float, pitch_y: float, first) -> list:
         """Native top-left of each slot, using whole-native-pixel pitches so rounding can't drift."""
@@ -245,14 +268,17 @@ class StackDigits:
         return [(fu + round((b[0] - first[0]) / pitch_x) * pu if pitch_x else fu,
                  fv + (round((b[1] - first[1]) / pitch_y) * pv if pitch_y else 0)) for b in boxes]
 
+    def read_view(self, view: NativeView, origins: list[tuple[int, int]]) -> list[SlotReading]:
+        """Read the stack number of each slot, given its native top-left."""
+        ox, oy = self.locate(view, origins)
+        return [self.read_number(view, u + ox, v + oy) for u, v in origins]
+
     def read_slots(self, frame, boxes, pitch_x: float, pitch_y: float) -> list[SlotReading]:
         """Read the stack number in every slot box (screen [x, y, w, h]); boxes[0] anchors the grid."""
         if not boxes:
             return []
         view = self.page_view(frame, boxes, pitch_x)
-        origins = self.slot_origins(view, boxes, pitch_x, pitch_y, boxes[0])
-        ox, oy = self.locate(view, origins)
-        return [self.read_number(view, u + ox, v + oy) for u, v in origins]
+        return self.read_view(view, self.slot_origins(view, boxes, pitch_x, pitch_y, boxes[0]))
 
     # --- teaching
 

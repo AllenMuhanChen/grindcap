@@ -17,6 +17,7 @@ Before/after mode (simpler, no live tracking):
   grindcap reread [FOLDER...]     read saved snapshots again from their screenshots (after an update)
   grindcap teach-digits           check the stack numbers it reads, correct any that are wrong
   grindcap items                  list known item icons and their names/prices
+  grindcap identify               name items by matching their icons with the game's item data
   grindcap label ITEM-ID          give an item id a name and price
 """
 from __future__ import annotations
@@ -238,6 +239,56 @@ def cmd_reread(cfg, a):
               f"{sum(snap['items'].values())} items (was {sum(old['items'].values())})")
 
 
+def cmd_itemdb(cfg, a):
+    """Download (or update) item names and icons from maplestory.io."""
+    from .snapshot import open_itemdb
+
+    db = open_itemdb(cfg, download=False)
+    if db is None or a.update:
+        from .itemdb import ItemDB
+
+        opt = cfg["inventory"].get("itemdb") or {}
+        db = ItemDB(Path(cfg["inventory"]["catalog_dir"]) / "itemdb", opt.get("region", "MCW"),
+                    str(opt.get("version", "1")))
+        db.download()
+    else:
+        print(f"Item data already downloaded: {len(db.items)} items in {db.folder}. Use --update to refresh.")
+
+
+def cmd_identify(cfg, a):
+    """Name catalog items from the item database by their saved icons."""
+    import cv2
+
+    from .digits import native_scale, native_view
+    from .inventory import Grid
+    from .snapshot import open_itemdb
+
+    db = open_itemdb(cfg)
+    if db is None:
+        raise SystemExit("No item data. Check your internet connection and run `grindcap itemdb`.")
+    cat = _catalog(cfg)
+    grid = Grid.from_cfg(cfg["inventory"])
+    named = 0
+    for iid, info in cat.items.items():
+        if info.get("name") and not (a.all and info.get("db")):
+            continue
+        img = cv2.imread(str(cat.icons_dir / f"{iid}.png"))
+        if img is None:
+            continue
+        sx, sy = native_scale(grid.pitch()[0], (1080, 1920) if a.frame_h is None else (a.frame_h, a.frame_h * 16 // 9))
+        view = native_view(img, (0, 0, img.shape[1], img.shape[0]), sx, sy, color=True)
+        patch = cv2.copyMakeBorder(view.color, 4, 4, 4, 4, cv2.BORDER_REPLICATE)
+        m = db.identify(patch)
+        if m:
+            cat.set_identity(iid, m, db.price(m.item_id))
+            named += 1
+            print(f"{iid}: {m.name}  (score {m.score:.0f}, next best {m.runner_up} is {m.ratio:.2f}x worse)")
+        else:
+            best = db.rank(patch)[:3]
+            print(f"{iid}: not sure. Closest: " + ", ".join(db.items[i]["name"] for _, i in best))
+    print(f"Named {named} items. Name the rest with `grindcap label ITEM-ID --name ...`.")
+
+
 def cmd_items(cfg, a):
     cat = _catalog(cfg)
     if not cat.items:
@@ -387,6 +438,15 @@ def main(argv=None):
     sp.set_defaults(fn=cmd_reread)
 
     sub.add_parser("items", help="list known item icons").set_defaults(fn=cmd_items)
+
+    sp = sub.add_parser("itemdb", help="download item names and icons from maplestory.io")
+    sp.add_argument("--update", action="store_true", help="download again")
+    sp.set_defaults(fn=cmd_itemdb)
+
+    sp = sub.add_parser("identify", help="name catalog items by matching their icons with the item data")
+    sp.add_argument("--all", action="store_true", help="also redo items named automatically before")
+    sp.add_argument("--frame-h", type=int, help="game window height in pixels (default 1080)")
+    sp.set_defaults(fn=cmd_identify)
     sub.add_parser("windows", help="list window titles (to set capture.window_title)").set_defaults(fn=cmd_windows)
     sub.add_parser("test-capture", help="grab the game window once and save it").set_defaults(fn=cmd_test_capture)
     sub.add_parser("gui", help="small always-on-top control window").set_defaults(fn=cmd_gui)

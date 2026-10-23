@@ -89,27 +89,40 @@ class Catalog:
         self.icons_dir = self.folder / "icons"
         self.path = self.folder / "catalog.json"
         self.items: dict[str, dict] = {}
-        self._sigs: dict[str, np.ndarray] = {}
+        self._sigs: list[tuple[str, np.ndarray]] = []   # (item id, signature); an item can have several
         if self.path.exists():
             self.items = json.loads(self.path.read_text())
             for iid in self.items:
-                p = self.icons_dir / f"{iid}.npy"
-                if p.exists():
-                    self._sigs[iid] = np.load(p)
+                for p in sorted(self.icons_dir.glob(f"{iid}.npy")) + sorted(self.icons_dir.glob(f"{iid}.alt*.npy")):
+                    self._sigs.append((iid, np.load(p)))
 
     def save(self):
         self.icons_dir.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self.items, indent=2))
 
+    def candidates(self, sig: np.ndarray, threshold: float) -> list[str]:
+        """Known items whose icon signature is within `threshold`, closest first."""
+        d = sorted((float(np.abs(s - sig).mean()), iid) for iid, s in self._sigs)
+        out = []
+        for dist, iid in d:
+            if dist <= threshold and iid not in out:
+                out.append(iid)
+        return out
+
+    def add_look(self, iid: str, sig: np.ndarray):
+        """Remember another look of a known item (e.g. drawn at a different sub-pixel offset)."""
+        self.icons_dir.mkdir(parents=True, exist_ok=True)
+        k = sum(1 for i, _ in self._sigs if i == iid)
+        np.save(self.icons_dir / f"{iid}.alt{k}.npy", sig)
+        self._sigs.append((iid, sig))
+
+    def by_db(self, db_id: int) -> str | None:
+        return next((iid for iid, it in self.items.items() if (it.get("db") or {}).get("id") == db_id), None)
+
     def match(self, sig: np.ndarray, slot_img: np.ndarray, threshold: float) -> str:
-        best, best_d = None, 1e9
-        for iid, s in self._sigs.items():
-            d = float(np.abs(s - sig).mean())
-            if d < best_d:
-                best, best_d = iid, d
-        if best is not None and best_d <= threshold:
-            return best
-        return self._add(sig, slot_img)
+        """Known item id for this icon, or a new id."""
+        c = self.candidates(sig, threshold)
+        return c[0] if c else self._add(sig, slot_img)
 
     def _add(self, sig, slot_img) -> str:
         import cv2
@@ -120,7 +133,7 @@ class Catalog:
         np.save(self.icons_dir / f"{iid}.npy", sig)
         cv2.imwrite(str(self.icons_dir / f"{iid}.png"), slot_img)
         self.items[iid] = {"name": None, "price": None}
-        self._sigs[iid] = sig
+        self._sigs.append((iid, sig))
         self.save()
         return iid
 
@@ -133,33 +146,92 @@ class Catalog:
             self.items[iid]["price"] = price
         self.save()
 
+    def set_identity(self, iid: str, match, price=None):
+        """Fill in a name found in the item database, unless you already named it yourself."""
+        it = self.items[iid]
+        if it.get("name") and not it.get("db"):
+            return
+        it["name"] = match.name
+        it["db"] = {"id": match.item_id, "score": match.score, "ratio": match.ratio,
+                    "runner_up": match.runner_up, "neighbors": match.neighbors}
+        if price is not None and it.get("price") is None:
+            it["price"] = price
+            it["price_source"] = "npc sell"
+        self.save()
+
     def name(self, iid: str) -> str:
         return (self.items.get(iid) or {}).get("name") or iid
 
 
-def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits,
-              empty_std: float = 6.0, match_threshold: float = 12.0) -> list[list[Slot]]:
+def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits, empty_std: float = 6.0,
+              match_threshold: float = 12.0, itemdb=None) -> list[list[Slot]]:
     """One screenshot of the visible inventory grid -> rows of (item_id or None, qty).
 
     `digits` is a digits.StackDigits. Slots with no number (equipment, single items) count as 1.
+    With an `itemdb` (itemdb.ItemDB), items seen for the first time are named from the game's data.
     """
+    from .digits import slot_patch
+
     rows = grid.slot_boxes()
     flat = [b for row in rows for b in row]
-    numbers = digits.read_slots(frame, flat, *grid.pitch())
+    px, py = grid.pitch()
+    view = digits.page_view(frame, flat, px, color=itemdb is not None)
+    origins = digits.slot_origins(view, flat, px, py, flat[0])
+    numbers = digits.read_view(view, origins)
     out, i = [], 0
     for row in rows:
         line = []
         for (x, y, w, h) in row:
             img = frame[max(0, y):y + h, max(0, x):x + w]
-            n = numbers[i].value
+            n, (u, v) = numbers[i].value, origins[i]
             i += 1
             if img.size == 0 or is_empty(img, grid.qty_box, empty_std):
                 line.append((None, 0))
                 continue
-            iid = catalog.match(signature(img, grid.qty_box), img, match_threshold)
+
+            sig = signature(img, grid.qty_box)
+            if itemdb is not None and itemdb.ready:
+                iid = _identify_slot(catalog, itemdb, sig, img, slot_patch(view, u, v), match_threshold)
+            else:
+                iid = catalog.match(sig, img, match_threshold)
             line.append((iid, n or 1))
         out.append(line)
     return out
+
+
+def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float) -> str:
+    """Catalog id for a slot, using the item database to tell apart look-alikes (e.g. ores that differ
+    only in colour) and to give each database item one catalog id.
+
+    Fast path: the closest known icon that was itself identified is re-checked against its own database
+    icon and its look-alikes (a few template matches). Only new or doubtful slots get the full search.
+    """
+    cands = catalog.candidates(sig, threshold)
+    unnamed = None
+    if cands:
+        iid = cands[0]
+        it = catalog.items[iid]
+        db = it.get("db")
+        if db and patch is not None:
+            sc = itemdb.scores(patch, [db["id"]] + list(db.get("neighbors") or []))
+            if sc and min(sc, key=sc.get) == db["id"]:
+                return iid
+        elif it.get("name") or patch is None:
+            return iid                      # named by you (or nothing to check with): trust the icon
+        else:
+            unnamed = iid                   # seen before but never named: try to name it now
+    m = itemdb.identify(patch) if patch is not None else None
+    if m is None:
+        # Not in the database (or unclear): fall back to icon signatures, unnamed.
+        return cands[0] if cands else catalog._add(sig, img)
+    known = catalog.by_db(m.item_id)
+    if known:
+        if known not in cands:
+            catalog.add_look(known, sig)    # next time this look takes the fast path
+        return known
+    iid = unnamed or catalog._add(sig, img)
+    catalog.set_identity(iid, m, itemdb.price(m.item_id))
+    return iid
 
 
 def _rows_agree(a_rows, b_rows) -> bool:

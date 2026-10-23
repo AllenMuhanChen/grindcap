@@ -26,6 +26,12 @@ digits.py    StackDigits: stack numbers in the game's font. Maps the screen back
              left to right at fixed advances (8 px, "1" = 5 px) by masked normalised correlation.
              Built-in templates: data/stack_digits.npz, rebuilt by scripts/build_stack_digits.py from
              tests/fixtures/game_frame.png. `teach-digits` = check + corrections (data/digits.npz).
+itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), version 1: names, icons,
+             NPC sell price (per item, lazily). identify(native BGR patch): masked TM_SQDIFF of every
+             Etc/Use/Setup icon (alpha>200) slid over the slot; accept if best name beats the next name
+             by min_ratio 1.25. inventory._identify_slot: catalog signature -> fast re-check against the
+             item's db icon + its stored look-alike neighbours -> else full identify; one catalog id per
+             db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

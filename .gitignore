@@ -6,3 +6,5 @@ config.yaml
 *.mp4
 *.mkv
 captures/
+/data/
+/snapshots/

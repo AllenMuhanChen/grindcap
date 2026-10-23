@@ -33,6 +33,26 @@ def read_status(cfg, frame) -> dict:
     return out
 
 
+def open_itemdb(cfg, download: bool = True, progress=print):
+    """The item database for naming items, downloading it the first time. None if turned off or offline."""
+    from .itemdb import ItemDB
+
+    inv = cfg["inventory"]
+    opt = inv.get("itemdb") or {}
+    if not opt.get("enabled", True):
+        return None
+    db = ItemDB(Path(inv["catalog_dir"]) / "itemdb", opt.get("region", "MCW"), str(opt.get("version", "1")),
+                min_ratio=opt.get("min_ratio", 1.25))
+    if not db.ready and download:
+        progress("Downloading item names and icons from maplestory.io (once, about a minute)...")
+        try:
+            db.download(progress=progress)
+        except Exception as e:
+            progress(f"Couldn't download item data ({e}); items keep their item-NNN ids for now.")
+            return None
+    return db if db.ready else None
+
+
 def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], catalog: Catalog,
                    when: float | None = None) -> dict:
     from .anchors import shifted
@@ -40,13 +60,14 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
 
     inv = cfg["inventory"]
     digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
+    itemdb = open_itemdb(cfg)
     tabs, first_page = {}, None
     for tab, frames in tab_pages.items():
         pages = []
         for f in frames:
             fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
             pages.append(read_page(f, Grid.from_cfg(fc["inventory"]), catalog, digits,
-                                   inv["empty_std"], inv["match_threshold"]))
+                                   inv["empty_std"], inv["match_threshold"], itemdb))
             if first_page is None:
                 first_page = (f, fc)
         tabs[tab] = merge_pages(pages)

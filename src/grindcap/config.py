@@ -62,6 +62,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Item catalog (icons, names, prices) and snapshot folders.
         "catalog_dir": "data",
         "snapshot_dir": "snapshots",
+        # Name new items by matching their icons with the game's data from maplestory.io
+        # (region MCW = MapleStory Classic World). Downloaded once into <catalog_dir>/itemdb/.
+        "itemdb": {"enabled": True, "region": "MCW", "version": "1", "min_ratio": 1.25},
     },
     "anchors": {
         # Patches of windows that never change, used to find the windows wherever they are on screen.
