@@ -107,10 +107,19 @@ def calibrate_inventory(cfg, frame: np.ndarray) -> None:
             print("  skipped inventory calibration")
             return
         inv[key] = [int(x), int(y), int(w), int(h)]
+    questions = {
+        "cols": "How many item squares ACROSS can you see in the inventory?",
+        "rows": "How many rows of item squares DOWN can you see without scrolling?",
+    }
     for key in ("cols", "rows"):
-        v = input(f"Visible {key} in the inventory grid [{inv[key]}]: ").strip()
-        if v:
-            inv[key] = int(v)
+        while True:
+            v = input(f"{questions[key]} Press Enter for {inv[key]}, or type the number: ").strip()
+            if not v:
+                break
+            if v.isdigit() and int(v) > 0:
+                inv[key] = int(v)
+                break
+            print("  Please type a whole number, like 4.")
     print(f"  inventory grid: first {inv['first_slot']}, last {inv['last_slot']}, {inv['cols']}x{inv['rows']}")
     calibrate_anchor(cfg, frame, "inventory",
                      "Landmark: box the inventory window's title at the top of the window")
