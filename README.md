@@ -130,6 +130,8 @@ It opens in your browser and lists only the items whose count changed. Everythin
 - **Slots hidden under a tooltip** aren't counted. If a later page showed them, they're filled in from it; otherwise they're listed so you can say what they were.
 - **EXP, level and mesos** of each snapshot can be corrected too.
 
+**Summary chart:** the **Summary chart** button (or `grindcap review --summary`) plots every saved session as a dot: EXP/hr across, net mesos/hr (or raw mesos/hr) up. Hover a dot for its map, name, time and rates; click it to open that session. "Show: all sessions" includes unsaved ones.
+
 Names and prices apply to every session. Slot and status fixes belong to that session and are kept in `fixes.json` next to each snapshot, so `grindcap reread` doesn't undo them. `grindcap compare` uses all of them.
 
 If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.

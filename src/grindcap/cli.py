@@ -300,8 +300,13 @@ def cmd_review(cfg, a):
     """Open the review page (fix misread items, set prices) and keep it running until Ctrl+C."""
     from .review import serve
 
-    httpd = serve(cfg, a.session, open_browser=not a.no_browser, port=a.port)
-    print(f"Review page: {httpd.url}  (Ctrl+C to stop)")
+    httpd = serve(cfg, a.session, open_browser=False, port=a.port)
+    url = httpd.url.split("?")[0] + "summary" if a.summary else httpd.url
+    if not a.no_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    print(f"{'Summary' if a.summary else 'Review page'}: {url}  (Ctrl+C to stop)")
     try:
         while True:
             time.sleep(1)
@@ -468,6 +473,7 @@ def main(argv=None):
     sp.add_argument("session", nargs="?", help="end snapshot folder name (default: the latest session)")
     sp.add_argument("--port", type=int, default=0)
     sp.add_argument("--no-browser", action="store_true")
+    sp.add_argument("--summary", action="store_true", help="open the summary chart of all sessions")
     sp.set_defaults(fn=cmd_review)
 
     sp = sub.add_parser("itemdb", help="download item names and icons from maplestory.io")

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grindcap summary</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #6d6a63; --line: #e3e0d8;
+  --grid: #ecebe6; --accent: #2a78d6; --series-1: #2a78d6; --chip: #efede7;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17171a; --panel: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #9a978f; --line: #34343b;
+          --grid: #2a2a2e; --accent: #3987e5; --series-1: #3987e5; --chip: #2b2b31; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+h1 { font-size: 16px; margin: 0; }
+a { color: var(--accent); }
+select { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+main { padding: 16px 20px 60px; max-width: 1100px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 18px 0 8px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.chart-title { font-weight: 600; margin: 0 0 2px; }
+.chart-sub { color: var(--muted); font-size: 12px; margin: 0 0 8px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.axis text { fill: var(--ink2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.axis line.grid { stroke: var(--grid); stroke-width: 1; }
+.axis line.zero { stroke: var(--muted); stroke-width: 1; }
+.axis .label { fill: var(--muted); font-size: 12px; }
+circle.dot { fill: var(--series-1); stroke: var(--panel); stroke-width: 2; }
+circle.dot.hot { r: 7; }
+circle.hit { fill: transparent; cursor: pointer; }
+.dlabel { fill: var(--ink2); font-size: 11px; pointer-events: none; }
+#tip { position: fixed; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+       border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.18); opacity: 0;
+       transition: opacity .1s; max-width: 300px; z-index: 9; }
+#tip.show { opacity: 1; }
+#tip b { display: block; font-size: 13px; margin-bottom: 2px; }
+#tip .row { display: flex; justify-content: space-between; gap: 14px; font-variant-numeric: tabular-nums; }
+#tip .row span:first-child { color: var(--muted); }
+table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; font-variant-numeric: tabular-nums; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--chip); }
+td.l, th.l { text-align: left; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td, tbody tr.hot td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.muted { color: var(--muted); }
+.empty { color: var(--muted); padding: 30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>grindcap summary</h1>
+    <a href="/">Review a session</a>
+    <label class="muted">Show <select id="which"><option value="saved">saved sessions</option><option value="all">all sessions</option></select></label>
+    <label class="muted">Mesos <select id="ymode"><option value="net">net incl. items</option><option value="raw">raw (cash only)</option></select></label>
+  </div>
+</header>
+<main>
+  <div class="card">
+    <p class="chart-title">EXP per hour vs mesos per hour</p>
+    <p class="chart-sub" id="sub">One dot per session. Hover for details, click to open it.</p>
+    <div id="chart"></div>
+  </div>
+  <h2>Sessions</h2>
+  <table id="table"></table>
+</main>
+<div id="tip"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const fmt = v => v == null ? "–" : Math.round(v).toLocaleString();
+const short = v => { const a = Math.abs(v); return a >= 1e6 ? (v / 1e6).toFixed(a >= 1e7 ? 0 : 1) + "M" : a >= 1e3 ? (v / 1e3).toFixed(a >= 1e4 ? 0 : 1) + "k" : String(Math.round(v)); };
+const hm = m => m == null ? "–" : `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
+const when = t => t ? new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"}) : "";
+let S = [];
+
+function niceTicks(lo, hi, n = 5) {
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const step0 = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0);
+  const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step, t = [];
+  for (let v = a; v <= b + step / 2; v += step) t.push(+v.toFixed(10));
+  return t;
+}
+
+function yval(s) { return $("#ymode").value === "net" ? s.net_per_hr : s.mesos_per_hr; }
+
+function draw() {
+  const pts = S.filter(s => !s.error && s.exp_per_hr != null && yval(s) != null);
+  const box = $("#chart");
+  if (!pts.length) {
+    box.innerHTML = `<p class="empty">${S.length ? "No session has both EXP and mesos read yet." :
+      ($("#which").value === "saved" ? "No saved sessions yet. Save sessions on the review page (☆ Save), or show all sessions." : "No sessions yet.")}</p>`;
+    return;
+  }
+  const W = 1000, H = 520, m = {l: 70, r: 24, t: 14, b: 50};
+  const xs = pts.map(p => p.exp_per_hr), ys = pts.map(yval);
+  const xt = niceTicks(Math.min(0, ...xs), Math.max(...xs)), yt = niceTicks(Math.min(0, ...ys), Math.max(...ys));
+  const X = v => m.l + (v - xt[0]) / (xt.at(-1) - xt[0]) * (W - m.l - m.r);
+  const Y = v => H - m.b - (v - yt[0]) / (yt.at(-1) - yt[0]) * (H - m.t - m.b);
+  let g = `<g class="axis">`;
+  for (const v of yt) g += `<line class="${v === 0 ? "zero" : "grid"}" x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}"/>
+    <text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end">${short(v)}</text>`;
+  for (const v of xt) g += `<line class="${v === 0 ? "zero" : "grid"}" y1="${m.t}" y2="${H - m.b}" x1="${X(v)}" x2="${X(v)}"/>
+    <text x="${X(v)}" y="${H - m.b + 18}" text-anchor="middle">${short(v)}</text>`;
+  g += `<text class="label" x="${(m.l + W - m.r) / 2}" y="${H - 8}" text-anchor="middle">EXP / hr</text>
+    <text class="label" transform="translate(16 ${(m.t + H - m.b) / 2}) rotate(-90)" text-anchor="middle">${
+      $("#ymode").value === "net" ? "Net mesos / hr (incl. items)" : "Mesos / hr (cash only)"}</text></g>`;
+  // label only the best few (highest EXP/hr, highest mesos/hr), never every point
+  const best = new Set([...pts].sort((a, b) => b.exp_per_hr - a.exp_per_hr).slice(0, 1).map(p => p.id)
+    .concat([...pts].sort((a, b) => yval(b) - yval(a)).slice(0, 1).map(p => p.id)));
+  let d = "";
+  pts.forEach((p, i) => {
+    const cx = X(p.exp_per_hr), cy = Y(yval(p));
+    d += `<circle class="dot" data-i="${i}" cx="${cx}" cy="${cy}" r="5"/>`;
+    if (best.has(p.id) && pts.length > 1)
+      d += `<text class="dlabel" x="${cx + 9}" y="${cy - 8}">${esc(p.map || p.name)}</text>`;
+  });
+  pts.forEach((p, i) => d += `<circle class="hit" data-i="${i}" cx="${X(p.exp_per_hr)}" cy="${Y(yval(p))}" r="14"/>`);
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Scatter plot of EXP per hour against mesos per hour, one dot per session">${g}${d}</svg>`;
+  box.querySelectorAll("circle.hit").forEach(c => {
+    const p = pts[+c.dataset.i];
+    c.onmousemove = e => tip(e, p);
+    c.onmouseleave = () => { $("#tip").classList.remove("show"); hot(null); };
+    c.onclick = () => openSession(p);
+  });
+}
+
+function hot(id) {
+  document.querySelectorAll("circle.dot").forEach(c => c.classList.remove("hot"));
+  document.querySelectorAll("tbody tr").forEach(r => r.classList.toggle("hot", r.dataset.id === id));
+  if (id == null) return;
+  const pts = S.filter(s => !s.error && s.exp_per_hr != null && yval(s) != null);
+  const i = pts.findIndex(p => p.id === id);
+  const c = document.querySelector(`circle.dot[data-i="${i}"]`);
+  if (c) c.classList.add("hot");
+}
+
+function tip(e, p) {
+  const t = $("#tip");
+  t.innerHTML = `<b>${esc(p.name)}</b>
+    <div class="row"><span>Map</span><span>${esc(p.map || "not read")}</span></div>
+    <div class="row"><span>When</span><span>${when(p.start_time)}</span></div>
+    <div class="row"><span>Time</span><span>${hm(p.minutes)}</span></div>
+    <div class="row"><span>EXP / hr</span><span>${fmt(p.exp_per_hr)}${p.levels ? ` (+${p.levels} lv)` : ""}</span></div>
+    <div class="row"><span>Net mesos / hr</span><span>${fmt(p.net_per_hr)}</span></div>
+    <div class="row"><span>Raw mesos / hr</span><span>${fmt(p.mesos_per_hr)}</span></div>
+    <div class="row"><span>Revenue / cost per hr</span><span>${fmt(p.revenue_per_hr)} / ${fmt(p.cost_per_hr)}</span></div>`;
+  const x = Math.min(e.clientX + 14, innerWidth - 310), y = Math.min(e.clientY + 14, innerHeight - 190);
+  t.style.left = x + "px"; t.style.top = y + "px"; t.classList.add("show");
+  hot(p.id);
+}
+
+function openSession(p) { location.href = "/?session=" + encodeURIComponent(p.id); }
+
+function table() {
+  const rows = [...S].sort((a, b) => (b.net_per_hr ?? -1e18) - (a.net_per_hr ?? -1e18));
+  $("#table").innerHTML = `<thead><tr><th class="l">Session</th><th class="l">Map</th><th>Time</th>
+      <th>EXP / hr</th><th>Net mesos / hr</th><th>Raw mesos / hr</th></tr></thead><tbody>` +
+    (rows.length ? rows.map(s => `<tr data-id="${esc(s.id)}"><td class="l">${s.saved ? "★ " : ""}${esc(s.name)}${s.error ? ` <span class="muted">(${esc(s.error)})</span>` : ""}</td>
+      <td class="l">${esc(s.map || "")}</td><td>${hm(s.minutes)}</td><td>${fmt(s.exp_per_hr)}</td>
+      <td>${fmt(s.net_per_hr)}</td><td>${fmt(s.mesos_per_hr)}</td></tr>`).join("")
+      : `<tr><td colspan="6" class="l muted">Nothing to show.</td></tr>`) + `</tbody>`;
+  document.querySelectorAll("tbody tr[data-id]").forEach(r => {
+    const s = S.find(x => x.id === r.dataset.id);
+    r.onclick = () => openSession(s);
+    r.onmouseenter = () => hot(s.id);
+    r.onmouseleave = () => hot(null);
+  });
+}
+
+async function load() {
+  const all = $("#which").value === "all";
+  const r = await fetch("/api/summary" + (all ? "?all=1" : ""));
+  const d = await r.json();
+  S = d.sessions || [];
+  $("#sub").textContent = `${S.length} ${all ? "" : "saved "}session${S.length === 1 ? "" : "s"}. One dot per session. Hover for details, click to open it.`;
+  draw(); table();
+}
+$("#which").onchange = load;
+$("#ymode").onchange = () => { draw(); };
+try { const w = localStorage.getItem("grindcap.summary.which"); if (w) $("#which").value = w; } catch (e) {}
+$("#which").addEventListener("change", () => { try { localStorage.setItem("grindcap.summary.which", $("#which").value); } catch (e) {} });
+load();
+</script>
+</body>
+</html>

@@ -100,6 +100,25 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
                               key=lambda x: x[1].lower())}
 
 
+def summary_data(root, catalog: Catalog, saved_only: bool = True) -> dict:
+    """One point per session for the summary page: EXP/hr and mesos/hr (net incl. items, and raw)."""
+    out = []
+    for ss in list_sessions(root):
+        if saved_only and not ss["saved"]:
+            continue
+        try:
+            r = compare(load_snapshot(ss["start"]), load_snapshot(ss["end"]), catalog)
+        except Exception as e:      # a broken snapshot shouldn't break the whole page
+            out.append({"id": ss["id"], "name": ss["name"], "error": str(e)})
+            continue
+        out.append({"id": ss["id"], "name": ss["name"], "map": ss["map"], "saved": ss["saved"],
+                    "start_time": ss["start_time"], "minutes": r["minutes"],
+                    "exp_per_hr": r["exp_per_hr"], "net_per_hr": r["net_per_hr"],
+                    "mesos_per_hr": r["mesos_per_hr"], "revenue_per_hr": r["revenue_per_hr"],
+                    "cost_per_hr": r["cost_per_hr"], "levels": r["levels"]})
+    return {"sessions": out, "saved_only": saved_only}
+
+
 # ---------------------------------------------------------------- edits
 
 def apply_edit(start_dir, end_dir, catalog: Catalog, itemdb, edit: dict) -> None:
@@ -266,6 +285,13 @@ def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: i
             try:
                 if u.path == "/":
                     return self._send(200, page.encode(), "text/html; charset=utf-8")
+                if u.path == "/summary":
+                    html = (Path(__file__).parent / "data" / "summary.html").read_text(encoding="utf-8")
+                    return self._send(200, html.encode(), "text/html; charset=utf-8")
+                if u.path == "/api/summary":
+                    with lock:
+                        d = summary_data(root, Catalog(cat_dir), saved_only=q.get("all") != "1")
+                    return self._json(d)
                 if u.path == "/api/sessions":
                     return self._json({"sessions": list_sessions(root), "selected": session_id})
                 if u.path == "/api/data":

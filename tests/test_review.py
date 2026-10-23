@@ -129,3 +129,16 @@ def test_revenue_and_cost(tmp_path):
     assert (r["revenue"], r["cost"]) == (400 + 120, 1000)
     assert r["revenue_per_hr"] == 520 and r["cost_per_hr"] == 1000      # the session is one hour
     assert r["net_mesos_incl_items"] == r["revenue"] - r["cost"]
+
+
+def test_summary_points_saved_sessions(tmp_path):
+    from grindcap import sessions
+    from grindcap.review import summary_data
+
+    cat, root, s, e = setup(tmp_path)
+    assert summary_data(root, cat)["sessions"] == []                 # nothing saved yet
+    sessions.update(root, "end-1", saved=True)
+    [p] = summary_data(root, cat)["sessions"]
+    assert (p["id"], p["exp_per_hr"], p["mesos_per_hr"]) == ("end-1", 2000, 400)
+    assert p["net_per_hr"] == 400 + 120 - 1000
+    assert len(summary_data(root, cat, saved_only=False)["sessions"]) == 1

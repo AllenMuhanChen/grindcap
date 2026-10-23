@@ -46,6 +46,9 @@ review.py    Session review: list_sessions (end paired with latest start before 
              compare(); compare() also skips ids no longer in the catalog (purged). Prices: catalog "price"
              = user's, "npc_price" = NPC; Catalog.price() picks. Slots under a tooltip (is_covered) are
              UNKNOWN "?": not counted, ignored when matching pages, filled from an overlapping page.
+summary      data/summary.html at /summary on the review server (review.summary_data): scatter of
+             EXP/hr vs net (or raw) mesos/hr, one dot per saved session (or all), hover tooltip, click opens
+             the session, table below. Single hue (identity via hover/table). User will add more here.
 sessions.py  list_sessions (each end snapshot + latest start before it; id = end folder name), name/map/saved
              overrides in <snapshot_dir>/sessions.json, default name "<map> · <start> · <min> min", delete
              (keeps a start another session uses). review.py re-exports list_sessions.

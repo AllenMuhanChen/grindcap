@@ -57,6 +57,7 @@ def main(config_path: str = "config.yaml"):
     b_fin = ttk.Button(frm, text="Finish (F10)", command=lambda: finish_now())
     b_cancel = ttk.Button(frm, text="Cancel", command=lambda: cancel())
     b_review = ttk.Button(frm, text="Review / fix sessions", command=lambda: review())
+    b_summary = ttk.Button(frm, text="Summary chart", command=lambda: review(page="summary"))
     b_discard = ttk.Button(frm, text="Discard", command=lambda: discard())
     timer = tk.StringVar(value="")
     timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"))
@@ -73,7 +74,7 @@ def main(config_path: str = "config.yaml"):
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
 
     def layout(collecting: bool):
-        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, timer_lbl, b_discard):
+        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard):
             w.grid_remove()
         if processing["on"]:
             # reading the pages: nothing to press; the session timer already runs for a start snapshot
@@ -92,7 +93,8 @@ def main(config_path: str = "config.yaml"):
             b_start.grid(row=2, column=0, sticky="ew", padx=2)
             b_end.grid(row=2, column=1, sticky="ew", padx=2)
             b_cmp.grid(row=2, column=2, sticky="ew", padx=2)
-            b_review.grid(row=3, column=0, columnspan=3, sticky="ew", padx=2, pady=(4, 0))
+            b_review.grid(row=3, column=0, columnspan=2, sticky="ew", padx=2, pady=(4, 0))
+            b_summary.grid(row=3, column=2, sticky="ew", padx=2, pady=(4, 0))
             # One session at a time: while one is running, Start is greyed out and a timer shows.
             b_start.state(["disabled"] if run else ["!disabled"])
             b_end.state(["!disabled"] if run else ["disabled"])
@@ -186,14 +188,16 @@ def main(config_path: str = "config.yaml"):
 
     server = {}
 
-    def review(session_id=None):
-        """Open the review page in the browser (one local server, started on first use)."""
+    def review(session_id=None, page=""):
+        """Open the review page (or the summary chart) in the browser (one local server, started on
+        first use)."""
         from .review import serve
 
         try:
             if "httpd" not in server:
                 server["httpd"] = serve(cfg, open_browser=False)
-            url = server["httpd"].url + (f"?session={session_id}" if session_id else "")
+            base = server["httpd"].url.split("?")[0]
+            url = base + page + (f"?session={session_id}" if session_id else "")
             webbrowser.open(url)
             status.set("Review page opened in your browser. Fixes are saved as you make them.")
         except Exception as e:
