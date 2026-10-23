@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 
 SIG = 24  # icon signature size (pixels per side)
-Slot = tuple  # (item_id or None, qty)
+Slot = tuple  # (item_id or None, qty[, ref]) where ref = "<page>:r<row>c<col>" says which screenshot slot it was
 
 
 @dataclass
@@ -67,6 +67,19 @@ def signature(slot_img: np.ndarray, qty_box) -> np.ndarray:
     return cv2.resize(img, (SIG, SIG), interpolation=cv2.INTER_AREA)
 
 
+UNKNOWN = "?"   # item id for a slot something was drawn over (an item tooltip): not counted
+
+
+def is_covered(slot_img: np.ndarray, frac: float = 0.15) -> bool:
+    """True if an item tooltip covers this slot. The game's tooltip is a dark, see-through navy panel:
+    blue well above red and green, which stay about equal. (Blue icons are far more saturated.)"""
+    s = slot_img.astype(np.int16)
+    b, g, r = s[..., 0], s[..., 1], s[..., 2]
+    blue = b - (r + g) / 2
+    m = (blue > 25) & (blue < 75) & (np.abs(r - g) < 15) & (r > 10) & (r < 115)
+    return float(m.mean()) > frac
+
+
 def is_empty(slot_img: np.ndarray, qty_box, std_max: float) -> bool:
     """A slot is empty when its middle is flat. The edges are left out, so a box drawn a few pixels
     off (taking in the slot border) still counts as empty."""
@@ -92,6 +105,10 @@ class Catalog:
         self._sigs: list[tuple[str, np.ndarray]] = []   # (item id, signature); an item can have several
         if self.path.exists():
             self.items = json.loads(self.path.read_text())
+            for it in self.items.values():   # older catalogs stored the NPC price as the price
+                if it.get("price_source") == "npc sell":
+                    it["npc_price"], it["price"] = it.get("price"), None
+                    it.pop("price_source")
             for iid in self.items:
                 for p in sorted(self.icons_dir.glob(f"{iid}.npy")) + sorted(self.icons_dir.glob(f"{iid}.alt*.npy")):
                     self._sigs.append((iid, np.load(p)))
@@ -115,6 +132,22 @@ class Catalog:
         k = sum(1 for i, _ in self._sigs if i == iid)
         np.save(self.icons_dir / f"{iid}.alt{k}.npy", sig)
         self._sigs.append((iid, sig))
+
+    def add_named(self, name: str, db_id: int | None = None, price=None, icon_png: Path | None = None) -> str:
+        """An item you picked by hand (e.g. which scroll a slot holds). It has no icon signature, so it
+        never attracts automatic matches; slots are assigned to it on the review page."""
+        import shutil
+
+        n = 1 + max([int(re.sub(r"\D", "", k) or 0) for k in self.items] or [0])
+        iid = f"item-{n:03d}"
+        self.icons_dir.mkdir(parents=True, exist_ok=True)
+        if icon_png is not None and Path(icon_png).exists():
+            shutil.copy(icon_png, self.icons_dir / f"{iid}.png")
+        self.items[iid] = {"name": name, "price": None, "npc_price": price, "manual": True}
+        if db_id is not None:
+            self.items[iid]["db"] = {"id": int(db_id), "manual": True}
+        self.save()
+        return iid
 
     def by_db(self, db_id: int) -> str | None:
         return next((iid for iid, it in self.items.items() if (it.get("db") or {}).get("id") == db_id), None)
@@ -149,23 +182,28 @@ class Catalog:
     def set_identity(self, iid: str, match, price=None):
         """Fill in a name found in the item database, unless you already named it yourself."""
         it = self.items[iid]
-        if it.get("name") and not it.get("db"):
+        if it.get("name_manual") or (it.get("name") and not it.get("db")):
             return
         it["name"] = match.name
         it["db"] = {"id": match.item_id, "score": match.score, "ratio": match.ratio,
                     "runner_up": match.runner_up, "neighbors": match.neighbors}
-        if price is not None and it.get("price") is None:
-            it["price"] = price
-            it["price_source"] = "npc sell"
+        if price is not None:
+            it["npc_price"] = price
         self.save()
+
+    def price(self, iid: str):
+        """Mesos each: your own price if you set one, else the NPC sell price, else None.
+        Your price ("price") never replaces the NPC price ("npc_price"); clear it to go back."""
+        it = self.items.get(iid) or {}
+        return it["price"] if it.get("price") is not None else it.get("npc_price")
 
     def name(self, iid: str) -> str:
         return (self.items.get(iid) or {}).get("name") or iid
 
 
 def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits, empty_std: float = 6.0,
-              match_threshold: float = 12.0, itemdb=None) -> list[list[Slot]]:
-    """One screenshot of the visible inventory grid -> rows of (item_id or None, qty).
+              match_threshold: float = 12.0, itemdb=None, page_key: str = "") -> list[list[Slot]]:
+    """One screenshot of the visible inventory grid -> rows of (item_id or None, qty, ref).
 
     `digits` is a digits.StackDigits. Slots with no number (equipment, single items) count as 1.
     With an `itemdb` (itemdb.ItemDB), items seen for the first time are named from the game's data.
@@ -179,27 +217,39 @@ def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits, empty_std
     origins = digits.slot_origins(view, flat, px, py, flat[0])
     numbers = digits.read_view(view, origins)
     out, i = [], 0
-    for row in rows:
+    for r, row in enumerate(rows):
         line = []
-        for (x, y, w, h) in row:
+        for c, (x, y, w, h) in enumerate(row):
             img = frame[max(0, y):y + h, max(0, x):x + w]
             n, (u, v) = numbers[i].value, origins[i]
+            ref = f"{page_key}:r{r + 1}c{c + 1}"
             i += 1
-            if img.size == 0 or is_empty(img, grid.qty_box, empty_std):
-                line.append((None, 0))
+            if img.size == 0:
+                line.append((None, 0, ref))
+                continue
+            if is_covered(img):
+                line.append((UNKNOWN, 0, ref))
+                continue
+            if is_empty(img, grid.qty_box, empty_std):
+                line.append((None, 0, ref))
                 continue
 
             sig = signature(img, grid.qty_box)
             if itemdb is not None and itemdb.ready:
-                iid = _identify_slot(catalog, itemdb, sig, img, slot_patch(view, u, v), match_threshold)
+                patch = slot_patch(view, u, v)
+                ignore = None
+                if patch is not None and numbers[i - 1].text:
+                    ox, oy = digits.last_offset
+                    ignore = digits.digit_mask(numbers[i - 1], patch.shape[:2], -4 - ox, -4 - oy)
+                iid = _identify_slot(catalog, itemdb, sig, img, patch, match_threshold, ignore)
             else:
                 iid = catalog.match(sig, img, match_threshold)
-            line.append((iid, n or 1))
+            line.append((iid, n or 1, ref))
         out.append(line)
     return out
 
 
-def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float) -> str:
+def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float, ignore=None) -> str:
     """Catalog id for a slot, using the item database to tell apart look-alikes (e.g. ores that differ
     only in colour) and to give each database item one catalog id.
 
@@ -220,10 +270,15 @@ def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float) 
             return iid                      # named by you (or nothing to check with): trust the icon
         else:
             unnamed = iid                   # seen before but never named: try to name it now
-    m = itemdb.identify(patch) if patch is not None else None
+    m = itemdb.identify(patch, ignore) if patch is not None else None
     if m is None:
-        # Not in the database (or unclear): fall back to icon signatures, unnamed.
-        return cands[0] if cands else catalog._add(sig, img)
+        # Not in the database, or several items share this icon (scrolls): stays unnamed, and the
+        # look-alike names are kept so the review page can offer them.
+        iid = cands[0] if cands else catalog._add(sig, img)
+        if patch is not None and not catalog.items[iid].get("name") and "candidates" not in catalog.items[iid]:
+            catalog.items[iid]["candidates"] = itemdb.ties(patch)
+            catalog.save()
+        return iid
     known = catalog.by_db(m.item_id)
     if known:
         if known not in cands:
@@ -240,7 +295,10 @@ def _rows_agree(a_rows, b_rows) -> bool:
     one slot, a hover highlight), but small overlaps must match exactly. Needs at least one item."""
     compared = mismatched = 0
     for ra, rb in zip(a_rows, b_rows):
-        for (ia, _), (ib, _) in zip(ra, rb):
+        for sa, sb in zip(ra, rb):
+            ia, ib = sa[0], sb[0]
+            if UNKNOWN in (ia, ib):
+                continue                  # covered on one page: no evidence either way
             if ia or ib:
                 compared += 1
                 mismatched += ia != ib
@@ -250,11 +308,23 @@ def _rows_agree(a_rows, b_rows) -> bool:
 def _contained(merged, page) -> bool:
     """True if the whole page already appears somewhere in `merged` (a page captured twice, a tab
     visited again, or scrolled back up)."""
+    return _find(merged, page) is not None
+
+
+def _find(merged, page) -> int | None:
     n = len(page)
-    return any(_rows_agree(merged[i:i + n], page) for i in range(len(merged) - n + 1))
+    return next((i for i in range(len(merged) - n + 1) if _rows_agree(merged[i:i + n], page)), None)
 
 
-def merge_pages(pages: list[list[list[Slot]]]) -> list[list[Slot]]:
+def _fill(merged_rows, page_rows):
+    """Slots covered on one page but visible on the other: take the visible one."""
+    for mr, pr in zip(merged_rows, page_rows):
+        for c, (ms, ps) in enumerate(zip(mr, pr)):
+            if ms[0] == UNKNOWN and ps[0] != UNKNOWN:
+                mr[c] = ps
+
+
+def merge_pages(pages: list[list[list[Slot]]], log: list | None = None) -> list[list[Slot]]:
     """Stitch captured pages into one list of rows, counting every row once.
 
     - A page that already appears in what we have is skipped (captured twice, tab revisited, scrolled back).
@@ -263,15 +333,24 @@ def merge_pages(pages: list[list[list[Slot]]]) -> list[list[Slot]]:
     - No overlap: a new tab (or a jump), so the whole page is added.
     """
     merged: list[list[Slot]] = []
-    for page in pages:
-        if merged and _contained(merged, page):
+    for n, page in enumerate(pages, 1):
+        at = _find(merged, page) if merged else None
+        if at is not None:
+            _fill(merged[at:at + len(page)], page)
+            if log is not None:
+                log.append(f"page {n}: already seen, skipped")
             continue
         best = 0
         for k in range(min(len(merged), len(page)), 0, -1):
             if _rows_agree(merged[-k:], page[:k]):
                 best = k
                 break
+        if best:
+            _fill(merged[-best:], page[:best])
         merged.extend(list(r) for r in page[best:])
+        if log is not None:
+            log.append(f"page {n}: " + (f"overlaps {best} rows, added {len(page) - best}" if best
+                                        else f"no overlap, added all {len(page)} rows"))
     return merged
 
 
@@ -335,7 +414,8 @@ def totals(tabs: dict[str, list[list[Slot]]]) -> dict[str, int]:
     out: dict[str, int] = {}
     for rows in tabs.values():
         for row in rows:
-            for iid, n in row:
-                if iid:
+            for slot in row:
+                iid, n = slot[0], slot[1]
+                if iid and iid != UNKNOWN:
                     out[iid] = out.get(iid, 0) + n
     return out

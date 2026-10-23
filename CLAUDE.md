@@ -32,6 +32,12 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              by min_ratio 1.25. inventory._identify_slot: catalog signature -> fast re-check against the
              item's db icon + its stored look-alike neighbours -> else full identify; one catalog id per
              db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
+review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
+             items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
+             ignore_item/item/item_db), local http.server + data/review.html. Slot/status fixes live in
+             <snapshot>/fixes.json, applied by snapshot.apply_fixes in compare(). Prices: catalog "price"
+             = user's, "npc_price" = NPC; Catalog.price() picks. Slots under a tooltip (is_covered) are
+             UNKNOWN "?": not counted, ignored when matching pages, filled from an overlapping page.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

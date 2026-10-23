@@ -30,7 +30,7 @@ grindcap-gui = "grindcap.gui:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-grindcap = ["data/*.npz"]
+grindcap = ["data/*.npz", "data/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -170,9 +170,61 @@ class ItemDB:
         out.sort()
         return out
 
-    def identify(self, patch: np.ndarray) -> Match | None:
-        """The item in this slot, or None if no icon matches clearly."""
+    def ties(self, patch: np.ndarray, ratio: float = 1.05, limit: int = 40) -> list[int]:
+        """Items whose icons fit this slot as well as the best one: several items drawn with the very
+        same icon, like scrolls. One id per name; [] unless at least two such items fit well."""
         ranked = self.rank(patch)
+        if not ranked or ranked[0][0] > 0.6 * self.max_score:
+            return []
+        cut = ranked[0][0] * ratio
+        out, names = [], set()
+        for s, i in ranked:
+            if s > cut or len(out) >= limit:
+                break
+            if self.items[i]["name"] not in names:
+                names.add(self.items[i]["name"])
+                out.append(i)
+        return out if len(out) > 1 else []
+
+    def search(self, text: str, limit: int = 30) -> list[tuple[int, str]]:
+        t = text.lower().strip()
+        hits = [(i, it["name"]) for i, it in self.items.items() if t and t in it["name"].lower()]
+        return sorted(hits, key=lambda h: (not h[1].lower().startswith(t), len(h[1]), h[1]))[:limit]
+
+    def icon_path(self, item_id: int) -> Path:
+        return self.icons_dir / f"{item_id}.png"
+
+    def rescore(self, patch: np.ndarray, ignore: np.ndarray, ids) -> list[tuple[float, int]]:
+        """Like rank() for a few ids, leaving out patch pixels marked in `ignore` (the stack number)."""
+        patch = patch.astype(np.float32)
+        keep = (~ignore).astype(np.float32)
+        out = []
+        for iid in ids:
+            img, mask = self._load_icons()[iid]
+            h, w = img.shape[:2]
+            m1 = mask[..., 0]
+            best = None
+            for y in range(patch.shape[0] - h + 1):
+                for x in range(patch.shape[1] - w + 1):
+                    m = m1 * keep[y:y + h, x:x + w]
+                    n = float(m.sum())
+                    if n < 0.5 * float(m1.sum()):
+                        continue
+                    sc = float((((patch[y:y + h, x:x + w] - img) ** 2).sum(axis=2) * m).sum()) / (3 * n)
+                    if best is None or sc < best:
+                        best = sc
+            if best is not None:
+                out.append((best, iid))
+        return sorted(out)
+
+    def identify(self, patch: np.ndarray, ignore: np.ndarray | None = None) -> Match | None:
+        """The item in this slot, or None if no icon matches clearly. With `ignore` (pixels of the
+        stack number), the closest few icons are compared again without those pixels: big stacks
+        ("1000") cover enough of an icon to blur look-alikes such as bow and crossbow arrows."""
+        ranked = self.rank(patch)
+        if ignore is not None and ignore.any() and ranked:
+            top = ranked[:12]
+            ranked = self.rescore(patch, ignore, [i for _, i in top]) + ranked[12:]
         if not ranked:
             return None
         s0, best = ranked[0]

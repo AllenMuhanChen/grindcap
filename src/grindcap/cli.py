@@ -14,6 +14,7 @@ Before/after mode (simpler, no live tracking):
   grindcap snap start             capture EXP and mesos, then page through your inventory (F8/F9/F10)
   grindcap snap end               same, after grinding
   grindcap compare                EXP/hr, mesos/hr and every item gained or used, per hour
+  grindcap review [SESSION]       fix misread items, names and prices of a session (browser page)
   grindcap reread [FOLDER...]     read saved snapshots again from their screenshots (after an update)
   grindcap teach-digits           check the stack numbers it reads, correct any that are wrong
   grindcap items                  list known item icons and their names/prices
@@ -237,6 +238,9 @@ def cmd_reread(cfg, a):
         n = sum(len(v) for v in pages.values())
         print(f"{folder}: {n} pages, {len(snap['items'])} kinds of item, "
               f"{sum(snap['items'].values())} items (was {sum(old['items'].values())})")
+        for tab, log in snap.get("merge_log", {}).items():
+            for line in log:
+                print(f"  {line}")
 
 
 def cmd_itemdb(cfg, a):
@@ -289,18 +293,36 @@ def cmd_identify(cfg, a):
     print(f"Named {named} items. Name the rest with `grindcap label ITEM-ID --name ...`.")
 
 
+def cmd_review(cfg, a):
+    """Open the review page (fix misread items, set prices) and keep it running until Ctrl+C."""
+    from .review import serve
+
+    httpd = serve(cfg, a.session, open_browser=not a.no_browser, port=a.port)
+    print(f"Review page: {httpd.url}  (Ctrl+C to stop)")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        httpd.shutdown()
+
+
 def cmd_items(cfg, a):
     cat = _catalog(cfg)
     if not cat.items:
         print("No items yet. Take a snapshot first.")
     for iid, info in cat.items.items():
-        print(f"{iid}  {info.get('name') or '(no name)':<28} price {info.get('price') if info.get('price') is not None else '-'}"
+        pr = cat.price(iid)
+        src = "yours" if info.get("price") is not None else ("NPC" if pr is not None else "")
+        print(f"{iid}  {info.get('name') or '(no name)':<28} price {pr if pr is not None else '-'} {src:<5}"
               f"   icon: {cat.icons_dir / (iid + '.png')}")
 
 
 def cmd_label(cfg, a):
     cat = _catalog(cfg)
     cat.label(a.item, a.name, a.price)
+    if a.npc_price:
+        cat.items[a.item]["price"] = None
+        cat.save()
     print(f"{a.item}: {cat.items[a.item]}")
 
 
@@ -439,6 +461,12 @@ def main(argv=None):
 
     sub.add_parser("items", help="list known item icons").set_defaults(fn=cmd_items)
 
+    sp = sub.add_parser("review", help="review a session in your browser: fix misread slots, names, prices")
+    sp.add_argument("session", nargs="?", help="end snapshot folder name (default: the latest session)")
+    sp.add_argument("--port", type=int, default=0)
+    sp.add_argument("--no-browser", action="store_true")
+    sp.set_defaults(fn=cmd_review)
+
     sp = sub.add_parser("itemdb", help="download item names and icons from maplestory.io")
     sp.add_argument("--update", action="store_true", help="download again")
     sp.set_defaults(fn=cmd_itemdb)
@@ -460,7 +488,8 @@ def main(argv=None):
     sp = sub.add_parser("label", help="name and price an item id")
     sp.add_argument("item")
     sp.add_argument("--name")
-    sp.add_argument("--price", type=float, help="mesos each (sell price, or what it saves you)")
+    sp.add_argument("--price", type=float, help="your price, mesos each (the NPC price is kept)")
+    sp.add_argument("--npc-price", action="store_true", help="go back to the NPC sell price")
     sp.set_defaults(fn=cmd_label)
 
     a = p.parse_args(argv)

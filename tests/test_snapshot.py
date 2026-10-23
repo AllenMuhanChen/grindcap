@@ -323,9 +323,10 @@ def test_items_named_from_item_database(tmp_path):
     c = cfg()
     cat = Catalog(tmp_path / "data")
     rows = read_page(img, Grid.from_cfg(c["inventory"]), cat, StackDigits(), itemdb=db)
-    got = [(cat.name(i), n) for row in rows for i, n in row if i]
+    got = [(cat.name(s[0]), s[1]) for row in rows for s in row if s[0]]
     assert got[:5] == [("Snail Shell", 13), ("Blue Snail Shell", 5), ("Mushroom Spore", 40),
                        ("Snail Shell", 7), ("Pig's Ribbon", 2)]
     assert got[5][1] == 3 and got[5][0].startswith("item-")        # not in the database: stays unnamed
     assert got[6] == ("Iron Ore", 9)                               # look-alike told apart by colour
-    assert cat.items[cat.by_db(4000001)]["price"] == 1             # NPC price filled in
+    assert cat.price(cat.by_db(4000001)) == 1                      # NPC price filled in
+    assert cat.items[cat.by_db(4000001)]["price"] is None          # ...without becoming "your" price

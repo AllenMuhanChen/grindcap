@@ -14,6 +14,7 @@ import queue
 import threading
 import traceback
 import webbrowser
+from pathlib import Path
 
 
 def main(config_path: str = "config.yaml"):
@@ -54,10 +55,11 @@ def main(config_path: str = "config.yaml"):
     b_page = ttk.Button(frm, text="Capture page (F8)", command=lambda: run_bg(do_page))
     b_fin = ttk.Button(frm, text="Finish (F10)", command=lambda: run_bg(do_finish))
     b_cancel = ttk.Button(frm, text="Cancel", command=lambda: cancel())
+    b_review = ttk.Button(frm, text="Review / fix sessions", command=lambda: review())
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
 
     def layout(collecting: bool):
-        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk):
+        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review):
             w.grid_remove()
         if collecting:
             b_page.grid(row=2, column=0, sticky="ew", padx=2)
@@ -68,6 +70,7 @@ def main(config_path: str = "config.yaml"):
             b_start.grid(row=2, column=0, sticky="ew", padx=2)
             b_end.grid(row=2, column=1, sticky="ew", padx=2)
             b_cmp.grid(row=2, column=2, sticky="ew", padx=2)
+            b_review.grid(row=3, column=0, columnspan=3, sticky="ew", padx=2, pady=(4, 0))
 
     # --- work that touches the screen or OCR runs off the UI thread ---
     busy = threading.Lock()
@@ -106,6 +109,21 @@ def main(config_path: str = "config.yaml"):
     def do_compare():
         return ("compared",) + flow.compare()
 
+    server = {}
+
+    def review(session_id=None):
+        """Open the review page in the browser (one local server, started on first use)."""
+        from .review import serve
+
+        try:
+            if "httpd" not in server:
+                server["httpd"] = serve(cfg, open_browser=False)
+            url = server["httpd"].url + (f"?session={session_id}" if session_id else "")
+            webbrowser.open(url)
+            status.set("Review page opened in your browser. Fixes are saved as you make them.")
+        except Exception as e:
+            status.set(f"Problem: {e}")
+
     def begin(which):
         run_bg(do_start, which)
 
@@ -132,6 +150,8 @@ def main(config_path: str = "config.yaml"):
             status.set(f"Saved the {info['which']} snapshot ({info['pages']} pages, {info['kinds']} kinds of item, "
                        f"{info['count']} items in total).")
             readout.set(f"EXP {info['exp']}   Level {info['level']}   Mesos {info['mesos']}")
+            if info["which"] == "end":
+                status.set(status.get() + " Press Compare, or Review / fix to check what changed.")
         elif kind == "compared":
             _, text, report = result
             show_text("Comparison", text, report)
@@ -145,6 +165,8 @@ def main(config_path: str = "config.yaml"):
         t.configure(state="disabled")
         t.pack(padx=6, pady=6)
         if report:
+            ttk.Button(win, text="Review and fix what changed",
+                       command=lambda: review(Path(report).parent.name)).pack(pady=(0, 4))
             ttk.Button(win, text="Open report with item icons",
                        command=lambda: webbrowser.open(report.resolve().as_uri())).pack(pady=(0, 6))
 

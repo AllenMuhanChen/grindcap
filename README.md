@@ -111,6 +111,25 @@ grindcap label item-001 --name "Green Mushroom Cap" --price 14
 
 `label` also overrides an automatic name or price (for potions you'd rather value at what they save you than at the NPC price). Snapshots taken before this update: `grindcap reread` names their items too.
 
+### Review and fix a session
+
+Some slots will be read wrong: the mouse cursor or a menu over an item, a tooltip covering slots, scrolls that share one icon. Open the review page, right after **End snapshot** (the **Review / fix sessions** button, or from the comparison window) or any time later:
+
+```
+grindcap review            # latest session; pick older ones from the Session menu
+```
+
+It opens in your browser and lists only the items whose count changed. Everything saves as you go:
+
+- **Name and price:** type a name, or your own price (e.g. what a potion saves you). The NPC sell price is always kept: clear your price, or press "use NPC", to go back to it.
+- **Delete:** a misread item that shouldn't count. Restore brings it back.
+- **Click a row** to see the slots it was read from, as pictures from the start and end screenshots. Per slot: fix the count, say what the item really is (pick from your items or search the game's item list), or ignore that one slot.
+- **Same icon, different items** (scrolls, cakes): the row says how many items share the icon. Pick one for the whole row, or set each slot.
+- **Slots hidden under a tooltip** aren't counted. If a later page showed them, they're filled in from it; otherwise they're listed so you can say what they were.
+- **EXP, level and mesos** of each snapshot can be corrected too.
+
+Names and prices apply to every session. Slot and status fixes belong to that session and are kept in `fixes.json` next to each snapshot, so `grindcap reread` doesn't undo them. `grindcap compare` uses all of them.
+
 If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.
 
 Pages are stitched together so every slot counts once: scroll overlap is matched by item icons, and a view captured twice (or a tab visited again) is skipped, even if one slot looks different because of the cursor. Each snapshot folder keeps its screenshots, so after an update `grindcap reread` reads the latest start and end snapshots again, and `grindcap compare` then uses the new readings.

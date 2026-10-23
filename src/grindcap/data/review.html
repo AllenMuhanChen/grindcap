@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grindcap review</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #6d6a63; --line: #e3e0d8;
+  --accent: #2f6fdb; --good: #1f8a4c; --bad: #c2413a; --warn: #b7791f; --chip: #efede7;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #17171a; --panel: #212126; --ink: #ecebe7; --muted: #9a978f; --line: #34343b;
+          --accent: #6ea0ff; --good: #4cc27f; --bad: #ff7b72; --warn: #e3b341; --chip: #2b2b31; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+select, input { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+input[type=number] { width: 92px; }
+main { padding: 16px 20px 60px; max-width: 1150px; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-width: 120px; }
+.stat b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+section { margin-top: 18px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 8px; }
+table { border-collapse: collapse; width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: middle; font-variant-numeric: tabular-nums; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--chip); }
+td.l, th.l { text-align: left; }
+tr.item { cursor: pointer; }
+tr.item:hover td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+img.icon { width: 32px; height: 32px; image-rendering: pixelated; display: block; }
+.pos { color: var(--good); } .neg { color: var(--bad); }
+.tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--chip); color: var(--muted); margin-left: 6px; }
+.tag.warn { color: var(--warn); }
+.name { width: 230px; }
+.detail td { background: var(--bg); text-align: left; }
+.slots { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 0; }
+.col { flex: 1 1 420px; }
+.col h3 { margin: 4px 0 8px; font-size: 13px; }
+.slot { display: flex; gap: 10px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; margin-bottom: 6px; }
+.slot.fixed { border-color: var(--accent); }
+.slot.ignored { opacity: .55; }
+.slot img { width: 78px; height: 78px; image-rendering: pixelated; border-radius: 4px; }
+.slot .f { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; font-size: 13px; }
+.muted { color: var(--muted); }
+button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: inherit; border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.search { position: relative; display: inline-block; }
+.hits { position: absolute; z-index: 9; top: 100%; left: 0; min-width: 260px; max-height: 260px; overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.15); }
+.hits div { display: flex; gap: 8px; align-items: center; padding: 4px 8px; cursor: pointer; }
+.hits div:hover { background: var(--chip); }
+.hits img { width: 24px; height: 24px; image-rendering: pixelated; }
+#msg { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 6px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+#msg.show { opacity: .92; }
+.status td input { width: 110px; }
+.hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1>grindcap review</h1>
+    <label>Session <select id="session"></select></label>
+    <label class="muted"><input type="checkbox" id="showall"> also show items I fixed or deleted</label>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+<main>
+  <section>
+    <h2>Status read from the screen</h2>
+    <table class="status" id="status"></table>
+    <p class="hint">Type a value to correct a misread; clear it to go back to what was read.</p>
+  </section>
+  <section id="coveredSec" hidden>
+    <h2>Slots hidden under a tooltip</h2>
+    <p class="hint" style="margin:0 0 8px">These weren't counted. If one wasn't visible on another page either, say what it is
+      (and the count), or ignore it.</p>
+    <div class="slots" id="covered"></div>
+  </section>
+  <section>
+    <h2>Items that changed</h2>
+    <table id="items"></table>
+    <p class="hint">Click a row to see the slots it was read from. Delete removes a misread item from this session
+      (Restore brings it back); to drop just one slot, use "Ignore this slot" there. Names and prices you set apply to every session;
+      slot fixes apply to this session's snapshots only.</p>
+  </section>
+</main>
+<div id="msg"></div>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const fmt = v => v === null || v === undefined ? "–" : (typeof v === "number" ? Math.round(v).toLocaleString() : v);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+let D = null, SID = null, open = new Set();
+
+function toast(t) { const m = $("#msg"); m.textContent = t; m.classList.add("show"); clearTimeout(m._t); m._t = setTimeout(() => m.classList.remove("show"), 1800); }
+
+async function api(path, body) {
+  const r = await fetch(path, body ? {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({...body, session: SID})} : {});
+  const j = await r.json();
+  if (j && j.error) { toast(j.error); throw new Error(j.error); }
+  return j;
+}
+async function edit(e, done = "Saved") { await api("/api/edit", e); await load(); toast(done); }
+
+async function init() {
+  const {sessions, selected} = await api("/api/sessions");
+  const sel = $("#session");
+  sel.innerHTML = sessions.map(s => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join("");
+  const want = new URLSearchParams(location.search).get("session") || selected;
+  if (want && sessions.some(s => s.id === want)) sel.value = want;
+  SID = sel.value;
+  sel.onchange = () => { SID = sel.value; open.clear(); load(); };
+  $("#showall").onchange = render;
+  await load();
+}
+
+async function load() { D = await api("/api/data?session=" + encodeURIComponent(SID)); render(); }
+
+function render() {
+  const s = D.summary;
+  $("#stats").innerHTML = [
+    ["Minutes", s.minutes], ["EXP", s.exp], ["EXP / hr", s.exp_per_hr], ["Mesos / hr", s.mesos_per_hr],
+    ["Items gained", s.items_gained_value], ["Items used", s.items_used_value], ["Net / hr incl. items", s.net_per_hr]
+  ].map(([k, v]) => `<div class="stat"><b>${fmt(v)}</b><span>${k}</span></div>`).join("");
+
+  const st = D.status;
+  const field = (snap, f) => {
+    const v = st[snap][f];
+    return `<input type="number" data-snap="${snap}" data-field="${f}" placeholder="${v.read ?? "not read"}" value="${v.fixed ?? ""}">`;
+  };
+  $("#status").innerHTML = `<tr><th class="l">Snapshot</th><th>Level</th><th>EXP</th><th>Mesos</th></tr>` +
+    ["start", "end"].map(n => `<tr><td class="l">${n} <span class="muted">${esc(st[n].when || "")}</span></td>
+      <td>${field(n, "level")}</td><td>${field(n, "exp")}</td><td>${field(n, "mesos")}</td></tr>`).join("");
+  $("#status").querySelectorAll("input").forEach(i => i.onchange = () => edit({op: "status", snap: i.dataset.snap, field: i.dataset.field, value: i.value}));
+
+  const cov = D.covered || {start: [], end: []};
+  $("#coveredSec").hidden = !(cov.start.length || cov.end.length);
+  const none = {candidates: []};
+  $("#covered").innerHTML = ["start", "end"].map(snap => `<div class="col"><h3>${snap === "start" ? "Start" : "End"} snapshot</h3>` +
+    (cov[snap].length ? cov[snap].map(sl => slotBox(none, snap, sl)).join("") : `<p class="muted">None.</p>`) + `</div>`).join("");
+  wireSlots($("#covered"));
+
+  const rows = D.items.filter(it => it.change !== 0 || $("#showall").checked);
+  let h = `<tr><th></th><th class="l">Item</th><th>Before</th><th>After</th><th>Change</th><th>Per hr</th><th>Price</th><th>Value</th><th></th></tr>`;
+  for (const it of rows) {
+    const tags = [];
+    if (!it.name) tags.push(`<span class="tag warn">unnamed</span>`);
+    if (it.candidates.length > 1) tags.push(`<span class="tag warn">${it.candidates.length} items share this icon</span>`);
+    if (it.auto_named) tags.push(`<span class="tag" title="matched ${it.db_match.ratio}x better than ${esc(it.db_match.runner_up)}">auto</span>`);
+    const fixed = [...it.slots.start, ...it.slots.end].filter(x => x.fixed).length;
+    if (it.deleted) tags.push(`<span class="tag warn">deleted from this session</span>`);
+    else if (fixed) tags.push(`<span class="tag">${fixed} slot fix${fixed > 1 ? "es" : ""}</span>`);
+    h += `<tr class="item" data-id="${esc(it.id)}">
+      <td><img class="icon" src="/icon?id=${encodeURIComponent(it.id)}" alt=""></td>
+      <td class="l"><input class="name" data-id="${esc(it.id)}" value="${esc(it.name)}" placeholder="${esc(it.id)}"> ${tags.join("")}</td>
+      <td>${fmt(it.before)}</td><td>${fmt(it.after)}</td>
+      <td class="${it.change > 0 ? "pos" : it.change < 0 ? "neg" : ""}">${it.change > 0 ? "+" : ""}${fmt(it.change)}</td>
+      <td>${fmt(it.per_hr)}</td>
+      <td><input type="number" class="price" data-id="${esc(it.id)}" value="${it.custom_price ?? ""}"
+             placeholder="${it.npc_price ?? "–"}" title="${it.npc_price != null ? "NPC sell price " + it.npc_price : "no NPC price known"}">
+          ${it.custom_price != null ? `<div><button class="npc" data-id="${esc(it.id)}">${it.npc_price != null ? "use NPC " + it.npc_price : "clear"}</button></div>`
+                                    : `<div class="muted" style="font-size:11px">${it.npc_price != null ? "NPC price" : ""}</div>`}</td>
+      <td>${fmt(it.value)}</td>
+      <td>${it.deleted ? `<button class="undel" data-id="${esc(it.id)}">Restore</button>`
+                       : `<button class="del" data-id="${esc(it.id)}" title="A misread: don't count it in this session">Delete</button>`}</td></tr>`;
+    if (open.has(it.id)) h += `<tr class="detail"><td colspan="9">${detail(it)}</td></tr>`;
+  }
+  if (!rows.length) h += `<tr><td colspan="9" class="l muted">No item counts changed.</td></tr>`;
+  const t = $("#items"); t.innerHTML = h;
+
+  t.querySelectorAll("tr.item").forEach(tr => tr.onclick = e => {
+    if (e.target.closest("input,select,button,.search")) return;
+    const id = tr.dataset.id; open.has(id) ? open.delete(id) : open.add(id); render();
+  });
+  t.querySelectorAll("input.name").forEach(i => i.onchange = () => edit({op: "item", id: i.dataset.id, name: i.value}));
+  t.querySelectorAll("input.price").forEach(i => i.onchange = () => edit({op: "item", id: i.dataset.id, price: i.value}));
+  t.querySelectorAll("select.cand").forEach(s => s.onchange = () => s.value && edit({op: "item_db", id: s.dataset.id, db_id: s.value}));
+  t.querySelectorAll("button.npc").forEach(b => b.onclick = () => edit({op: "item", id: b.dataset.id, price: ""}, "Back to the NPC price"));
+  t.querySelectorAll("button.del").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: true},
+    "Deleted from this session. Tick 'also show items I fixed or deleted' to restore it."));
+  t.querySelectorAll("button.undel").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: false}));
+  wireSlots(t);
+}
+
+function wireSlots(t) {
+  t.querySelectorAll("select.assign").forEach(s => s.onchange = () => {
+    const v = s.value, b = {op: "slot", snap: s.dataset.snap, ref: s.dataset.ref};
+    if (v === "__ignore") edit({...b, ignore: true});
+    else if (v.startsWith("db:")) edit({op: "slot_db", snap: b.snap, ref: b.ref, db_id: v.slice(3), ignore: false});
+    else if (v) edit({...b, item: v, ignore: false});
+  });
+  t.querySelectorAll("input.qty").forEach(i => i.onchange = () => edit({op: "slot", snap: i.dataset.snap, ref: i.dataset.ref, qty: i.value}));
+  t.querySelectorAll("button.reset").forEach(b => b.onclick = () => edit({op: "reset", snap: b.dataset.snap, ref: b.dataset.ref}));
+  t.querySelectorAll(".search input").forEach(wireSearch);
+}
+
+function detail(it) {
+  let h = "";
+  if (it.candidates.length > 1)
+    h += `<p>These items all use this icon. If every slot is the same one, pick it:
+      <select class="cand" data-id="${esc(it.id)}"><option value="">choose…</option>${it.candidates.map(c => `<option value="${c.db_id}">${esc(c.name)}</option>`).join("")}</select>
+      Otherwise set each slot below.</p>`;
+  h += `<div class="slots">` + ["start", "end"].map(snap => `<div class="col"><h3>${snap === "start" ? "Start" : "End"} snapshot</h3>` +
+    (it.slots[snap].length ? it.slots[snap].map(sl => slotBox(it, snap, sl)).join("") : `<p class="muted">Not in this snapshot.</p>`) + `</div>`).join("") + `</div>`;
+  return h;
+}
+
+function slotBox(it, snap, sl) {
+  const opts = [`<option value="">${sl.ignored ? "ignored" : "this is…"}</option>`,
+    ...it.candidates.map(c => `<option value="db:${c.db_id}">${esc(c.name)}</option>`),
+    ...D.catalog.filter(([id]) => id !== sl.item).map(([id, n]) => `<option value="${esc(id)}">${esc(n)}${n === id ? "" : ` (${esc(id)})`}</option>`),
+    `<option value="__ignore">Ignore this slot (cursor, menu, misread)</option>`];
+  const readAs = sl.read_item !== sl.item || sl.ignored ? `<span class="muted">read as ${esc(nameOf(sl.read_item))} ×${sl.read_qty}</span>` : "";
+  return `<div class="slot ${sl.fixed ? "fixed" : ""} ${sl.ignored ? "ignored" : ""}">
+    <img src="/crop?session=${encodeURIComponent(SID)}&snap=${snap}&ref=${encodeURIComponent(sl.ref)}" alt="">
+    <div class="f">
+      <span class="muted">Slot</span><span>${esc(sl.ref.replace(":", " · "))} ${readAs}</span>
+      <span class="muted">Count</span><span><input type="number" class="qty" data-snap="${snap}" data-ref="${esc(sl.ref)}" value="${sl.qty}"></span>
+      <span class="muted">Item</span><span><select class="assign" data-snap="${snap}" data-ref="${esc(sl.ref)}">${opts.join("")}</select>
+        ${D.has_itemdb ? `<span class="search"><input placeholder="search item list…" data-snap="${snap}" data-ref="${esc(sl.ref)}"><div class="hits" hidden></div></span>` : ""}</span>
+      <span></span><span>${sl.fixed ? `<button class="reset" data-snap="${snap}" data-ref="${esc(sl.ref)}">Undo fix</button>` : ""}</span>
+    </div></div>`;
+}
+
+function nameOf(id) {
+  if (id === "?") return "hidden slot";
+  const c = D.catalog.find(x => x[0] === id); return c ? c[1] : (id || "nothing");
+}
+
+function wireSearch(inp) {
+  const box = inp.nextElementSibling;
+  let t = null;
+  inp.oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const q = inp.value.trim();
+      if (q.length < 2) { box.hidden = true; return; }
+      const hits = await api("/api/search?q=" + encodeURIComponent(q));
+      box.innerHTML = hits.map(x => `<div data-id="${x.db_id}"><img src="/dbicon?id=${x.db_id}" alt="">${esc(x.name)}</div>`).join("") || `<div class="muted">No match</div>`;
+      box.hidden = false;
+      box.querySelectorAll("div[data-id]").forEach(d => d.onclick = () => edit({op: "slot_db", snap: inp.dataset.snap, ref: inp.dataset.ref, db_id: d.dataset.id, ignore: false}));
+    }, 200);
+  };
+  inp.onblur = () => setTimeout(() => box.hidden = true, 200);
+}
+
+init().catch(e => toast(e.message));
+</script>
+</body>
+</html>

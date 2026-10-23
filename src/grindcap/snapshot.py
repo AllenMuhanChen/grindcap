@@ -61,16 +61,22 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     inv = cfg["inventory"]
     digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
     itemdb = open_itemdb(cfg)
-    tabs, first_page = {}, None
+    tabs, first_page, boxes, merge_log = {}, None, {}, {}
     for tab, frames in tab_pages.items():
         pages = []
-        for f in frames:
+        for i, f in enumerate(frames, 1):
             fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
-            pages.append(read_page(f, Grid.from_cfg(fc["inventory"]), catalog, digits,
-                                   inv["empty_std"], inv["match_threshold"], itemdb))
+            grid = Grid.from_cfg(fc["inventory"])
+            key = f"{tab}_{i:02d}"                # = the screenshot's file name in the snapshot folder
+            pages.append(read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
+                                   itemdb, page_key=key))
+            for r, row in enumerate(grid.slot_boxes()):
+                for c, b in enumerate(row):
+                    boxes[f"{key}:r{r + 1}c{c + 1}"] = [int(v) for v in b]
             if first_page is None:
                 first_page = (f, fc)
-        tabs[tab] = merge_pages(pages)
+        tabs[tab] = merge_pages(pages, log := [])
+        merge_log[tab] = log
     status = {}
     if status_frame is not None:
         status = read_status(shifted(cfg, status_frame, ("status",)), status_frame)
@@ -90,6 +96,10 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "status_raw": {k: v for k, v in status.items() if k.endswith("_raw")},
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},
         "items": totals(tabs),
+        "merge_log": merge_log,
+        # every counted slot, so single slots can be corrected later (see apply_fixes)
+        "slots": [{"ref": s[2], "item": s[0], "qty": s[1], "box": boxes.get(s[2])}
+                  for rows in tabs.values() for row in rows for s in row if s[0] and len(s) > 2],
     }
 
 
@@ -107,10 +117,43 @@ def save_snapshot(snap: dict, folder: Path, status_frame=None, tab_pages=None) -
 
 
 def load_snapshot(path: str | Path) -> dict:
+    """A saved snapshot, with your corrections (fixes.json next to it) attached as snap["fixes"]."""
     p = Path(path)
     if p.is_dir():
         p = p / "snapshot.json"
-    return json.loads(p.read_text())
+    snap = json.loads(p.read_text())
+    fx = p.parent / "fixes.json"
+    snap["fixes"] = json.loads(fx.read_text()) if fx.exists() else {}
+    snap["folder"] = str(p.parent)
+    return snap
+
+
+def save_fixes(folder: str | Path, fixes: dict):
+    (Path(folder) / "fixes.json").write_text(json.dumps(fixes, indent=2))
+
+
+def apply_fixes(snap: dict) -> dict:
+    """The snapshot as corrected: fixes["status"] overrides exp/mesos/level, fixes["slots"][ref] can
+    reassign a slot ({"item": id}), fix its count ({"qty": n}) or drop it ({"ignore": true})."""
+    fx = snap.get("fixes") or {}
+    out = dict(snap)
+    for k, v in (fx.get("status") or {}).items():
+        if v is not None:
+            out[k] = v
+            if k == "level":
+                out["level_read"] = True
+    if "slots" in snap:
+        sf = fx.get("slots") or {}
+        items: dict[str, int] = {}
+        for sl in snap["slots"]:
+            f = sf.get(sl["ref"], {})
+            if f.get("ignore"):
+                continue
+            iid, n = f.get("item", sl["item"]), f.get("qty", sl["qty"])
+            if iid and iid != "?":
+                items[iid] = items.get(iid, 0) + int(n)
+        out["items"] = items
+    return out
 
 
 def latest_snapshot(root: Path, label: str) -> Path | None:
@@ -134,6 +177,7 @@ def exp_gained(start: dict, end: dict) -> float | None:
 
 
 def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = None) -> dict:
+    start, end = apply_fixes(start), apply_fixes(end)
     hours = (minutes / 60) if minutes else (end["time"] - start["time"]) / 3600
     per_hr = (lambda v: round(v / hours, 1)) if hours > 0 else (lambda v: None)
     ids = sorted(set(start["items"]) | set(end["items"]))
@@ -143,7 +187,7 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
         if a == b:
             continue
         info = catalog.items.get(iid, {})
-        price = info.get("price")
+        price = catalog.price(iid)
         rows.append({"id": iid, "name": info.get("name") or iid, "before": a, "after": b, "change": b - a,
                      "per_hr": per_hr(b - a), "price": price,
                      "value": (b - a) * price if price is not None else None})

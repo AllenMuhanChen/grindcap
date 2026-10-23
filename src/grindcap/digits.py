@@ -192,6 +192,8 @@ class SlotReading:
 class StackDigits:
     """Stack-number reader. Built-in templates plus any you taught (saved in `path`)."""
 
+    hole_spread = 40.0   # grey levels; digit pixels vary less than this across examples
+
     def __init__(self, path: str | Path | None = None, builtin: Path = BUILTIN):
         self.path = Path(path) if path else None
         self.builtin, off = _load(builtin)
@@ -206,8 +208,15 @@ class StackDigits:
         for d in DIGITS:
             ex = self.taught.get(d, []) + self.builtin.get(d, [])
             if ex:
-                t = np.median(np.stack(ex), axis=0).astype(np.float32)
-                self.templates[d] = _Template(t, glyph_mask(t))
+                st = np.stack(ex)
+                t = np.median(st, axis=0).astype(np.float32)
+                m = glyph_mask(t)
+                if len(ex) >= 3:
+                    # Holes inside a digit show whatever icon is behind it: across examples they vary,
+                    # the digit's own pixels don't. Leave the varying ones out.
+                    spread = np.median(np.abs(st - t), axis=0)
+                    m &= spread < self.hole_spread
+                self.templates[d] = _Template(t, m)
 
     @property
     def ready(self) -> bool:
@@ -271,7 +280,27 @@ class StackDigits:
     def read_view(self, view: NativeView, origins: list[tuple[int, int]]) -> list[SlotReading]:
         """Read the stack number of each slot, given its native top-left."""
         ox, oy = self.locate(view, origins)
+        self.last_offset = (ox, oy)
         return [self.read_number(view, u + ox, v + oy) for u, v in origins]
+
+    def digit_mask(self, reading: "SlotReading", shape, u0: int, v0: int) -> np.ndarray:
+        """Pixels covered by this reading's digits (grown by 1 px), in an image whose top-left is
+        native pixel (u0, v0) relative to the slot origin's digit start. Used to keep stack numbers
+        out of icon matching."""
+        import cv2
+
+        m = np.zeros(shape, bool)
+        x = -u0
+        for d in reading.text:
+            t = self.templates.get(d)
+            if t is not None:
+                y0, x0 = -v0, x
+                ys, xs = np.nonzero(t.mask)
+                ys, xs = ys + y0, xs + x0
+                ok = (ys >= 0) & (ys < shape[0]) & (xs >= 0) & (xs < shape[1])
+                m[ys[ok], xs[ok]] = True
+            x += ADV[d]
+        return cv2.dilate(m.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
 
     def read_slots(self, frame, boxes, pitch_x: float, pitch_y: float) -> list[SlotReading]:
         """Read the stack number in every slot box (screen [x, y, w, h]); boxes[0] anchors the grid."""
