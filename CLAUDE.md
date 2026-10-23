@@ -39,6 +39,12 @@ review.py    Session review: list_sessions (end paired with latest start before 
              compare(); compare() also skips ids no longer in the catalog (purged). Prices: catalog "price"
              = user's, "npc_price" = NPC; Catalog.price() picks. Slots under a tooltip (is_covered) are
              UNKNOWN "?": not counted, ignored when matching pages, filled from an overlapping page.
+sessions.py  list_sessions (each end snapshot + latest start before it; id = end folder name), name/map/saved
+             overrides in <snapshot_dir>/sessions.json, default name "<map> · <start> · <min> min", delete
+             (keeps a start another session uses). review.py re-exports list_sessions.
+mapname.py   Minimap map name: template-match data/minimap_header.png ("MINI MAP" bar, 1920x1080; scaled
+             by frame height), Tesseract on the street + map lines, snapped to MCW map names (maps.json in
+             <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Stored as snapshot["map"].
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

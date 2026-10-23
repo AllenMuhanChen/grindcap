@@ -97,8 +97,9 @@ def main(config_path: str = "config.yaml"):
         st = flow.start(which)
         exp = st.get("exp")
         mes = st.get("mesos")
+        where = (st.get("map") or {}).get("name") or "map not read"
         return ("started", which, f"EXP {exp if exp is not None else '?'}   Level {st.get('level') or '?'}   "
-                                  f"Mesos {mes if mes is not None else '?'}   (via {source.method})")
+                                  f"Mesos {mes if mes is not None else '?'}\n{where}   (via {source.method})")
 
     def do_page():
         return ("page", flow.add_page())

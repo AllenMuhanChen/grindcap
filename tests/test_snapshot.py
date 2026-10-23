@@ -330,3 +330,17 @@ def test_items_named_from_item_database(tmp_path):
     assert got[6] == ("Iron Ore", 9)                               # look-alike told apart by colour
     assert cat.price(cat.by_db(4000001)) == 1                      # NPC price filled in
     assert cat.items[cat.by_db(4000001)]["price"] is None          # ...without becoming "your" price
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+@pytest.mark.parametrize("name", ["game_frame.png", "use_tab_tooltip.png"])
+def test_map_name_from_minimap(name):
+    from pathlib import Path
+
+    from grindcap.mapname import read_map
+
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / name))
+    m = read_map(frame, [{"streetName": "Victoria Road", "name": "The Rain-Forest East of Henesys"},
+                         {"streetName": "Victoria Road", "name": "The Rain-Forest East of Henesys 2"}])
+    assert (m["street"], m["name"], m["matched"]) == ("Victoria Road", "The Rain-Forest East of Henesys", True)
+    assert read_map(np.zeros_like(frame)) is None      # no minimap on screen

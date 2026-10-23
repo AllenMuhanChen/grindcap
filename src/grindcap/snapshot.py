@@ -33,6 +33,24 @@ def read_status(cfg, frame) -> dict:
     return out
 
 
+def read_map_safe(cfg, frame):
+    """Map shown in the minimap ({"street", "name", ...}), or None. Never raises: a missing minimap
+    or OCR problem just means no map name (you can type it on the review page)."""
+    from .mapname import download_maps, load_maps, read_map
+
+    folder = Path(cfg["inventory"]["catalog_dir"]) / "itemdb"
+    try:
+        maps = load_maps(folder)
+        if not maps and (cfg["inventory"].get("itemdb") or {}).get("enabled", True):
+            try:
+                maps = download_maps(folder)
+            except Exception:
+                maps = []
+        return read_map(frame, maps, cfg["session"].get("tesseract_cmd"))
+    except Exception:
+        return None
+
+
 def open_itemdb(cfg, download: bool = True, progress=print):
     """The item database for naming items, downloading it the first time. None if turned off or offline."""
     from .itemdb import ItemDB
@@ -80,6 +98,8 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     status = {}
     if status_frame is not None:
         status = read_status(shifted(cfg, status_frame, ("status",)), status_frame)
+    map_frame = status_frame if status_frame is not None else (first_page[0] if first_page else None)
+    where = read_map_safe(cfg, map_frame) if map_frame is not None else None
     if first_page is not None and (cfg["readers"].get("mesos") or {}).get("box"):
         # The meso total lives in the inventory window, so read it from an inventory page.
         f, fc = first_page
@@ -94,6 +114,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "exp": status.get("exp"),
         "mesos": status.get("mesos"),
         "status_raw": {k: v for k, v in status.items() if k.endswith("_raw")},
+        "map": where,
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},
         "items": totals(tabs),
         "merge_log": merge_log,

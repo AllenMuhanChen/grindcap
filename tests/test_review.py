@@ -95,3 +95,28 @@ def test_custom_price_keeps_npc_price(tmp_path):
     assert cat.items["item-001"]["npc_price"] == 25
     apply_edit(s, e, cat, None, {"op": "item", "id": "item-001", "price": ""})   # back to NPC price
     assert Catalog(tmp_path / "data").price("item-001") == 25
+
+
+def test_session_names_saved_flag_and_delete(tmp_path):
+    from grindcap import sessions
+
+    _, root, s, e = setup(tmp_path)
+    d = json.loads((s / "snapshot.json").read_text())
+    d["map"] = {"street": "Victoria Road", "name": "The Rain-Forest East of Henesys"}
+    (s / "snapshot.json").write_text(json.dumps(d))
+    snap(root / "end-2", 7200, [])          # a second session sharing the same start
+    ss = {x["id"]: x for x in sessions.list_sessions(root)}
+    assert ss["end-1"]["map"] == "The Rain-Forest East of Henesys"
+    assert ss["end-1"]["name"].startswith("The Rain-Forest East of Henesys · ") and ss["end-1"]["name"].endswith("60 min")
+    sessions.update(root, "end-1", name="Pigs, FA test", saved=True, map="Pig Beach")
+    x = {x["id"]: x for x in sessions.list_sessions(root)}["end-1"]
+    assert (x["name"], x["map"], x["saved"], x["map_read"]) == ("Pigs, FA test", "Pig Beach", True,
+                                                                 "The Rain-Forest East of Henesys")
+    sessions.update(root, "end-1", name="", map="")      # back to automatic
+    x = {x["id"]: x for x in sessions.list_sessions(root)}["end-1"]
+    assert x["map"] == "The Rain-Forest East of Henesys" and x["saved"]
+    removed = sessions.delete(root, "end-1")
+    assert [p.split("/")[-1] for p in removed] == ["end-1"]      # start kept: end-2 still uses it
+    assert not e.exists() and s.exists()
+    sessions.delete(root, "end-2")
+    assert not s.exists() and sessions.list_sessions(root) == []

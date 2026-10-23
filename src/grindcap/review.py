@@ -23,29 +23,8 @@ from .inventory import Catalog
 from .snapshot import apply_fixes, compare, load_snapshot, save_fixes
 
 
-# ---------------------------------------------------------------- sessions
-
-def list_sessions(root: str | Path) -> list[dict]:
-    """Every end snapshot, paired with the latest start snapshot taken before it. Newest first."""
-    root = Path(root)
-
-    def when(p):
-        try:
-            return json.loads((p / "snapshot.json").read_text())["time"]
-        except Exception:
-            return 0
-
-    starts = sorted((when(p), p) for p in root.glob("start-*") if (p / "snapshot.json").exists())
-    out = []
-    for p in root.glob("end-*"):
-        if not (p / "snapshot.json").exists():
-            continue
-        t = when(p)
-        before = [s for ts, s in starts if ts <= t]
-        if before:
-            out.append({"id": p.name, "start": str(before[-1]), "end": str(p), "time": t,
-                        "label": f"{before[-1].name.replace('start-', '')} to {p.name.replace('end-', '')}"})
-    return sorted(out, key=lambda s: -s["time"])
+from . import sessions as sessions_mod
+from .sessions import list_sessions  # noqa: F401  (used here and by callers)
 
 
 # ---------------------------------------------------------------- the data the page shows
@@ -287,12 +266,19 @@ def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: i
                 if u.path == "/api/sessions":
                     return self._json({"sessions": list_sessions(root), "selected": session_id})
                 if u.path == "/api/data":
+                    if not list_sessions(root):
+                        return self._json({"empty": True})
                     s = session(q.get("session"))
                     with lock:
                         d = review_data(s["start"], s["end"], Catalog(cat_dir), itemdb)
                     d["session"] = s
                     d["has_itemdb"] = itemdb is not None
                     return self._json(d)
+                if u.path == "/api/maps":
+                    from .mapname import load_maps
+
+                    folder = Path(cat_dir) / "itemdb"
+                    return self._json(sorted({m.get("name") for m in load_maps(folder) if m.get("name")}))
                 if u.path == "/api/search":
                     hits = itemdb.search(q.get("q", "")) if itemdb else []
                     return self._json([{"db_id": i, "name": n} for i, n in hits])
@@ -319,6 +305,13 @@ def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: i
                     s = session(body.get("session"))
                     with lock:
                         apply_edit(s["start"], s["end"], Catalog(cat_dir), itemdb, body)
+                    return self._json({"ok": True})
+                if u.path == "/api/session":
+                    s = session(body.get("session"))
+                    with lock:
+                        if body.get("delete"):
+                            return self._json({"removed": sessions_mod.delete(root, s["id"])})
+                        sessions_mod.update(root, s["id"], **{k: body[k] for k in ("name", "map", "saved") if k in body})
                     return self._json({"ok": True})
                 self._send(404, b"")
             except Exception as e:

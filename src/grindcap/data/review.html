@@ -58,6 +58,13 @@ button:hover { border-color: var(--accent); }
 #msg { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 6px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 #msg.show { opacity: .92; }
 .status td input { width: 110px; }
+.sessbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 10px; }
+.sessbar input.sname { width: 380px; font-weight: 600; }
+.sessbar input.smap { width: 260px; }
+button.star { font-size: 15px; line-height: 1; padding: 3px 8px; }
+button.star.on { color: var(--warn); border-color: var(--warn); }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+.empty { padding: 40px 0; color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
 </style>
 </head>
@@ -66,11 +73,15 @@ button:hover { border-color: var(--accent); }
   <div class="bar">
     <h1>grindcap review</h1>
     <label>Session <select id="session"></select></label>
+    <label class="muted"><input type="checkbox" id="savedonly"> saved only</label>
     <label class="muted"><input type="checkbox" id="showall"> also show unchanged items I fixed</label>
   </div>
+  <div class="sessbar" id="sessbar"></div>
   <div class="stats" id="stats"></div>
 </header>
 <main>
+  <p class="empty" id="empty" hidden></p>
+  <div id="content">
   <section>
     <h2>Status read from the screen</h2>
     <table class="status" id="status"></table>
@@ -95,6 +106,7 @@ button:hover { border-color: var(--accent); }
     <p class="hint">Not counted in this session. Restore puts an item back. Purge removes it for good: from your item list
       and its saved icons, so it isn't counted in any session.</p>
   </section>
+  </div>
 </main>
 <div id="msg"></div>
 <script>
@@ -113,19 +125,65 @@ async function api(path, body) {
 }
 async function edit(e, done = "Saved") { await api("/api/edit", e); await load(); toast(done); }
 
-async function init() {
+let SESS = [], MAPS = [];
+
+async function loadSessions(want) {
   const {sessions, selected} = await api("/api/sessions");
+  SESS = sessions;
+  const only = $("#savedonly").checked;
+  const shown = sessions.filter(s => !only || s.saved || s.id === want);
   const sel = $("#session");
-  sel.innerHTML = sessions.map(s => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join("");
-  const want = new URLSearchParams(location.search).get("session") || selected;
-  if (want && sessions.some(s => s.id === want)) sel.value = want;
-  SID = sel.value;
-  sel.onchange = () => { SID = sel.value; open.clear(); load(); };
+  sel.innerHTML = shown.map(s => `<option value="${esc(s.id)}">${s.saved ? "★ " : ""}${esc(s.name)}</option>`).join("");
+  want = want || new URLSearchParams(location.search).get("session") || selected;
+  if (want && shown.some(s => s.id === want)) sel.value = want;
+  SID = sel.value || null;
+}
+
+async function init() {
+  await loadSessions();
+  $("#session").onchange = () => { SID = $("#session").value; open.clear(); load(); };
+  $("#savedonly").onchange = async () => { await loadSessions(SID); load(); };
   $("#showall").onchange = render;
+  api("/api/maps").then(m => { MAPS = m; const dl = document.createElement("datalist"); dl.id = "maplist";
+    dl.innerHTML = m.map(n => `<option value="${esc(n)}">`).join(""); document.body.appendChild(dl); }).catch(() => {});
   await load();
 }
 
-async function load() { D = await api("/api/data?session=" + encodeURIComponent(SID)); render(); }
+async function load() {
+  if (!SID) {
+    $("#empty").textContent = `No sessions${$("#savedonly").checked ? " saved yet" : " yet: take a start and an end snapshot first"}.`;
+    $("#empty").hidden = false; $("#content").hidden = true;
+    $("#sessbar").innerHTML = ""; $("#stats").innerHTML = "";
+    return;
+  }
+  $("#empty").hidden = true; $("#content").hidden = false;
+  D = await api("/api/data?session=" + encodeURIComponent(SID)); render(); renderSession();
+}
+
+async function sessionEdit(body, done = "Saved") {
+  await api("/api/session", body);
+  await loadSessions(SID); await load(); toast(done);
+}
+
+function renderSession() {
+  const s = SESS.find(x => x.id === SID); if (!s) return;
+  const bar = $("#sessbar");
+  bar.innerHTML = `
+    <input class="sname" value="${esc(s.custom_name || "")}" placeholder="${esc(s.name)}" title="Session name (empty = automatic)">
+    <label class="muted">Map <input class="smap" list="maplist" value="${esc(s.map || "")}" placeholder="not read"
+      title="${s.map_read ? "Read from the minimap: " + esc(s.map_read) : "Not read from the minimap"}"></label>
+    ${s.map_changed ? `<span class="tag warn" title="The minimap showed a different map at the end">map changed during the session</span>` : ""}
+    <span class="muted">${fmt(s.minutes)} min</span>
+    <button class="star ${s.saved ? "on" : ""}" title="${s.saved ? "Saved: click to unsave" : "Save this session to your list"}">${s.saved ? "★ Saved" : "☆ Save"}</button>
+    <button class="danger" id="delsess">Delete session</button>`;
+  $(".sname", bar).onchange = e => sessionEdit({name: e.target.value}, "Renamed");
+  $(".smap", bar).onchange = e => sessionEdit({map: e.target.value}, e.target.value ? "Map set" : "Back to the map read from the screen");
+  $(".star", bar).onclick = () => sessionEdit({saved: !s.saved}, s.saved ? "Removed from saved" : "Saved to your list");
+  $("#delsess", bar).onclick = async () => {
+    if (!confirm(`Delete "${s.name}"? Its snapshots and screenshots are removed for good.`)) return;
+    await api("/api/session", {delete: true}); await loadSessions(); await load(); toast("Session deleted");
+  };
+}
 
 function render() {
   const s = D.summary;

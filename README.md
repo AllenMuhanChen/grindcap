@@ -121,6 +121,8 @@ grindcap review            # latest session; pick older ones from the Session me
 
 It opens in your browser and lists only the items whose count changed. Everything saves as you go:
 
+- **Session:** each one gets the map it was on (read from the minimap when you take the snapshot, matched against Classic World's map list) and a name like "The Rain-Forest East of Henesys · Oct 23 00:16 · 50 min". Type over either one; clear it to go back to the automatic value. **☆ Save** keeps a session in your list ("saved only" shows just those). **Delete session** removes its snapshots and screenshots (the start snapshot is kept if another session still uses it).
+
 - **Name and price:** type a name, or your own price (e.g. what a potion saves you). The NPC sell price is always kept: clear your price, or press "use NPC", to go back to it.
 - **Delete:** a misread item that shouldn't count. It moves to a "Deleted" list at the bottom, where **Restore** brings it back and **Purge** (or **Purge all**) removes it for good: from your item list and its saved icons, in every session.
 - **Click a row** to see the slots it was read from, as pictures from the start and end screenshots. Per slot: fix the count, say what the item really is (pick from your items or search the game's item list), or ignore that one slot.

@@ -105,6 +105,12 @@ class ItemDB:
                 progress(f"icons: {n}/{len(todo)}")
             time.sleep(delay)
         self._icons = None
+        try:
+            from .mapname import download_maps
+
+            progress(f"Map names: {len(download_maps(self.folder, self.region, self.version))}")
+        except Exception as e:
+            progress(f"  couldn't get map names: {e}")
         progress(f"Item data ready: {len(self.items)} items in {self.folder}")
 
     def price(self, item_id: int) -> int | None:

@@ -42,6 +42,9 @@ class SnapFlow:
         except LookupError:
             fc = self.cfg
         self.status = read_status(fc, self.status_frame)
+        from .snapshot import read_map_safe
+
+        self.status["map"] = read_map_safe(self.cfg, self.status_frame)
         self.watcher = PageWatcher(self.cfg)
         return self.status
 
@@ -70,7 +73,7 @@ class SnapFlow:
         which, self.which, self.watcher = self.which, None, None
         return {"which": which, "folder": str(folder), "pages": len(self.pages), "level": snap["level"],
                 "exp": snap["exp"], "mesos": snap["mesos"], "kinds": len(snap["items"]),
-                "count": sum(snap["items"].values())}
+                "count": sum(snap["items"].values()), "map": (snap.get("map") or {}).get("name")}
 
     def cancel(self):
         self.which, self.watcher, self.pages = None, None, []
