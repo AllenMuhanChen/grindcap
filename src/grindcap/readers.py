@@ -12,6 +12,34 @@ from dataclasses import dataclass
 import numpy as np
 
 
+WINDOWS_TESSERACT = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+]
+
+
+def setup_tesseract(tesseract_cmd: str | None = None):
+    """Point pytesseract at Tesseract: the configured path, PATH, or the usual Windows install folders."""
+    import os
+    import shutil
+
+    import pytesseract
+
+    candidates = [tesseract_cmd] if tesseract_cmd else []
+    candidates += [shutil.which("tesseract")] + WINDOWS_TESSERACT
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        candidates.append(os.path.join(local, "Programs", "Tesseract-OCR", "tesseract.exe"))
+    for c in candidates:
+        if c and os.path.exists(c):
+            pytesseract.pytesseract.tesseract_cmd = c
+            return pytesseract
+    raise RuntimeError(
+        "Tesseract isn't installed (it reads the numbers on screen). Install it from "
+        "https://github.com/UB-Mannheim/tesseract/wiki, keeping the default folder, then try again. "
+        "If you installed it somewhere else, set session.tesseract_cmd in config.yaml to tesseract.exe.")
+
+
 def crop(frame: np.ndarray, box) -> np.ndarray:
     x, y, w, h = (int(v) for v in box)
     return frame[y:y + h, x:x + w]
@@ -62,11 +90,7 @@ class TextReader:
     NUM = re.compile(r"\d[\d,]*")
 
     def __init__(self, box, tesseract_cmd: str | None = None, upscale: int | None = None):
-        import pytesseract  # optional dependency: pip install grindcap[ocr]
-
-        if tesseract_cmd:
-            pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-        self._tess = pytesseract
+        self._tess = setup_tesseract(tesseract_cmd)
         self.box = box
         self.upscale = upscale
         self._last_hash = None

@@ -136,11 +136,9 @@ class QtyReader:
         self.digits = digits if digits is not None and digits.ready else None
         self._tess = None
         if self.digits is None:
-            import pytesseract
+            from .readers import setup_tesseract
 
-            if tesseract_cmd:
-                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-            self._tess = pytesseract
+            self._tess = setup_tesseract(tesseract_cmd)
 
     def region(self, slot_img: np.ndarray) -> np.ndarray:
         h, w = slot_img.shape[:2]
