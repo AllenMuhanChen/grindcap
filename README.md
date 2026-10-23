@@ -40,7 +40,7 @@ Open the game in windowed mode with your inventory window open (so the meso tota
 grindcap calibrate
 ```
 
-A screenshot opens. For each of HP, MP, EXP and mesos, drag a box around it and press Enter (press C to skip one). For the HP and MP bars, do this when they're fairly full: the tool samples the bar colour from the left part of the box.
+A screenshot opens, shrunk to fit your screen. For each of HP, MP, EXP and mesos: drag roughly around it and press Enter, then it zooms in and you drag tightly around it and press Enter again. Press C to skip one. For the HP and MP bars, do this when they're fairly full: the tool samples the bar colour from the left part of the box.
 
 Check it:
 

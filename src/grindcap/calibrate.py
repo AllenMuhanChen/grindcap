@@ -41,6 +41,56 @@ def load_frame(image: str | None = None, video: str | None = None, at: float = 0
     return screen.grab_one()
 
 
+def _screen_size() -> tuple[int, int]:
+    try:
+        import mss
+
+        with mss.mss() as sct:
+            m = sct.monitors[1]
+            return m["width"], m["height"]
+    except Exception:
+        return 1920, 1080
+
+
+def _select_scaled(title: str, frame: np.ndarray, fit: float, max_up: float = 1.0):
+    import cv2
+
+    sw, sh = _screen_size()
+    h, w = frame.shape[:2]
+    scale = min(max_up, fit * sw / w, fit * sh / h)
+    shown = frame if scale == 1.0 else cv2.resize(frame, (int(w * scale), int(h * scale)),
+                                                   interpolation=cv2.INTER_AREA)
+    if scale > 1.0:
+        shown = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
+    cv2.namedWindow(title, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    cv2.resizeWindow(title, shown.shape[1], shown.shape[0])
+    cv2.moveWindow(title, 0, 0)
+    x, y, bw, bh = cv2.selectROI(title, shown, showCrosshair=False)
+    cv2.destroyWindow(title)
+    if bw == 0 or bh == 0:
+        return 0, 0, 0, 0
+    return (round(x / scale), round(y / scale), round(bw / scale), round(bh / scale))
+
+
+def select_box(title: str, frame: np.ndarray, fit: float = 0.8):
+    """Pick a box in two steps, so small UI elements are easy to box precisely.
+
+    Step 1: the whole screenshot, shrunk to fit on screen (clear of the taskbar): drag roughly around
+    the area. Step 2: that area zoomed in: drag tightly around the element. Returns full-resolution
+    [x, y, w, h]. Press Enter with no box in step 2 to use the step 1 box as is.
+    """
+    x, y, w, h = _select_scaled(f"{title}  (step 1: drag roughly around it)", frame, fit)
+    if w == 0 or h == 0:
+        return 0, 0, 0, 0
+    pad = 10
+    x0, y0 = max(0, x - pad), max(0, y - pad)
+    crop = frame[y0: y + h + pad, x0: x + w + pad]
+    zx, zy, zw, zh = _select_scaled(f"{title}  (step 2: zoomed, drag tightly)", crop, fit, max_up=6.0)
+    if zw == 0 or zh == 0:
+        return x, y, w, h
+    return x0 + zx, y0 + zy, zw, zh
+
+
 def calibrate_inventory(cfg, frame: np.ndarray) -> None:
     import cv2
 
@@ -48,8 +98,7 @@ def calibrate_inventory(cfg, frame: np.ndarray) -> None:
     for key, what in (("first_slot", "the TOP-LEFT inventory slot"), ("last_slot", "the BOTTOM-RIGHT visible slot")):
         title = f"Inventory: drag a box tightly around {what}  [Enter = confirm]"
         print(title)
-        x, y, w, h = cv2.selectROI(title, frame, showCrosshair=False)
-        cv2.destroyWindow(title)
+        x, y, w, h = select_box(title, frame)
         if w == 0 or h == 0:
             print("  skipped inventory calibration")
             return
@@ -72,8 +121,7 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
         rc = cfg["readers"][name]
         title = PROMPTS.get(name, name) + "  [Enter = confirm, C = skip]"
         print(title)
-        x, y, w, h = cv2.selectROI(title, frame, showCrosshair=False)
-        cv2.destroyWindow(title)
+        x, y, w, h = select_box(title, frame)
         if w == 0 or h == 0:
             print(f"  skipped {name}")
             continue
