@@ -10,6 +10,7 @@ PROMPTS = {
     "mp": "MP: drag a box around the MP bar (or the MP numbers)",
     "exp": "EXP: drag a box around the EXP numbers (or the EXP bar if you use bar mode)",
     "mesos": "Mesos: drag a box around the meso total in your inventory window",
+    "level": "Level: drag a box around your level number",
 }
 
 
@@ -40,11 +41,34 @@ def load_frame(image: str | None = None, video: str | None = None, at: float = 0
     return screen.grab_one()
 
 
+def calibrate_inventory(cfg, frame: np.ndarray) -> None:
+    import cv2
+
+    inv = cfg["inventory"]
+    for key, what in (("first_slot", "the TOP-LEFT inventory slot"), ("last_slot", "the BOTTOM-RIGHT visible slot")):
+        title = f"Inventory: drag a box tightly around {what}  [Enter = confirm]"
+        print(title)
+        x, y, w, h = cv2.selectROI(title, frame, showCrosshair=False)
+        cv2.destroyWindow(title)
+        if w == 0 or h == 0:
+            print("  skipped inventory calibration")
+            return
+        inv[key] = [int(x), int(y), int(w), int(h)]
+    for key in ("cols", "rows"):
+        v = input(f"Visible {key} in the inventory grid [{inv[key]}]: ").strip()
+        if v:
+            inv[key] = int(v)
+    print(f"  inventory grid: first {inv['first_slot']}, last {inv['last_slot']}, {inv['cols']}x{inv['rows']}")
+
+
 def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
     import cv2
 
-    names = only or list(cfg["readers"])
+    names = only or list(cfg["readers"]) + ["inventory"]
     for name in names:
+        if name == "inventory":
+            calibrate_inventory(cfg, frame)
+            continue
         rc = cfg["readers"][name]
         title = PROMPTS.get(name, name) + "  [Enter = confirm, C = skip]"
         print(title)
@@ -71,6 +95,13 @@ def overlay(cfg, frame: np.ndarray, readings: dict | None = None) -> np.ndarray:
         cv2.rectangle(out, (x, y), (x + w, y + h), (0, 255, 255), 1)
         label = name if not readings or name not in readings else f"{name}: {readings[name]}"
         cv2.putText(out, label, (x, max(10, y - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1)
+    inv = cfg["inventory"]
+    if inv.get("first_slot") and inv.get("last_slot"):
+        from .inventory import Grid
+
+        for row in Grid.from_cfg(inv).slot_boxes():
+            for (x, y, w, h) in row:
+                cv2.rectangle(out, (x, y), (x + w, y + h), (255, 0, 255), 1)
     return out
 
 

@@ -61,7 +61,7 @@ class TextReader:
 
     NUM = re.compile(r"\d[\d,]*")
 
-    def __init__(self, box, tesseract_cmd: str | None = None, upscale: int = 4):
+    def __init__(self, box, tesseract_cmd: str | None = None, upscale: int | None = None):
         import pytesseract  # optional dependency: pip install grindcap[ocr]
 
         if tesseract_cmd:
@@ -76,7 +76,9 @@ class TextReader:
         import cv2
 
         g = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
-        g = cv2.resize(g, None, fx=self.upscale, fy=self.upscale, interpolation=cv2.INTER_NEAREST)
+        # Scale so text is roughly 40-60 px tall, which is where Tesseract does best.
+        f = self.upscale or max(1, round(50 / max(1, g.shape[0])))
+        g = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
         _, th = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         if th.mean() < 127:  # Tesseract wants dark text on light background
             th = 255 - th

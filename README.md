@@ -15,6 +15,11 @@ From those it works out the numbers Grind Ledger needs you to fill in by hand: *
 
 It only reads the screen. It never sends keys or clicks to the game.
 
+## Two ways to use it
+
+- **Before/after snapshots (start here).** Take a snapshot of your EXP, mesos and whole inventory, grind, take another, compare. Gives EXP/hr, mesos/hr, and every item gained or used per hour (potions drunk show as negative). No live tracking needed.
+- **Live tracking.** Watches HP/MP/EXP continuously to count touches, casts and kills.
+
 ## Setup (Windows)
 
 1. Install Python 3.10 or newer.
@@ -46,6 +51,45 @@ grindcap watch        # prints live readings; take a hit, cast a skill and watch
 
 You can calibrate on a saved screenshot or a recording instead of the live screen: `grindcap calibrate --image shot.png` or `grindcap calibrate --video grind.mp4 --at 12`.
 
+## Before/after snapshots
+
+One-time setup, with your inventory window open:
+
+```
+grindcap calibrate --only exp mesos level inventory
+grindcap teach-digits
+```
+
+`calibrate` asks for boxes around your EXP number, meso total and level, then the top-left and bottom-right visible inventory slots. `teach-digits` shows each stacked item and asks you to type its number, so it learns the game's tiny digit font. Do this until it reports all digits 0-9 are known.
+
+Each grind:
+
+```
+grindcap snap start
+```
+
+It grabs EXP and mesos, then, in game:
+
+- **F8:** capture the visible inventory page. Scroll down and press F8 again, until the end of the tab. Overlapping rows are merged automatically.
+- **F9:** move to the next tab (Equip, Use, Etc, Setup).
+- **F10:** done.
+
+Grind, then:
+
+```
+grindcap snap end
+grindcap compare
+```
+
+`compare` prints EXP/hr, mesos/hr and an item table, and writes `report.html` with each item's icon. Items are recognised by icon, so new ones show as `item-001`, `item-002`. Name and price them once:
+
+```
+grindcap items
+grindcap label item-001 --name "Green Mushroom Cap" --price 14
+```
+
+If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.
+
 ## Track a session
 
 ```
@@ -72,6 +116,7 @@ grindcap export sessions/20261022-210000_Green_Mushroom.jsonl
 ## Known limits
 
 - **HP and MP bars are pixel-accurate, not point-accurate.** A 200 px bar on a 1,000 HP character resolves 5 HP. Switch HP/MP to `mode: text` to read the numbers instead.
-- **Item drops aren't counted yet**, only floor mesos. Reading the pickup messages is the next step (see CLAUDE.md).
+- **Live tracking doesn't count item drops**, only floor mesos. Use before/after snapshots for items.
+- **Snapshots:** don't hover over items while capturing, since tooltips cover slots. Digits drawn over very dark icons can confuse the stack reader; check the report.
 - **Regen vs potions is guessed by size.** Tune `hp_regen_max` and `mp_regen_max` to your character.
 - **Kill counting needs the EXP number visible** (or the EXP bar in `mode: bar`, which is too coarse at higher levels).

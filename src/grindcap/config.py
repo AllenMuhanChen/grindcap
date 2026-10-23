@@ -39,6 +39,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "exp": {"mode": "text", "box": None},
         # Your meso total in the inventory window (keep the inventory open while grinding).
         "mesos": {"mode": "text", "box": None},
+        # Optional: your level number, so before/after snapshots can tell how many levels you gained.
+        "level": {"mode": "text", "box": None},
+    },
+    "inventory": {
+        # Boxes [x, y, w, h] of the top-left and bottom-right *visible* slots of the inventory grid.
+        "first_slot": None,
+        "last_slot": None,
+        "cols": 4,
+        "rows": 6,
+        # Where the stack number sits inside a slot, as fractions [x, y, w, h] of the slot.
+        "qty_box": [0.0, 0.62, 0.75, 0.38],
+        # A slot whose icon area varies less than this (grey-level std) is empty.
+        "empty_std": 6.0,
+        # Icons closer than this (mean absolute pixel difference) count as the same item.
+        "match_threshold": 12.0,
+        # Inventory tab names, in the order you capture them.
+        "tabs": ["Equip", "Use", "Etc", "Setup"],
+        # Item catalog (icons, names, prices) and snapshot folders.
+        "catalog_dir": "data",
+        "snapshot_dir": "snapshots",
     },
     "detection": {
         # A reading must stay the same for this many frames before it counts. Filters animation flicker.

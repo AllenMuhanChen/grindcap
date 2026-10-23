@@ -7,6 +7,14 @@
   grindcap replay VIDEO           run the tracker on a screen recording
   grindcap summarize SESSION      summarise a saved session log
   grindcap export SESSION         print the values to paste into Grind Ledger
+
+Before/after mode (simpler, no live tracking):
+  grindcap snap start             capture EXP and mesos, then page through your inventory (F8/F9/F10)
+  grindcap snap end               same, after grinding
+  grindcap compare                EXP/hr, mesos/hr and every item gained or used, per hour
+  grindcap teach-digits           teach it the stack-number font (once, before the first snapshot)
+  grindcap items                  list known item icons and their names/prices
+  grindcap label ITEM-ID          give an item id a name and price
 """
 from __future__ import annotations
 
@@ -95,6 +103,109 @@ def cmd_export(cfg, a):
     print(json.dumps(ledger_export(header, summarize(events)), indent=2))
 
 
+def _catalog(cfg):
+    from .inventory import Catalog
+
+    return Catalog(cfg["inventory"]["catalog_dir"])
+
+
+def cmd_snap(cfg, a):
+    from .calibrate import load_frame
+    from .snapshot import PageCollector, build_snapshot, save_snapshot
+
+    screen = _screen(cfg)
+    if a.image or a.video:
+        status = load_frame(a.image, a.video, a.at, screen)
+        pages = {"Inventory": [status]}
+    else:
+        print("Make sure your EXP and meso total are visible. Capturing status in 2 s...")
+        time.sleep(2)
+        status = screen.grab_one()
+        pages = PageCollector(screen.grab_one, cfg["inventory"]["tabs"]).run()
+    cat = _catalog(cfg)
+    snap = build_snapshot(cfg, status, pages, cat)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    folder = save_snapshot(snap, Path(cfg["inventory"]["snapshot_dir"]) / f"{a.which}-{stamp}", status, pages)
+    n_items = sum(snap["items"].values())
+    print(f"Saved {folder}: level {snap['level']}, EXP {snap['exp']}, mesos {snap['mesos']}, "
+          f"{len(snap['items'])} different items ({n_items} total)")
+    if snap["exp"] is None:
+        print("  EXP was not read. Check the exp box with `grindcap snapshot`.")
+
+
+def cmd_compare(cfg, a):
+    from .snapshot import compare, format_compare, html_report, latest_snapshot, load_snapshot
+
+    root = Path(cfg["inventory"]["snapshot_dir"])
+    start = a.start or latest_snapshot(root, "start")
+    end = a.end or latest_snapshot(root, "end")
+    if not start or not end:
+        raise SystemExit("Need a start and an end snapshot. Run `grindcap snap start` and `grindcap snap end`.")
+    cat = _catalog(cfg)
+    r = compare(load_snapshot(start), load_snapshot(end), cat, a.minutes)
+    print(f"Comparing {start} -> {end}\n")
+    print(json.dumps(r, indent=2) if a.json else format_compare(r))
+    out = Path(end) / "report.html"
+    html_report(r, cat, out)
+    print(f"\nReport with item icons: {out}")
+
+
+def cmd_items(cfg, a):
+    cat = _catalog(cfg)
+    if not cat.items:
+        print("No items yet. Take a snapshot first.")
+    for iid, info in cat.items.items():
+        print(f"{iid}  {info.get('name') or '(no name)':<28} price {info.get('price') if info.get('price') is not None else '-'}"
+              f"   icon: {cat.icons_dir / (iid + '.png')}")
+
+
+def cmd_label(cfg, a):
+    cat = _catalog(cfg)
+    cat.label(a.item, a.name, a.price)
+    print(f"{a.item}: {cat.items[a.item]}")
+
+
+def cmd_teach_digits(cfg, a):
+    """Show each occupied slot and ask for its stack number, to learn the game's digit font."""
+    import cv2
+
+    from .calibrate import load_frame
+    from .digits import DigitReader
+    from .inventory import Grid, QtyReader, is_empty
+
+    inv = cfg["inventory"]
+    grid = Grid.from_cfg(inv)
+    frame = load_frame(a.image, a.video, a.at, _screen(cfg))
+    dr = DigitReader(Path(inv["catalog_dir"]) / "digits.npz")
+    qty = QtyReader(grid.qty_box, digits=dr) if dr.ready else None
+    region = lambda img: img[int(grid.qty_box[1] * img.shape[0]):, :int((grid.qty_box[0] + grid.qty_box[2]) * img.shape[1])]
+    taught = 0
+    print("For each slot: type the stack number shown, Enter if it has no number, q to stop.")
+    for row in grid.slot_boxes():
+        for (x, y, w, h) in row:
+            img = frame[y:y + h, x:x + w]
+            if is_empty(img, grid.qty_box, inv["empty_std"]):
+                continue
+            cv2.imshow("slot (enlarged)", cv2.resize(img, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST))
+            cv2.waitKey(1)
+            ans = input("number> ").strip()
+            if ans.lower() == "q":
+                break
+            if ans.isdigit():
+                ok = dr.teach(region(img), ans)
+                taught += ok
+                print("  learned" if ok else "  couldn't split that into digits; try another slot")
+        else:
+            continue
+        break
+    cv2.destroyAllWindows()
+    have = "".join(sorted(dr.templates))
+    if dr.color is not None:
+        dr.save()
+    print(f"Learned from {taught} slots. Digits known: {have or 'none'}." +
+          ("" if len(have) == 10 else " Teach more slots until all of 0-9 are covered."))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="grindcap", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -108,7 +219,7 @@ def main(argv=None):
 
     sp = sub.add_parser("calibrate", help="set the HP/MP/EXP/meso boxes")
     frame_args(sp)
-    sp.add_argument("--only", nargs="+", choices=["hp", "mp", "exp", "mesos"], help="calibrate just these")
+    sp.add_argument("--only", nargs="+", choices=["hp", "mp", "exp", "mesos", "level", "inventory"], help="calibrate just these")
     sp.set_defaults(fn=cmd_calibrate)
 
     sp = sub.add_parser("snapshot", help="save screenshot, overlay and crops")
@@ -132,6 +243,30 @@ def main(argv=None):
         if name == "summarize":
             sp.add_argument("--json", action="store_true")
         sp.set_defaults(fn=fn)
+
+    sp = sub.add_parser("snap", help="before/after snapshot of EXP, mesos and inventory")
+    sp.add_argument("which", choices=["start", "end"])
+    frame_args(sp)
+    sp.set_defaults(fn=cmd_snap)
+
+    sp = sub.add_parser("compare", help="compare the latest start and end snapshots")
+    sp.add_argument("--start", help="start snapshot folder (default: latest start-*)")
+    sp.add_argument("--end", help="end snapshot folder (default: latest end-*)")
+    sp.add_argument("--minutes", type=float, help="grinding time, if you paused between snapshots")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(fn=cmd_compare)
+
+    sub.add_parser("items", help="list known item icons").set_defaults(fn=cmd_items)
+
+    sp = sub.add_parser("teach-digits", help="learn the game's stack-number font from your inventory")
+    frame_args(sp)
+    sp.set_defaults(fn=cmd_teach_digits)
+
+    sp = sub.add_parser("label", help="name and price an item id")
+    sp.add_argument("item")
+    sp.add_argument("--name")
+    sp.add_argument("--price", type=float, help="mesos each (sell price, or what it saves you)")
+    sp.set_defaults(fn=cmd_label)
 
     a = p.parse_args(argv)
     cfg = Config.load(a.config)

@@ -18,7 +18,15 @@ events.py    Stabilizer (value must hold settle_frames frames) + EventDetector: 
              (touch, cast, kill, meso, hp/mp potion/regen, fa_heal, level_up).
 session.py   Tracker (source -> readers -> detector -> JSONL log), summarize(), ledger_export().
 calibrate.py cv2.selectROI box picking, bar colour sampling, snapshot/overlay for debugging.
-cli.py       calibrate | snapshot | watch | run | replay | summarize | export
+inventory.py Grid (slot boxes from first/last visible slot), icon signatures with the stack-number area
+             masked, Catalog (icon -> item-NNN id, name, price; data/catalog.json + icons/), read_page,
+             merge_pages (stitches scrolled pages by largest identical row overlap), totals.
+digits.py    DigitReader: stack numbers by template matching on the game's fixed font (taught via
+             `teach-digits`), with splitting of touching glyphs. Tesseract is the fallback.
+snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
+             value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
+cli.py       calibrate | snapshot | watch | run | replay | summarize | export |
+             snap start/end | compare | items | label | teach-digits
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```
@@ -40,6 +48,12 @@ Everything was built and tested on synthetic frames; the real UI has not been se
 2. `grindcap watch` while taking hits and casting: check HP/MP/EXP/meso readings move correctly.
 3. Tune `settle_frames`, regen thresholds and `mp_tol` from what `watch` shows.
 4. If Tesseract misreads the game's pixel font, replace TextReader with template matching on digit glyphs cut from a screenshot (the font is fixed, so this is usually more reliable than OCR).
+
+Snapshot mode specifics to check on the real game: icon match threshold (same item must match across
+captures, different items must not), empty-slot detection threshold, the stack-number colour (the
+teach step tries white then black), and whether hover highlights change icons.
+
+The user's preferred first workflow is snapshots (start/end), not live tracking.
 
 ## Next steps
 
