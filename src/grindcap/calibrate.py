@@ -8,9 +8,9 @@ import numpy as np
 # What to box, depending on whether the reader measures a bar or reads a number.
 PROMPTS = {
     ("hp", "bar"): "HP: box the red HP bar",
-    ("hp", "text"): "HP: box just the HP number, e.g. 312/450",
+    ("hp", "text"): "HP: box just the HP numbers next to the bar, e.g. 312/450",
     ("mp", "bar"): "MP: box the blue MP bar",
-    ("mp", "text"): "MP: box just the MP number, e.g. 120/200",
+    ("mp", "text"): "MP: box just the MP numbers next to the bar, e.g. 120/200",
     ("exp", "text"): "EXP: box just your EXP number, e.g. 1234/20216",
     ("exp", "bar"): "EXP: box the EXP bar",
     ("mesos", "text"): "Mesos: box just the meso number in your inventory, e.g. 45,210",
@@ -147,6 +147,9 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None, save=None) 
             save()
             continue
         rc = cfg["readers"][name]
+        if name in ("hp", "mp", "exp", "mesos", "level"):
+            rc["mode"] = "text"  # read the numbers; bars are only a fallback you can set by hand
+            rc.pop("fill_rgb", None)
         title = PROMPTS.get((name, rc.get("mode", "bar")), name) + "  [Enter = confirm, C = skip]"
         print(title)
         x, y, w, h = select_box(title, frame)

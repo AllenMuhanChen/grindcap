@@ -13,6 +13,7 @@ dependencies = [
   "opencv-python>=4.8",
   "pyyaml>=6",
   "pynput>=1.7",
+  "windows-capture>=1.4; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -21,6 +22,9 @@ dev = ["pytest>=7"]
 
 [project.scripts]
 grindcap = "grindcap.cli:main"
+
+[project.gui-scripts]
+grindcap-gui = "grindcap.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

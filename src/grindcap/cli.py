@@ -8,6 +8,8 @@
   grindcap summarize SESSION      summarise a saved session log
   grindcap export SESSION         print the values to paste into Grind Ledger
 
+Easiest: grindcap gui   (or the grindcap-gui program) opens a small window that stays on top of the game.
+
 Before/after mode (simpler, no live tracking):
   grindcap snap start             capture EXP and mesos, then page through your inventory (F8/F9/F10)
   grindcap snap end               same, after grinding
@@ -34,7 +36,42 @@ QUIET = {"hp_regen", "mp_regen"}
 
 def _screen(cfg) -> ScreenSource:
     c = cfg["capture"]
-    return ScreenSource(c["monitor"], c["region"], c["fps"])
+    return ScreenSource(c["monitor"], c["region"], c["fps"], c.get("window_title"))
+
+
+def cmd_windows(cfg, a):
+    from .winfind import find_game, list_windows
+
+    wins = list_windows()
+    if not wins:
+        print("No windows listed (this only works on Windows).")
+    for title, r, _ in wins:
+        print(f"{r['width']:>5}x{r['height']:<5} at ({r['left']}, {r['top']})  {title}")
+    t = cfg["capture"].get("window_title")
+    if t:
+        print(f"\ncapture.window_title = {t!r} -> " + ("found" if find_game(t) else "NOT found"))
+
+
+def cmd_test_capture(cfg, a):
+    """Grab the game window once and save it, reporting which capture method worked."""
+    import cv2
+
+    src = _screen(cfg)
+    img = src.grab_one()
+    out = Path("captures")
+    out.mkdir(exist_ok=True)
+    p = out / "test_capture.png"
+    cv2.imwrite(str(p), img)
+    print(f"Captured {img.shape[1]}x{img.shape[0]} using '{src.method}'. Saved {p}")
+    if src.method == "screen":
+        print("That was a plain screenshot: it only shows the game when the game is in front. "
+              "Install windows-capture (pip install windows-capture) to capture it behind other windows.")
+
+
+def cmd_gui(cfg, a):
+    from .gui import main as gui_main
+
+    gui_main(a.config)
 
 
 def _print_event(e):
@@ -262,6 +299,9 @@ def main(argv=None):
     sp.set_defaults(fn=cmd_compare)
 
     sub.add_parser("items", help="list known item icons").set_defaults(fn=cmd_items)
+    sub.add_parser("windows", help="list window titles (to set capture.window_title)").set_defaults(fn=cmd_windows)
+    sub.add_parser("test-capture", help="grab the game window once and save it").set_defaults(fn=cmd_test_capture)
+    sub.add_parser("gui", help="small always-on-top control window").set_defaults(fn=cmd_gui)
 
     sp = sub.add_parser("teach-digits", help="learn the game's stack-number font from your inventory")
     frame_args(sp)

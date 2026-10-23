@@ -1,6 +1,7 @@
 """Frame sources. Everything downstream works on (timestamp_seconds, BGR numpy image)."""
 from __future__ import annotations
 
+import sys
 import time
 from typing import Iterator, Protocol
 
@@ -14,10 +15,21 @@ class FrameSource(Protocol):
 class ScreenSource:
     """Live screen capture with mss. Yields frames at roughly `fps`."""
 
-    def __init__(self, monitor: int = 1, region: dict | None = None, fps: float = 8):
+    def __init__(self, monitor: int = 1, region: dict | None = None, fps: float = 8,
+                 window_title: str | None = None):
         self.monitor = monitor
         self.region = region
         self.fps = fps
+        self.window_title = window_title
+        self.game = None
+        if window_title and sys.platform == "win32":
+            from .wincap import GameWindow
+
+            self.game = GameWindow(window_title)
+
+    @property
+    def method(self) -> str:
+        return (self.game.method if self.game and self.game.method else "screen")
 
     def grab_one(self) -> np.ndarray:
         import mss
@@ -26,6 +38,8 @@ class ScreenSource:
             return self._grab(sct)
 
     def _grab(self, sct) -> np.ndarray:
+        if self.game is not None:
+            return self.game.grab()  # the game window itself, even if covered
         mon = sct.monitors[self.monitor]
         if self.region:
             r = self.region

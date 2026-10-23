@@ -21,6 +21,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "region": None,
         # Frames per second to sample. 8 is enough to separate individual hits.
         "fps": 8,
+        # Capture only the game window: any window whose title contains this text (Windows only).
+        # Set to null to capture the whole monitor instead. `grindcap windows` lists window titles.
+        "window_title": "MapleStory",
     },
     "character": {
         "level": 30,
@@ -34,8 +37,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # mode "text": OCR the numbers in the box (e.g. "312/450"). Needs Tesseract installed.
         # mode "bar":  measure how full a coloured bar is. No OCR needed.
         # box: [x, y, width, height] in pixels, relative to the capture area.
-        "hp": {"mode": "bar", "box": None, "fill_rgb": None, "tol": 45},
-        "mp": {"mode": "bar", "box": None, "fill_rgb": None, "tol": 45},
+        "hp": {"mode": "text", "box": None},
+        "mp": {"mode": "text", "box": None},
         "exp": {"mode": "text", "box": None},
         # Your meso total in the inventory window (keep the inventory open while grinding).
         "mesos": {"mode": "text", "box": None},
