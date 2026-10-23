@@ -109,6 +109,8 @@ grindcap label item-001 --name "Green Mushroom Cap" --price 14
 
 If you took a break between snapshots, pass the real grinding time: `grindcap compare --minutes 45`.
 
+Pages are stitched together so every slot counts once: scroll overlap is matched by item icons, and a view captured twice (or a tab visited again) is skipped, even if one slot looks different because of the cursor. Each snapshot folder keeps its screenshots, so after an update `grindcap reread` reads the latest start and end snapshots again, and `grindcap compare` then uses the new readings.
+
 ## Track a session
 
 ```

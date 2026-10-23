@@ -201,6 +201,22 @@ def test_missing_window_is_reported(tmp_path):
         locate(c, "inventory", np.full((460, 380, 3), (70, 60, 55), np.uint8))
 
 
+def test_merge_skips_repeated_pages_even_with_one_slot_misread():
+    tab_a = [[("a1", 5), ("a2", 1), ("a3", 9)], [("a4", 2), ("a5", 7), (None, 0)]]
+    tab_b = [[("b1", 3), ("b2", 1), ("b3", 4)], [("b4", 8), (None, 0), (None, 0)]]
+    a_again = [[("a1", 5), ("a2", 1), ("a3", 9)], [("a4", 2), ("x9", 7), (None, 0)]]  # cursor over a5
+    merged = merge_pages([tab_a, tab_a, tab_b, a_again, tab_a])
+    assert merged == tab_a + tab_b
+
+
+def test_merge_scroll_overlap_tolerates_one_odd_slot():
+    rows = [[(f"i{r}{c}", r + c) for c in range(5)] for r in range(9)]
+    p1, p2 = rows[0:6], [list(r) for r in rows[3:9]]
+    p2[0][2] = ("hover", 1)            # one slot looks different in the overlap
+    merged = merge_pages([p1, p2])
+    assert len(merged) == 9 and merged[3][2] == rows[3][2]
+
+
 def test_merge_skips_page_scrolled_back_to():
     a = [[("i1", 1)], [("i2", 3)], [("i3", 5)]]
     b = [[("i3", 5)], [("i4", 2)], [("i5", 1)]]

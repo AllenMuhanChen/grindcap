@@ -14,6 +14,7 @@ Before/after mode (simpler, no live tracking):
   grindcap snap start             capture EXP and mesos, then page through your inventory (F8/F9/F10)
   grindcap snap end               same, after grinding
   grindcap compare                EXP/hr, mesos/hr and every item gained or used, per hour
+  grindcap reread [FOLDER...]     read saved snapshots again from their screenshots (after an update)
   grindcap teach-digits           check the stack numbers it reads, correct any that are wrong
   grindcap items                  list known item icons and their names/prices
   grindcap label ITEM-ID          give an item id a name and price
@@ -212,6 +213,31 @@ def cmd_compare(cfg, a):
     print(f"\nReport with item icons: {out}")
 
 
+def cmd_reread(cfg, a):
+    """Read saved snapshots again from their screenshots (after a fix), keeping their times."""
+    import cv2
+
+    from .snapshot import build_snapshot, latest_snapshot, load_snapshot
+
+    root = Path(cfg["inventory"]["snapshot_dir"])
+    folders = [Path(f) for f in a.folders] or [f for f in (latest_snapshot(root, "start"),
+                                                           latest_snapshot(root, "end")) if f]
+    if not folders:
+        raise SystemExit("No snapshots found.")
+    for folder in folders:
+        old = load_snapshot(folder)
+        status = cv2.imread(str(folder / "status.png")) if (folder / "status.png").exists() else None
+        pages: dict[str, list] = {}
+        for png in sorted(folder.glob("*_[0-9][0-9].png")):
+            tab = png.stem.rsplit("_", 1)[0]
+            pages.setdefault(tab, []).append(cv2.imread(str(png)))
+        snap = build_snapshot(cfg, status, pages, _catalog(cfg), when=old["time"])
+        (folder / "snapshot.json").write_text(json.dumps(snap, indent=2))
+        n = sum(len(v) for v in pages.values())
+        print(f"{folder}: {n} pages, {len(snap['items'])} kinds of item, "
+              f"{sum(snap['items'].values())} items (was {sum(old['items'].values())})")
+
+
 def cmd_items(cfg, a):
     cat = _catalog(cfg)
     if not cat.items:
@@ -355,6 +381,10 @@ def main(argv=None):
     sp.add_argument("--minutes", type=float, help="grinding time, if you paused between snapshots")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(fn=cmd_compare)
+
+    sp = sub.add_parser("reread", help="read saved snapshots again from their screenshots")
+    sp.add_argument("folders", nargs="*", help="snapshot folders (default: the latest start and end)")
+    sp.set_defaults(fn=cmd_reread)
 
     sub.add_parser("items", help="list known item icons").set_defaults(fn=cmd_items)
     sub.add_parser("windows", help="list window titles (to set capture.window_title)").set_defaults(fn=cmd_windows)

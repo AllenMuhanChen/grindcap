@@ -162,41 +162,45 @@ def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits,
     return out
 
 
-def _row_key(row) -> tuple:
-    return tuple((a, b) for a, b in row)
+def _rows_agree(a_rows, b_rows) -> bool:
+    """Do these rows show the same items? Compared by item id only (stack numbers can be misread),
+    over slots where either side has an item. Allows 1 in 5 slots to differ (a cursor or tooltip over
+    one slot, a hover highlight), but small overlaps must match exactly. Needs at least one item."""
+    compared = mismatched = 0
+    for ra, rb in zip(a_rows, b_rows):
+        for (ia, _), (ib, _) in zip(ra, rb):
+            if ia or ib:
+                compared += 1
+                mismatched += ia != ib
+    return compared > 0 and mismatched <= compared // 5
+
+
+def _contained(merged, page) -> bool:
+    """True if the whole page already appears somewhere in `merged` (a page captured twice, a tab
+    visited again, or scrolled back up)."""
+    n = len(page)
+    return any(_rows_agree(merged[i:i + n], page) for i in range(len(merged) - n + 1))
 
 
 def merge_pages(pages: list[list[list[Slot]]]) -> list[list[Slot]]:
-    """Stitch scrolled pages of one inventory tab, dropping rows that appear on both pages.
+    """Stitch captured pages into one list of rows, counting every row once.
 
-    Overlap = the largest k where the last k rows of what we have equal the first k rows of the next page.
-    Overlapping rows must contain at least one item, so runs of empty rows don't cause false matches.
+    - A page that already appears in what we have is skipped (captured twice, tab revisited, scrolled back).
+    - Otherwise the largest k where the last k rows we have show the same items as the page's first k
+      rows is the scroll overlap; only the rows after it are added.
+    - No overlap: a new tab (or a jump), so the whole page is added.
     """
-    if not pages:
-        return []
-    merged = [list(r) for r in pages[0]]
-    for page in pages[1:]:
-        if _contained(merged, page):
-            continue  # scrolled back up to rows already counted
+    merged: list[list[Slot]] = []
+    for page in pages:
+        if merged and _contained(merged, page):
+            continue
         best = 0
         for k in range(min(len(merged), len(page)), 0, -1):
-            a = [_row_key(r) for r in merged[-k:]]
-            b = [_row_key(r) for r in page[:k]]
-            if a == b and any(iid for r in page[:k] for iid, _ in r):
+            if _rows_agree(merged[-k:], page[:k]):
                 best = k
                 break
         merged.extend(list(r) for r in page[best:])
     return merged
-
-
-def _contained(merged, page) -> bool:
-    """True if every row of `page` already appears, in order and contiguously, in `merged`."""
-    if not any(iid for r in page for iid, _ in r):
-        return False
-    pk = [_row_key(r) for r in page]
-    mk = [_row_key(r) for r in merged]
-    n = len(pk)
-    return any(mk[i:i + n] == pk for i in range(len(mk) - n + 1))
 
 
 class PageWatcher:
@@ -204,7 +208,8 @@ class PageWatcher:
 
     Feed it frames a few times a second. It finds the inventory (by its landmark), looks at the item
     grid, and returns True once the grid has changed and then held still for `stable` frames, i.e.
-    you scrolled or switched tabs and stopped. Frames where the inventory isn't visible are ignored.
+    you scrolled or switched tabs and stopped, and it isn't a view captured before. Frames where the
+    inventory isn't visible are ignored.
     """
 
     def __init__(self, cfg, stable: int = 2, diff: float = 4.0):
@@ -213,7 +218,7 @@ class PageWatcher:
         self.diff = diff
         self._last = None
         self._count = 0
-        self._captured = None
+        self._captured: list = []
 
     def grid_signature(self, frame):
         import cv2
@@ -247,8 +252,8 @@ class PageWatcher:
             self._count += 1
         else:
             self._last, self._count = sig, 1
-        if self._count >= self.stable and not self._same(sig, self._captured):
-            self._captured = sig
+        if self._count >= self.stable and not any(self._same(sig, c) for c in self._captured):
+            self._captured.append(sig)   # never capture the same view twice (e.g. a tab visited again)
             return True
         return False
 
