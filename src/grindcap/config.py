@@ -60,6 +60,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "catalog_dir": "data",
         "snapshot_dir": "snapshots",
     },
+    "anchors": {
+        # Patches of windows that never change, used to find the windows wherever they are on screen.
+        # Set by `grindcap calibrate`; the images are saved in <catalog_dir>/anchors/.
+        "inventory": None,
+        "status": None,
+        # How closely the screen must match the saved patch (0-1).
+        "min_score": 0.8,
+    },
     "detection": {
         # A reading must stay the same for this many frames before it counts. Filters animation flicker.
         "settle_frames": 2,

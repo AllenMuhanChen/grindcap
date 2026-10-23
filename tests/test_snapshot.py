@@ -24,13 +24,24 @@ def icon(seed: int) -> np.ndarray:
     return img
 
 
-def inventory_screen(items: list[tuple[int, int] | None], top_row: int = 0) -> np.ndarray:
-    """Draw the visible 4x6 window of a longer inventory list, scrolled so `top_row` is at the top."""
-    img = np.full((360, 240, 3), (70, 60, 55), np.uint8)
+def header(img, ox=0, oy=0):
+    """The inventory window's title bar: fixed artwork above the grid."""
+    cv2.rectangle(img, (X0 - 6 + ox, Y0 - 40 + oy), (X0 + 170 + ox, Y0 - 12 + oy), (40, 120, 200), -1)
+    cv2.putText(img, "INVENTORY", (X0 + ox, Y0 - 18 + oy), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    cv2.circle(img, (X0 + 150 + ox, Y0 - 26 + oy), 7, (0, 0, 180), -1)
+
+
+def inventory_screen(items: list[tuple[int, int] | None], top_row: int = 0, ox: int = 0, oy: int = 0) -> np.ndarray:
+    """Draw the visible 4x6 window of a longer inventory list, scrolled so `top_row` is at the top.
+
+    (ox, oy) moves the whole inventory window on screen.
+    """
+    img = np.full((460, 380, 3), (70, 60, 55), np.uint8)
+    header(img, ox, oy)
     for r in range(ROWS):
         for c in range(COLS):
             i = (top_row + r) * COLS + c
-            x, y = X0 + c * (SLOT + GAP), Y0 + r * (SLOT + GAP)
+            x, y = X0 + c * (SLOT + GAP) + ox, Y0 + r * (SLOT + GAP) + oy
             cell = np.full((SLOT, SLOT, 3), 235, np.uint8)  # empty slot: flat
             if i < len(items) and items[i]:
                 seed, qty = items[i]
@@ -138,3 +149,33 @@ def test_snapshot_compare_end_to_end(tmp_path):
     assert r["mesos"] == 3300
     changes = sorted(it["change"] for it in r["items"])
     assert changes == [-18, 4, 19]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_inventory_found_after_moving_window(tmp_path):
+    from grindcap.anchors import save_anchor
+
+    c = cfg()
+    c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
+    teach_digits(tmp_path / "data" / "digits.npz", c)
+    items = [(1, 13), (2, 1), (3, 40), (4, 7), (5, 1), (6, 25)] + [None] * 18
+    calib = inventory_screen(items)
+    save_anchor(c, "inventory", calib, (X0 - 6, Y0 - 40, 176, 28))
+
+    s = build_snapshot(c, None, {"Etc": [inventory_screen(items)]}, Catalog(c["inventory"]["catalog_dir"]), when=0)
+    moved = list(items)
+    moved[0] = (1, 20)
+    e = build_snapshot(c, None, {"Etc": [inventory_screen(moved, ox=90, oy=55)]},
+                       Catalog(c["inventory"]["catalog_dir"]), when=600)
+    r = compare(s, e, Catalog(c["inventory"]["catalog_dir"]))
+    assert [(it["before"], it["after"]) for it in r["items"]] == [(13, 20)]
+
+
+def test_missing_window_is_reported(tmp_path):
+    from grindcap.anchors import locate, save_anchor
+
+    c = cfg()
+    c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
+    save_anchor(c, "inventory", inventory_screen([]), (X0 - 6, Y0 - 40, 176, 28))
+    with pytest.raises(LookupError):
+        locate(c, "inventory", np.full((460, 380, 3), (70, 60, 55), np.uint8))

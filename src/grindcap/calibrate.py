@@ -108,6 +108,21 @@ def calibrate_inventory(cfg, frame: np.ndarray) -> None:
         if v:
             inv[key] = int(v)
     print(f"  inventory grid: first {inv['first_slot']}, last {inv['last_slot']}, {inv['cols']}x{inv['rows']}")
+    calibrate_anchor(cfg, frame, "inventory",
+                     "Inventory anchor: box the inventory window's title bar (a part that never changes, "
+                     "not the tabs or items)")
+
+
+def calibrate_anchor(cfg, frame: np.ndarray, name: str, prompt: str) -> None:
+    from .anchors import save_anchor
+
+    print(prompt)
+    x, y, w, h = select_box(prompt + "  [C = skip]", frame)
+    if w == 0 or h == 0:
+        print(f"  skipped the {name} anchor: that window must then stay where it is now")
+        return
+    save_anchor(cfg, name, frame, (x, y, w, h))
+    print(f"  {name} anchor saved: the tool will now find this window wherever you move it")
 
 
 def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
@@ -131,6 +146,10 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
             print(f"  {name}: box {rc['box']}, fill colour {rc['fill_rgb']}")
         else:
             print(f"  {name}: box {rc['box']} (text)")
+    if any(n in ("exp", "level", "hp", "mp") for n in names):
+        calibrate_anchor(cfg, frame, "status",
+                         "Status-bar anchor: box a part of the status bar that never changes "
+                         "(e.g. the 'EXP' or 'LV' label, not the numbers)")
 
 
 def overlay(cfg, frame: np.ndarray, readings: dict | None = None) -> np.ndarray:

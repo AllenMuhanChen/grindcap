@@ -60,7 +60,7 @@ grindcap calibrate --only exp mesos level inventory
 grindcap teach-digits
 ```
 
-`calibrate` asks for boxes around your EXP number, meso total and level, then the top-left and bottom-right visible inventory slots. `teach-digits` shows each stacked item and asks you to type its number, so it learns the game's tiny digit font. Do this until it reports all digits 0-9 are known.
+`calibrate` asks for boxes around your EXP number, meso total and level, then the top-left and bottom-right visible inventory slots. It also asks for two anchors: the inventory window's title bar and a fixed label on the status bar. Those let it find the inventory and the status bar wherever they are on screen, so you can move the inventory or the game window freely between snapshots. `teach-digits` shows each stacked item and asks you to type its number, so it learns the game's tiny digit font. Do this until it reports all digits 0-9 are known.
 
 Each grind:
 

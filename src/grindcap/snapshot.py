@@ -35,17 +35,31 @@ def read_status(cfg, frame) -> dict:
 
 def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], catalog: Catalog,
                    when: float | None = None) -> dict:
-    inv = cfg["inventory"]
-    grid = Grid.from_cfg(inv)
+    from .anchors import shifted
     from .digits import DigitReader
 
+    inv = cfg["inventory"]
     digits = DigitReader(Path(inv["catalog_dir"]) / "digits.npz")
-    qty = QtyReader(grid.qty_box, cfg["session"].get("tesseract_cmd"), digits=digits)
-    tabs = {}
+    qty = QtyReader(Grid.from_cfg(inv).qty_box, cfg["session"].get("tesseract_cmd"), digits=digits)
+    tabs, first_page = {}, None
     for tab, frames in tab_pages.items():
-        pages = [read_page(f, grid, catalog, qty, inv["empty_std"], inv["match_threshold"]) for f in frames]
+        pages = []
+        for f in frames:
+            fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
+            pages.append(read_page(f, Grid.from_cfg(fc["inventory"]), catalog, qty,
+                                   inv["empty_std"], inv["match_threshold"]))
+            if first_page is None:
+                first_page = (f, fc)
         tabs[tab] = merge_pages(pages)
-    status = read_status(cfg, status_frame) if status_frame is not None else {}
+    status = {}
+    if status_frame is not None:
+        status = read_status(shifted(cfg, status_frame, ("status",)), status_frame)
+    if first_page is not None and (cfg["readers"].get("mesos") or {}).get("box"):
+        # The meso total lives in the inventory window, so read it from an inventory page.
+        f, fc = first_page
+        m = read_status(fc, f).get("mesos")
+        if m is not None:
+            status["mesos"] = m
     return {
         "time": when if when is not None else time.time(),
         "when": datetime.fromtimestamp(when or time.time()).isoformat(timespec="seconds"),

@@ -43,10 +43,20 @@ class Tracker:
                                  "monster_exp": self.cfg["session"].get("monster_exp"),
                                  "level": self.cfg["character"]["level"],
                                  "skills": self.cfg["character"]["skills"]}) + "\n")
+        located = False
         try:
             for t, frame in self.source.frames():
                 if max_seconds is not None and t > max_seconds:
                     break
+                if not located:
+                    # Find the status bar / inventory wherever they are, then read from there.
+                    from .anchors import shifted
+
+                    try:
+                        self.readers = build_readers(shifted(self.cfg, frame))
+                    except LookupError as e:
+                        print(f"Warning: {e} Using the calibrated positions.")
+                    located = True
                 for e in self.detector.process(t, read_values(self.readers, frame)):
                     self.events.append(e)
                     if fh:

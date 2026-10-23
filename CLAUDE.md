@@ -27,6 +27,8 @@ snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, m
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |
              snap start/end | compare | items | label | teach-digits
+anchors.py   Template-matched anchors (inventory title bar, status-bar label) found per frame; boxes that
+             belong to that window are shifted by the anchor's offset (shifted()). User wants minimal manual input.
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```
