@@ -54,6 +54,14 @@ def glyphs(mask: np.ndarray, min_px: int = 2) -> list[np.ndarray]:
     return [norm(g) for g in raw_glyphs(mask, min_px)]
 
 
+def dominant_colors(img: np.ndarray, k: int = 8) -> list[tuple[int, int, int]]:
+    """Most common colours in the image (RGB), as extra guesses for the digit colour."""
+    q = (img // 16 * 16 + 8).reshape(-1, 3)
+    vals, counts = np.unique(q, axis=0, return_counts=True)
+    order = np.argsort(-counts)[:k]
+    return [tuple(int(v) for v in vals[i][::-1]) for i in order]
+
+
 class DigitReader:
     def __init__(self, path: str | Path, colors=((255, 255, 255), (0, 0, 0)), tol: float = 70,
                  max_dist: float = 0.25):
@@ -78,7 +86,7 @@ class DigitReader:
 
     def teach(self, img: np.ndarray, number: str) -> bool:
         """Learn glyphs from an image whose number you know. Returns False if it couldn't split it."""
-        cands = [self.color] if self.color else self.colors
+        cands = [self.color] if self.color else self.colors + dominant_colors(img)
         for c in cands:
             gs = glyphs(text_mask(img, c, self.tol))
             if len(gs) == len(number):

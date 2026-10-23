@@ -242,12 +242,17 @@ def cmd_teach_digits(cfg, a):
     qty = QtyReader(grid.qty_box, digits=dr) if dr.ready else None
     region = lambda img: img[int(grid.qty_box[1] * img.shape[0]):, :int((grid.qty_box[0] + grid.qty_box[2]) * img.shape[1])]
     taught = 0
+    outdir = Path("captures") / "slots"
+    outdir.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(outdir / "frame.png"), frame)
     print("For each slot: type the stack number shown, Enter if it has no number, q to stop.")
-    for row in grid.slot_boxes():
-        for (x, y, w, h) in row:
+    for r, row in enumerate(grid.slot_boxes()):
+        for c, (x, y, w, h) in enumerate(row):
             img = frame[y:y + h, x:x + w]
             if is_empty(img, grid.qty_box, inv["empty_std"]):
                 continue
+            slot_png = outdir / f"slot_r{r + 1}c{c + 1}.png"
+            cv2.imwrite(str(slot_png), cv2.resize(img, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST))
             cv2.imshow("slot (enlarged)", cv2.resize(img, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST))
             cv2.waitKey(1)
             ans = input("number> ").strip()
@@ -256,7 +261,7 @@ def cmd_teach_digits(cfg, a):
             if ans.isdigit():
                 ok = dr.teach(region(img), ans)
                 taught += ok
-                print("  learned" if ok else "  couldn't split that into digits; try another slot")
+                print("  learned" if ok else f"  couldn't split that into digits. Picture saved: {slot_png}")
         else:
             continue
         break
