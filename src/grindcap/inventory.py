@@ -37,11 +37,14 @@ class Grid:
         return cls(inv["first_slot"], inv["last_slot"], inv["cols"], inv["rows"],
                    inv.get("qty_box") or [0.0, 0.62, 0.75, 0.38])
 
+    def pitch(self) -> tuple[float, float]:
+        """Screen pixels from one slot to the next, across and down."""
+        return ((self.last[0] - self.first[0]) / max(1, self.cols - 1),
+                (self.last[1] - self.first[1]) / max(1, self.rows - 1))
+
     def slot_boxes(self) -> list[list[tuple[int, int, int, int]]]:
         x0, y0, w, h = self.first
-        x1, y1 = self.last[0], self.last[1]
-        px = (x1 - x0) / max(1, self.cols - 1)
-        py = (y1 - y0) / max(1, self.rows - 1)
+        px, py = self.pitch()
         return [[(round(x0 + c * px), round(y0 + r * py), w, h) for c in range(self.cols)]
                 for r in range(self.rows)]
 
@@ -65,10 +68,17 @@ def signature(slot_img: np.ndarray, qty_box) -> np.ndarray:
 
 
 def is_empty(slot_img: np.ndarray, qty_box, std_max: float) -> bool:
+    """A slot is empty when its middle is flat. The edges are left out, so a box drawn a few pixels
+    off (taking in the slot border) still counts as empty."""
     import cv2
 
     g = cv2.cvtColor(slot_img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    return float(g[_qty_mask(*g.shape, qty_box)].std()) < std_max
+    h, w = g.shape
+    m = _qty_mask(h, w, qty_box)
+    keep = np.zeros_like(m)
+    keep[int(0.15 * h): h - int(0.15 * h), int(0.15 * w): w - int(0.15 * w)] = True
+    v = g[m & keep]
+    return v.size == 0 or float(v.std()) < std_max
 
 
 class Catalog:
@@ -127,58 +137,29 @@ class Catalog:
         return (self.items.get(iid) or {}).get("name") or iid
 
 
-class QtyReader:
-    """Reads the stack number in a slot. Slots with no number (equipment, single items) count as 1."""
-
-    def __init__(self, qty_box, tesseract_cmd=None, upscale=5, digits=None):
-        self.qty_box = qty_box
-        self.upscale = upscale
-        self.digits = digits if digits is not None and digits.ready else None
-        self._tess = None
-        if self.digits is None:
-            from .readers import setup_tesseract
-
-            self._tess = setup_tesseract(tesseract_cmd)
-
-    def region(self, slot_img: np.ndarray) -> np.ndarray:
-        h, w = slot_img.shape[:2]
-        fx, fy, fw, fh = self.qty_box
-        return slot_img[int(fy * h): int((fy + fh) * h), int(fx * w): int((fx + fw) * w)]
-
-    def read(self, slot_img: np.ndarray) -> tuple[int, str]:
-        import cv2
-
-        c = self.region(slot_img)
-        if self.digits is not None:
-            n = self.digits.read(c)
-            return (n if n else 1), ("" if n is None else str(n))
-        g = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
-        g = cv2.resize(g, None, fx=self.upscale, fy=self.upscale, interpolation=cv2.INTER_NEAREST)
-        _, th = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        if th.mean() < 127:
-            th = 255 - th
-        th = cv2.copyMakeBorder(th, 12, 12, 12, 12, cv2.BORDER_CONSTANT, value=255)
-        raw = self._tess.image_to_string(th, config="--psm 7 -c tessedit_char_whitelist=0123456789").strip()
-        digits = re.sub(r"\D", "", raw)
-        return (int(digits) if digits else 1), raw
-
-
-def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, qty: QtyReader,
+def read_page(frame: np.ndarray, grid: Grid, catalog: Catalog, digits,
               empty_std: float = 6.0, match_threshold: float = 12.0) -> list[list[Slot]]:
-    """One screenshot of the visible inventory grid -> rows of (item_id or None, qty)."""
-    rows = []
-    for row in grid.slot_boxes():
-        out = []
+    """One screenshot of the visible inventory grid -> rows of (item_id or None, qty).
+
+    `digits` is a digits.StackDigits. Slots with no number (equipment, single items) count as 1.
+    """
+    rows = grid.slot_boxes()
+    flat = [b for row in rows for b in row]
+    numbers = digits.read_slots(frame, flat, *grid.pitch())
+    out, i = [], 0
+    for row in rows:
+        line = []
         for (x, y, w, h) in row:
-            img = frame[y:y + h, x:x + w]
+            img = frame[max(0, y):y + h, max(0, x):x + w]
+            n = numbers[i].value
+            i += 1
             if img.size == 0 or is_empty(img, grid.qty_box, empty_std):
-                out.append((None, 0))
+                line.append((None, 0))
                 continue
             iid = catalog.match(signature(img, grid.qty_box), img, match_threshold)
-            n, _ = qty.read(img)
-            out.append((iid, n))
-        rows.append(out)
-    return rows
+            line.append((iid, n or 1))
+        out.append(line)
+    return out
 
 
 def _row_key(row) -> tuple:

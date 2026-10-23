@@ -21,8 +21,11 @@ calibrate.py cv2.selectROI box picking, bar colour sampling, snapshot/overlay fo
 inventory.py Grid (slot boxes from first/last visible slot), icon signatures with the stack-number area
              masked, Catalog (icon -> item-NNN id, name, price; data/catalog.json + icons/), read_page,
              merge_pages (stitches scrolled pages by largest identical row overlap), totals.
-digits.py    DigitReader: stack numbers by template matching on the game's fixed font (taught via
-             `teach-digits`), with splitting of touching glyphs. Tesseract is the fallback.
+digits.py    StackDigits: stack numbers in the game's font. Maps the screen back to native game pixels
+             (scale from slot pitch = 36 native px, sub-pixel phase by Laplacian sharpness), then reads
+             left to right at fixed advances (8 px, "1" = 5 px) by masked normalised correlation.
+             Built-in templates: data/stack_digits.npz, rebuilt by scripts/build_stack_digits.py from
+             tests/fixtures/game_frame.png. `teach-digits` = check + corrections (data/digits.npz).
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |
@@ -57,8 +60,9 @@ Everything was built and tested on synthetic frames; the real UI has not been se
 4. If Tesseract misreads the game's pixel font, replace TextReader with template matching on digit glyphs cut from a screenshot (the font is fixed, so this is usually more reliable than OCR).
 
 Snapshot mode specifics to check on the real game: icon match threshold (same item must match across
-captures, different items must not), empty-slot detection threshold, the stack-number colour (the
-teach step tries white then black), and whether hover highlights change icons.
+captures, different items must not), empty-slot detection threshold, and whether hover highlights change
+icons. Stack digits are verified on one real 1920x1080 frame (tests/fixtures/game_frame.png, Etc tab,
+5 columns x 6 rows): digit costs <= 0.23, non-digits >= 0.72, END_COST 0.45.
 
 The user's preferred first workflow is snapshots (start/end) from the control window, not live tracking.
 The user has one monitor and wants as little manual input as possible. HP/MP are read as numbers (cur/max);

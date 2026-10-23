@@ -14,7 +14,7 @@ Before/after mode (simpler, no live tracking):
   grindcap snap start             capture EXP and mesos, then page through your inventory (F8/F9/F10)
   grindcap snap end               same, after grinding
   grindcap compare                EXP/hr, mesos/hr and every item gained or used, per hour
-  grindcap teach-digits           teach it the stack-number font (once, before the first snapshot)
+  grindcap teach-digits           check the stack numbers it reads, correct any that are wrong
   grindcap items                  list known item icons and their names/prices
   grindcap label ITEM-ID          give an item id a name and price
 """
@@ -227,50 +227,83 @@ def cmd_label(cfg, a):
     print(f"{a.item}: {cat.items[a.item]}")
 
 
+def readings_sheet(frame, grid, readings, empty, scale: int = 3):
+    """One picture of every occupied slot with the number grindcap read under it (r1c1 = row 1, col 1)."""
+    import cv2
+    import numpy as np
+
+    tiles = []
+    for r, row in enumerate(grid.slot_boxes()):
+        line = []
+        for c, (x, y, w, h) in enumerate(row):
+            i = r * grid.cols + c
+            img = frame[max(0, y):y + h, max(0, x):x + w]
+            tile = np.full((h * scale + 26, w * scale, 3), 30, np.uint8)
+            if img.size:
+                tile[:img.shape[0] * scale, :img.shape[1] * scale] = cv2.resize(
+                    img, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+            if not empty[i]:
+                v = readings[i].value
+                cv2.putText(tile, f"r{r + 1}c{c + 1}: {v if v is not None else '-'}", (3, h * scale + 19),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (80, 255, 80), 1, cv2.LINE_AA)
+            line.append(cv2.copyMakeBorder(tile, 2, 2, 2, 2, cv2.BORDER_CONSTANT, value=(0, 0, 0)))
+        tiles.append(np.hstack(line))
+    return np.vstack(tiles)
+
+
 def cmd_teach_digits(cfg, a):
-    """Show each occupied slot and ask for its stack number, to learn the game's digit font."""
+    """Read every stack number, show what was read, and learn from your corrections."""
+    import re
+
     import cv2
 
+    from .anchors import shifted
     from .calibrate import load_frame
-    from .digits import DigitReader
-    from .inventory import Grid, QtyReader, is_empty
+    from .digits import StackDigits
+    from .inventory import Grid, is_empty
 
+    frame = load_frame(a.image, a.video, a.at, None if (a.image or a.video) else _screen(cfg))
+    try:
+        cfg = shifted(cfg, frame, ("inventory",))
+    except LookupError:
+        print("(Couldn't find the inventory landmark; using the calibrated position as is.)")
     inv = cfg["inventory"]
     grid = Grid.from_cfg(inv)
-    frame = load_frame(a.image, a.video, a.at, _screen(cfg))
-    dr = DigitReader(Path(inv["catalog_dir"]) / "digits.npz")
-    qty = QtyReader(grid.qty_box, digits=dr) if dr.ready else None
-    region = lambda img: img[int(grid.qty_box[1] * img.shape[0]):, :int((grid.qty_box[0] + grid.qty_box[2]) * img.shape[1])]
-    taught = 0
+    sd = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
+    boxes = [b for row in grid.slot_boxes() for b in row]
+    readings = sd.read_slots(frame, boxes, *grid.pitch())
+    empty = [is_empty(frame[max(0, y):y + h, max(0, x):x + w], grid.qty_box, inv["empty_std"])
+             for (x, y, w, h) in boxes]
     outdir = Path("captures") / "slots"
     outdir.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(outdir / "frame.png"), frame)
-    print("For each slot: type the stack number shown, Enter if it has no number, q to stop.")
-    for r, row in enumerate(grid.slot_boxes()):
-        for c, (x, y, w, h) in enumerate(row):
-            img = frame[y:y + h, x:x + w]
-            if is_empty(img, grid.qty_box, inv["empty_std"]):
-                continue
-            slot_png = outdir / f"slot_r{r + 1}c{c + 1}.png"
-            cv2.imwrite(str(slot_png), cv2.resize(img, None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST))
-            cv2.imshow("slot (enlarged)", cv2.resize(img, None, fx=6, fy=6, interpolation=cv2.INTER_NEAREST))
-            cv2.waitKey(1)
-            ans = input("number> ").strip()
-            if ans.lower() == "q":
-                break
-            if ans.isdigit():
-                ok = dr.teach(region(img), ans)
-                taught += ok
-                print("  learned" if ok else f"  couldn't split that into digits. Picture saved: {slot_png}")
-        else:
-            continue
-        break
+    sheet = readings_sheet(frame, grid, readings, empty)
+    sheet_png = outdir / "readings.png"
+    cv2.imwrite(str(sheet_png), sheet)
+    print(f"Read {sum(not e for e in empty)} occupied slots ({grid.cols} columns x {grid.rows} rows). "
+          f"Picture: {sheet_png}")
+    for r in range(grid.rows):
+        print("  " + "  ".join(
+            f"{'.' if empty[r * grid.cols + c] else (readings[r * grid.cols + c].value or '-'):>5}"
+            for c in range(grid.cols)))
+    if not a.image or a.ask:
+        cv2.imshow("what grindcap read (any key to close)", sheet)
+        cv2.waitKey(1)
+    print("\nIf every number is right, press Enter. Otherwise type the right ones, e.g.  r1c4=59 r3c2=52")
+    print("(use - for a slot that has no number, e.g. r2c1=-). If the grid itself is wrong, run "
+          "`grindcap calibrate --only inventory`.")
+    ans = input("> ").strip() if not a.yes else ""
     cv2.destroyAllWindows()
-    have = "".join(sorted(dr.templates))
-    if dr.color is not None:
-        dr.save()
-    print(f"Learned from {taught} slots. Digits known: {have or 'none'}." +
-          ("" if len(have) == 10 else " Teach more slots until all of 0-9 are covered."))
+    labels = ["" if e else (str(rd.value) if rd.value is not None else "") for rd, e in zip(readings, empty)]
+    fixed = 0
+    for r, c, v in re.findall(r"r(\d+)\s*c(\d+)\s*=\s*(\d+|-)", ans.lower()):
+        i = (int(r) - 1) * grid.cols + int(c) - 1
+        if 0 <= i < len(labels):
+            labels[i] = "" if v == "-" else str(int(v))
+            fixed += 1
+    n = sd.teach(frame, boxes, labels, *grid.pitch())
+    sd.save()
+    print(f"Learned {n} digits from {sum(bool(l) for l in labels)} slots ({fixed} corrected). Saved {sd.path}.")
 
 
 def main(argv=None):
@@ -328,8 +361,10 @@ def main(argv=None):
     sub.add_parser("test-capture", help="grab the game window once and save it").set_defaults(fn=cmd_test_capture)
     sub.add_parser("gui", help="small always-on-top control window").set_defaults(fn=cmd_gui)
 
-    sp = sub.add_parser("teach-digits", help="learn the game's stack-number font from your inventory")
+    sp = sub.add_parser("teach-digits", help="check the stack numbers it reads and correct any it got wrong")
     frame_args(sp)
+    sp.add_argument("--yes", action="store_true", help="accept what was read without asking")
+    sp.add_argument("--ask", action="store_true", help="show the picture even with --image")
     sp.set_defaults(fn=cmd_teach_digits)
 
     sp = sub.add_parser("label", help="name and price an item id")

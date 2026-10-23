@@ -10,11 +10,23 @@ from grindcap.inventory import Catalog, merge_pages
 from grindcap.snapshot import build_snapshot, compare, exp_gained
 
 HAS_TESS = shutil.which("tesseract") is not None
-SLOT, GAP, X0, Y0, COLS, ROWS = 40, 4, 20, 60, 4, 6
+SLOT, GAP, X0, Y0, COLS, ROWS = 32, 4, 20, 60, 4, 6   # 36 px pitch = the game at native size
+
+
+def draw_number(cell: np.ndarray, n: int, x: int = 1, y: int = 20):
+    """Stamp a stack number in the game's font (the built-in templates) onto a slot, like the game does."""
+    from grindcap.digits import ADV, FONT_H, StackDigits
+
+    font = StackDigits()
+    for d in str(n):
+        t = font.templates[d]
+        reg = cell[y:y + FONT_H, x:x + ADV[d]]
+        reg[t.mask] = np.clip(t.img[t.mask], 0, 255).astype(np.uint8)[:, None]
+        x += ADV[d]
 
 
 def icon(seed: int) -> np.ndarray:
-    """A distinct, deterministic 40x40 'item icon'."""
+    """A distinct, deterministic 32x32 'item icon'."""
     rng = np.random.default_rng(seed)
     img = np.full((SLOT, SLOT, 3), 235, np.uint8)
     for _ in range(5):
@@ -47,7 +59,7 @@ def inventory_screen(items: list[tuple[int, int] | None], top_row: int = 0, ox: 
                 seed, qty = items[i]
                 cell = icon(seed)
                 if qty > 1:
-                    cv2.putText(cell, str(qty), (1, SLOT - 3), cv2.FONT_HERSHEY_PLAIN, 1.0, (0, 0, 0), 1)
+                    draw_number(cell, qty)
             img[y:y + SLOT, x:x + SLOT] = cell
     return img
 
@@ -72,37 +84,47 @@ def cfg():
 
 def slot_with(seed, qty):
     cell = icon(seed)
-    cv2.putText(cell, str(qty), (1, SLOT - 3), cv2.FONT_HERSHEY_PLAIN, 1.0, (0, 0, 0), 1)
+    draw_number(cell, qty)
     return cell
 
 
-def teach_digits(path, c):
-    from grindcap.digits import DigitReader
-    from grindcap.inventory import QtyReader
+def test_stack_numbers_on_synthetic_slots():
+    from grindcap.digits import StackDigits
 
-    dr = DigitReader(path)
-    q = QtyReader(c["inventory"]["qty_box"], digits=dr) if False else None
-    box = c["inventory"]["qty_box"]
-    for i, n in enumerate(["10", "23", "45", "67", "89", "31"]):
-        cell = slot_with(100 + i, int(n))
-        h, w = cell.shape[:2]
-        reg = cell[int(box[1] * h): int((box[1] + box[3]) * h), int(box[0] * w): int((box[0] + box[2]) * w)]
-        assert dr.teach(reg, n)
-    dr.save()
-    return dr
+    nums = [13, 40, 7, 25, 60, 9, 2, 3, 15, 98, 111, 1047]
+    img = np.full((80, 36 * len(nums) + 20, 3), (70, 60, 55), np.uint8)
+    boxes = []
+    for i, n in enumerate(nums):
+        x, y = 10 + 36 * i, 20
+        img[y:y + SLOT, x:x + SLOT] = slot_with(i + 1, n)
+        boxes.append((x, y, SLOT, SLOT))
+    got = [r.value for r in StackDigits().read_slots(img, boxes, 36, 0)]
+    assert got == nums
 
 
-def test_digit_templates_read_new_numbers(tmp_path):
-    from grindcap.digits import DigitReader
+REAL = [[1, 1, 1, 59, 68], [0, 0, 1, 0, 1], [0, 52, 52, 14, 0],
+        [160, 81, 13, 0, 1], [105, 0, 0, 0, 0], [66, 0, 52, 0, 97]]
 
-    c = cfg()
-    teach_digits(tmp_path / "d.npz", c)
-    dr = DigitReader(tmp_path / "d.npz")
-    box = c["inventory"]["qty_box"]
-    for seed, n in [(1, 13), (3, 40), (4, 7), (6, 25), (11, 60), (13, 9), (10, 2), (7, 3), (9, 15), (2, 98)]:
-        cell = slot_with(seed, n)
-        h, w = cell.shape[:2]
-        assert dr.read(cell[int(box[1] * h):, :int(box[2] * w)]) == n
+
+@pytest.mark.parametrize("dx,dy,roll", [(0, 0, 0), (3, -2, 0), (-2, 3, 0), (0, 0, 3), (0, 0, 5)])
+def test_stack_numbers_on_real_screenshot(dx, dy, roll):
+    """The real game at 1920x1080 (drawn at 1366x768 and stretched). Boxes drawn a few pixels off and
+    the picture shifted (a different sub-pixel offset) must still read every number."""
+    from pathlib import Path
+
+    from grindcap.digits import StackDigits
+    from grindcap.inventory import Grid, is_empty
+
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / "game_frame.png"))
+    frame = np.roll(frame, (roll, roll), axis=(0, 1))
+    o = roll
+    g = Grid([1494 + dx + o, 139 + dy + o, 44, 44], [1695 + dx + o, 377 + dy + o, 44, 44], cols=5, rows=6)
+    boxes = [b for row in g.slot_boxes() for b in row]
+    got = [r.value for r in StackDigits().read_slots(frame, boxes, *g.pitch())]
+    want = [n or None for row in REAL for n in row]
+    assert got == want
+    empty = [is_empty(frame[y:y + h, x:x + w], g.qty_box, 6.0) for x, y, w, h in boxes]
+    assert empty == [n == 0 for row in REAL for n in row]
 
 
 def test_merge_pages_drops_overlap_and_keeps_empty_tail():
@@ -129,7 +151,6 @@ def test_snapshot_compare_end_to_end(tmp_path):
     c = cfg()
     c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
     cat = Catalog(c["inventory"]["catalog_dir"])
-    teach_digits(tmp_path / "data" / "digits.npz", c)
 
     # 10 rows of inventory: seed = item identity, qty = stack size
     before = [(s, q) for s, q in [(1, 13), (2, 1), (3, 40), (4, 7), (5, 1), (6, 25), (7, 3), (8, 1),
@@ -157,7 +178,6 @@ def test_inventory_found_after_moving_window(tmp_path):
 
     c = cfg()
     c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
-    teach_digits(tmp_path / "data" / "digits.npz", c)
     items = [(1, 13), (2, 1), (3, 40), (4, 7), (5, 1), (6, 25)] + [None] * 18
     calib = inventory_screen(items)
     save_anchor(c, "inventory", calib, (X0 - 6, Y0 - 40, 176, 28))
@@ -216,7 +236,6 @@ def test_snapflow_auto_pages_start_end_compare(tmp_path):
     c = cfg()
     c.data["inventory"]["catalog_dir"] = str(tmp_path / "data")
     c.data["inventory"]["snapshot_dir"] = str(tmp_path / "snaps")
-    teach_digits(tmp_path / "data" / "digits.npz", c)
     before = [(1, 13), (2, 1), (3, 40), (4, 7), (5, 1), (6, 25), (7, 3), (8, 1), (9, 15), (10, 2)] + [None] * 30
     after = list(before)
     after[0] = (1, 33)

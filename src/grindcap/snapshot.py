@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from .gamedata import exp_to_next
-from .inventory import Catalog, Grid, QtyReader, merge_pages, read_page, totals
+from .inventory import Catalog, Grid, merge_pages, read_page, totals
 from .readers import TextReader
 
 
@@ -36,17 +36,16 @@ def read_status(cfg, frame) -> dict:
 def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], catalog: Catalog,
                    when: float | None = None) -> dict:
     from .anchors import shifted
-    from .digits import DigitReader
+    from .digits import StackDigits
 
     inv = cfg["inventory"]
-    digits = DigitReader(Path(inv["catalog_dir"]) / "digits.npz")
-    qty = QtyReader(Grid.from_cfg(inv).qty_box, cfg["session"].get("tesseract_cmd"), digits=digits)
+    digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
     tabs, first_page = {}, None
     for tab, frames in tab_pages.items():
         pages = []
         for f in frames:
             fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
-            pages.append(read_page(f, Grid.from_cfg(fc["inventory"]), catalog, qty,
+            pages.append(read_page(f, Grid.from_cfg(fc["inventory"]), catalog, digits,
                                    inv["empty_std"], inv["match_threshold"]))
             if first_page is None:
                 first_page = (f, fc)

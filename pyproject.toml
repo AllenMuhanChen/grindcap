@@ -29,6 +29,9 @@ grindcap-gui = "grindcap.gui:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+grindcap = ["data/*.npz"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

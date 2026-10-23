@@ -74,10 +74,12 @@ One-time setup, with your inventory window open:
 
 ```
 grindcap calibrate --only exp mesos level inventory
-grindcap teach-digits
+grindcap teach-digits      # optional check of the stack numbers
 ```
 
-`calibrate` asks for boxes around your EXP number, meso total and level, then the top-left and bottom-right visible inventory slots. It also asks for two anchors: the inventory window's title bar and a fixed label on the status bar. Those let it find the inventory and the status bar wherever they are on screen, so you can move the inventory or the game window freely between snapshots. `teach-digits` shows each stacked item and asks you to type its number, so it learns the game's tiny digit font. Do this until it reports all digits 0-9 are known.
+`calibrate` asks for boxes around your EXP number, meso total and level, then the top-left and bottom-right visible inventory slots. It also asks for two anchors: the inventory window's title bar and a fixed label on the status bar. Those let it find the inventory and the status bar wherever they are on screen, so you can move the inventory or the game window freely between snapshots.
+
+Stack numbers are read with templates of the game's own digit font, which come with grindcap (cut from a real screenshot), so there is nothing to teach. `teach-digits` is a check: it reads every stack number in your open inventory, shows a picture with what it read under each slot (also saved as `captures/slots/readings.png`), and asks you to press Enter if all are right or type fixes like `r1c4=59`. Whatever you confirm or fix is added to its examples. If the numbers are in the wrong slots, the grid is off: run `grindcap calibrate --only inventory` and check the column and row counts.
 
 Each grind:
 
@@ -134,6 +136,7 @@ grindcap export sessions/20261022-210000_Green_Mushroom.jsonl
 
 - **HP and MP bars are pixel-accurate, not point-accurate.** A 200 px bar on a 1,000 HP character resolves 5 HP. Switch HP/MP to `mode: text` to read the numbers instead.
 - **Live tracking doesn't count item drops**, only floor mesos. Use before/after snapshots for items.
-- **Snapshots:** don't hover over items while capturing, since tooltips cover slots. Digits drawn over very dark icons can confuse the stack reader; check the report.
+- **Snapshots:** don't hover over items while capturing, since tooltips cover slots.
+- **Stack numbers** are matched in the game's own pixels: the game draws at a lower resolution (e.g. 1366x768) and stretches it to the window, and grindcap undoes the stretch using the slot spacing. It was built on one 1920x1080 screenshot; if your window size gives wrong numbers, `teach-digits` with corrections fixes it.
 - **Regen vs potions is guessed by size.** Tune `hp_regen_max` and `mp_regen_max` to your character.
 - **Kill counting needs the EXP number visible** (or the EXP bar in `mode: bar`, which is too coarse at higher levels).
