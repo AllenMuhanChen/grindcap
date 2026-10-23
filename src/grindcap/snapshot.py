@@ -47,7 +47,7 @@ def read_status(cfg, frame, prior: int | None = None, when: float | None = None)
 
     Level comes from the orange level tiles and EXP from "53,791 [97.98%]"; the two are checked
     against the EXP table (statusbar.py), which also fixes a misread level digit."""
-    from .statusbar import read_exp_texts, read_level, resolve_many
+    from .statusbar import read_exp_texts, read_level, resolve, resolve_many
 
     out = {}
     tess = cfg["session"].get("tesseract_cmd")
@@ -56,9 +56,11 @@ def read_status(cfg, frame, prior: int | None = None, when: float | None = None)
     level = read_level(frame, lv_box, tess)      # also finds the tiles without a box
     if level is not None:
         out["level"] = level
-    texts = read_exp_texts(frame, exp_box, tess)   # finds the EXP text itself; the box is a fallback
+    pr, up = (prior, 5) if prior is not None else last_level(cfg, when)
+    # finds the EXP text itself (the box is a fallback); stops at the first reading that fits
+    texts = read_exp_texts(frame, exp_box, tess,
+                           good=lambda t: resolve(t, level, pr, up)["checked"] and level is not None)
     if texts:
-        pr, up = (prior, 5) if prior is not None else last_level(cfg, when)
         r = resolve_many(texts, level, prior=pr, up=up)
         out["exp"], out["exp_pct"] = r["exp"], r["pct"]
         out["exp_raw"] = " | ".join(texts)
@@ -117,8 +119,17 @@ def open_itemdb(cfg, download: bool = True, progress=print):
     return db if db.ready else None
 
 
+def read_mesos(cfg, frame):
+    rc = cfg["readers"].get("mesos") or {}
+    if not rc.get("box"):
+        return None
+    return TextReader(rc["box"], cfg["session"].get("tesseract_cmd")).read(frame).value
+
+
 def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], catalog: Catalog,
-                   when: float | None = None) -> dict:
+                   when: float | None = None, status: dict | None = None, progress=None) -> dict:
+    """Read a snapshot. `status` = level/EXP/mesos/map already read from status_frame (e.g. when the
+    snapshot was started), so they aren't read twice. `progress(text)` is told what's happening."""
     from .anchors import shifted
     from .digits import StackDigits
 
@@ -127,11 +138,15 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     itemdb = open_itemdb(cfg)
     from .inventory import detect_tab
 
+    say = progress or (lambda text: None)
     skip = set(inv.get("skip_tabs") or [])
     by_tab: dict[str, list] = {}
     first_page, boxes, merge_log, skipped = None, {}, {}, {}
+    total = sum(len(v) for v in tab_pages.values())
+    done, seen = 0, []
     for given, frames in tab_pages.items():
         for i, f in enumerate(frames, 1):
+            done += 1
             fc = shifted(cfg, f, ("inventory",))  # the inventory may be anywhere on screen
             grid = Grid.from_cfg(fc["inventory"])
             key = f"{given}_{i:02d}"              # = the screenshot's file name in the snapshot folder
@@ -141,6 +156,11 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
             if tab in skip:
                 skipped[tab] = skipped.get(tab, 0) + 1
                 continue
+            sig = _grid_crop_sig(f, grid)
+            if sig is not None and any(t == tab and float(np.abs(sig - o).mean()) < 1.0 for t, o in seen):
+                continue                          # the very same view captured twice: nothing new
+            seen.append((tab, sig))
+            say(f"Reading page {done} of {total} ({tab})")
             page = read_page(f, grid, catalog, digits, inv["empty_std"], inv["match_threshold"],
                              itemdb, page_key=key)
             by_tab.setdefault(tab, []).append(page)
@@ -151,15 +171,20 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     for tab, pages in by_tab.items():         # pages of one tab are stitched together, tabs separately
         tabs[tab] = merge_pages(pages, log := [])
         merge_log[tab] = log
-    status = {}
-    if status_frame is not None:
-        status = read_status(shifted(cfg, status_frame, ("status",)), status_frame, when=when)
-    map_frame = status_frame if status_frame is not None else (first_page[0] if first_page else None)
-    where = read_map_safe(cfg, map_frame) if map_frame is not None else None
-    if first_page is not None and (cfg["readers"].get("mesos") or {}).get("box"):
+    if status is not None:
+        status = dict(status)
+        where = status.pop("map", None)
+    else:
+        say("Reading level, EXP and map")
+        status = {}
+        if status_frame is not None:
+            status = read_status(shifted(cfg, status_frame, ("status",)), status_frame, when=when)
+        map_frame = status_frame if status_frame is not None else (first_page[0] if first_page else None)
+        where = read_map_safe(cfg, map_frame) if map_frame is not None else None
+    if first_page is not None and status.get("mesos") is None:
         # The meso total lives in the inventory window, so read it from an inventory page.
         f, fc = first_page
-        m = read_status(fc, f).get("mesos")
+        m = read_mesos(fc, f)
         if m is not None:
             status["mesos"] = m
     return {
@@ -182,6 +207,18 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "slots": [{"ref": s[2], "item": s[0], "qty": s[1], "box": boxes.get(s[2]), "tab": tab}
                   for tab, rows in tabs.items() for row in rows for s in row if s[0] and len(s) > 2],
     }
+
+
+def _grid_crop_sig(frame, grid):
+    import cv2
+
+    b = grid.slot_boxes()
+    x0, y0 = b[0][0][0], b[0][0][1]
+    x1, y1 = b[-1][-1][0] + b[-1][-1][2], b[-1][-1][1] + b[-1][-1][3]
+    crop = frame[max(0, y0):y1, max(0, x0):x1]
+    if crop.size == 0:
+        return None
+    return cv2.resize(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), (60, 72), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
 def save_snapshot(snap: dict, folder: Path, status_frame=None, tab_pages=None) -> Path:
@@ -288,6 +325,12 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
         "levels": int(end["level"]) - int(start["level"]),
         "mesos": mesos, "mesos_per_hr": per_hr(mesos) if mesos is not None else None,
         "items_gained_value": gained_value, "items_used_value": used_value,
+        # revenue = what came in (mesos picked up, items gained); cost = what went out (items used,
+        # mesos spent if your total went down)
+        "revenue": max(mesos or 0, 0) + gained_value,
+        "cost": used_value + max(-(mesos or 0), 0),
+        "revenue_per_hr": per_hr(max(mesos or 0, 0) + gained_value),
+        "cost_per_hr": per_hr(used_value + max(-(mesos or 0), 0)),
         "net_mesos_incl_items": (mesos or 0) + gained_value - used_value,
         "net_per_hr": per_hr((mesos or 0) + gained_value - used_value),
         "unpriced": unpriced,
@@ -303,6 +346,7 @@ def format_compare(r: dict) -> str:
     lines = [
         f"NET MESOS / HR  {f(r['net_per_hr'])}   (incl. items)",
         f"EXP / HR        {f(r['exp_per_hr'])}{'   +' + str(r['levels']) + ' level(s)' if r['levels'] else ''}",
+        f"Revenue / hr    {f(r['revenue_per_hr'])}   Cost / hr {f(r['cost_per_hr'])}",
         f"Time            {int(m // 60)}:{int(round(m % 60)):02d}",
         "",
         f"  mesos {f(r['mesos'])}, items gained {f(r['items_gained_value'])}, used {f(r['items_used_value'])}",

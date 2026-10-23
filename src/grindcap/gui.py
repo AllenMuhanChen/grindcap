@@ -54,13 +54,14 @@ def main(config_path: str = "config.yaml"):
     b_end = ttk.Button(frm, text="End snapshot", command=lambda: begin("end"))
     b_cmp = ttk.Button(frm, text="Compare", command=lambda: run_bg(do_compare))
     b_page = ttk.Button(frm, text="Capture page (F8)", command=lambda: run_bg(do_page))
-    b_fin = ttk.Button(frm, text="Finish (F10)", command=lambda: run_bg(do_finish))
+    b_fin = ttk.Button(frm, text="Finish (F10)", command=lambda: finish_now())
     b_cancel = ttk.Button(frm, text="Cancel", command=lambda: cancel())
     b_review = ttk.Button(frm, text="Review / fix sessions", command=lambda: review())
     b_discard = ttk.Button(frm, text="Discard", command=lambda: discard())
     timer = tk.StringVar(value="")
     timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"))
     session = {"run": None}   # the start snapshot waiting for its end, if any
+    processing = {"on": False}  # a finished snapshot is being read in the background
 
     def refresh_running():
         from .sessions import running
@@ -74,6 +75,12 @@ def main(config_path: str = "config.yaml"):
     def layout(collecting: bool):
         for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, timer_lbl, b_discard):
             w.grid_remove()
+        if processing["on"]:
+            # reading the pages: nothing to press; the session timer already runs for a start snapshot
+            if session["run"]:
+                timer_lbl.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            update_timer()
+            return
         if collecting:
             b_page.grid(row=2, column=0, sticky="ew", padx=2)
             b_fin.grid(row=2, column=1, sticky="ew", padx=2)
@@ -148,7 +155,31 @@ def main(config_path: str = "config.yaml"):
         return ("page", flow.add_page())
 
     def do_finish():
-        return ("finished", flow.finish())
+        return ("finished", flow.finish(progress=lambda text: jobs.put(("ok", ("progress", text)))))
+
+    def finish_now():
+        """Stop collecting pages and read them in the background. For a start snapshot the session
+        clock starts now (at the last page), not when reading is done."""
+        if not flow.collecting or processing["on"]:
+            return
+        processing["on"] = True
+        if flow.which == "start":
+            session["run"] = {"time": flow.grind_time(), "map": (flow.status.get("map") or {}).get("name")}
+        else:
+            session["run"] = None                 # the session ended when End was pressed
+        readout.set("")
+        status.set(f"Got {len(flow.pages)} page(s). Reading them now; this can take a few seconds the first "
+                   "time new items show up.")
+        layout(False)
+        run_bg(do_finish)
+
+    def tabs_line() -> str:
+        need = flow.needed_tabs
+        marks = "  ".join(f"{t} {'✓' if t in flow.tabs_seen else '·'}" for t in need)
+        left = flow.finish_in()
+        if left is None:
+            return f"Tabs: {marks}"
+        return f"Tabs: {marks}\nAll tabs in. Finishing in {left:.0f} s (keep scrolling to add pages)."
 
     def do_compare():
         return ("compared",) + flow.compare()
@@ -183,13 +214,18 @@ def main(config_path: str = "config.yaml"):
         if kind == "started":
             _, which, line = result
             readout.set(line)
-            status.set(f"{which.title()} snapshot: open your inventory and scroll through every tab, top to "
-                       "bottom. Pages are captured as you go. Press Finish when done.")
+            status.set(f"{which.title()} snapshot: open your inventory and go through every tab, top to "
+                       "bottom. Pages are captured as you go, and it finishes by itself a few seconds after "
+                       "every tab has been seen (or press Finish).")
             layout(True)
         elif kind == "page":
             status.set(f"Captured {result[1]} page(s). Keep scrolling, or press Finish.")
+            readout.set(tabs_line())
+        elif kind == "progress":
+            status.set(result[1] + "...")
         elif kind == "finished":
             info = result[1]
+            processing["on"] = False
             layout(False)
             status.set(f"Saved the {info['which']} snapshot ({info['pages']} pages, {info['kinds']} kinds of item, "
                        f"{info['count']} items in total).")
@@ -220,17 +256,25 @@ def main(config_path: str = "config.yaml"):
             while True:
                 kind, payload = jobs.get_nowait()
                 if kind == "err":
-                    status.set(f"Problem: {payload}")
+                    status.set(f"Problem: {payload} You can just try again.")
+                    if processing["on"]:          # reading failed: back to collecting, pages kept
+                        processing["on"] = False
+                        layout(flow.collecting)
                 else:
                     handle(payload)
         except queue.Empty:
             pass
-        if not flow.collecting:
+        if not flow.collecting or processing["on"]:
             update_timer()
+        elif not processing["on"]:
+            readout.set(tabs_line())
+            left = flow.finish_in()
+            if auto.get() and left is not None and left <= 0:
+                finish_now()                      # every tab captured and nothing new for a few seconds
         if waiting and not busy.locked():
             fn, args = waiting.pop(0)
             run_bg(fn, *args)
-        elif flow.collecting and auto.get() and not busy.locked():
+        elif flow.collecting and not processing["on"] and auto.get() and not busy.locked():
             def poll():
                 return ("page", len(flow.pages)) if flow.poll() else ("idle",)
             run_bg(poll, retry=False)
@@ -246,7 +290,7 @@ def main(config_path: str = "config.yaml"):
             if key == keyboard.Key.f8:
                 root.after(0, lambda: run_bg(do_page))
             elif key == keyboard.Key.f10:
-                root.after(0, lambda: run_bg(do_finish))
+                root.after(0, finish_now)
 
         keyboard.Listener(on_press=on_press, daemon=True).start()
     except Exception:

@@ -72,6 +72,8 @@ def _read_tiles(reg, tesseract_cmd=None) -> int | None:
         t = re.sub(r"\D", "", _ocr(img, "--psm 8 -c tessedit_char_whitelist=0123456789", tesseract_cmd))
         if t and len(t) == len(group):          # one digit per tile
             votes[int(t)] += 1
+            if votes[int(t)] >= 2:
+                break                           # two sizes agree: enough
     v = votes.most_common(1)[0][0] if votes else None
     return v if v is not None and 1 <= v <= 200 else None
 
@@ -114,7 +116,7 @@ def exp_text_box(frame) -> list[int] | None:
     return [x + tw + int(2 * s), y0 + y - int(2 * s), int(140 * s), th + int(4 * s)]
 
 
-def read_exp_texts(frame, box, tesseract_cmd=None) -> list[str]:
+def read_exp_texts(frame, box, tesseract_cmd=None, good=None) -> list[str]:
     """OCR of the EXP number and the "[xx.xx%]" after it, at a few sizes. Uses the place right of the
     "EXP." label when that's found, else the calibrated box widened to the right."""
     import cv2
@@ -138,6 +140,8 @@ def read_exp_texts(frame, box, tesseract_cmd=None) -> list[str]:
             th = 255 - th
         th = cv2.copyMakeBorder(th, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
         out.append(_ocr(th, "--psm 7 -c tessedit_char_whitelist=0123456789,.[]%", tesseract_cmd))
+        if good is not None and good(out[-1]):
+            break                               # this reading fits the EXP table: done
     return out
 
 

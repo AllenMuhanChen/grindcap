@@ -94,7 +94,7 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
         status[name]["raw"] = snap.get("status_raw") or {}
     summary = {k: r[k] for k in ("minutes", "exp", "exp_per_hr", "levels", "mesos", "mesos_per_hr",
                                  "items_gained_value", "items_used_value", "net_mesos_incl_items",
-                                 "net_per_hr")}
+                                 "net_per_hr", "revenue", "cost", "revenue_per_hr", "cost_per_hr")}
     return {"summary": summary, "status": status, "items": items, "covered": covered,
             "catalog": sorted(([iid, it.get("name") or iid] for iid, it in catalog.items.items()),
                               key=lambda x: x[1].lower())}

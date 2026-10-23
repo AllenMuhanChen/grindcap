@@ -298,8 +298,8 @@ def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float, 
             sc = itemdb.scores(patch, [db["id"]] + list(db.get("neighbors") or []))
             if sc and min(sc, key=sc.get) == db["id"]:
                 return iid
-        elif it.get("name") or patch is None:
-            return iid                      # named by you (or nothing to check with): trust the icon
+        elif it.get("name") or patch is None or it.get("db_tried"):
+            return iid      # named by you, or already searched for and not in the item data
         else:
             unnamed = iid                   # seen before but never named: try to name it now
     m = itemdb.identify(patch, ignore) if patch is not None else None
@@ -307,8 +307,10 @@ def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float, 
         # Not in the database, or several items share this icon (scrolls): stays unnamed, and the
         # look-alike names are kept so the review page can offer them.
         iid = cands[0] if cands else catalog._add(sig, img)
-        if patch is not None and not catalog.items[iid].get("name") and "candidates" not in catalog.items[iid]:
-            catalog.items[iid]["candidates"] = itemdb.ties(patch)
+        it = catalog.items[iid]
+        if patch is not None and not it.get("name") and not it.get("db_tried"):
+            it["candidates"] = itemdb.ties(patch)
+            it["db_tried"] = True           # searched once; don't search all icons again every snapshot
             catalog.save()
         return iid
     known = catalog.by_db(m.item_id)

@@ -25,6 +25,33 @@ class SnapFlow:
         self.pages: list = []
         self.status: dict = {}
         self.watcher: PageWatcher | None = None
+        self.pressed_at: float | None = None      # when Start/End snapshot was pressed
+        self.tabs_seen: set[str] = set()
+        self.last_page_at: float | None = None
+
+    @property
+    def needed_tabs(self) -> list[str]:
+        """Tabs that must be captured before the snapshot can finish by itself."""
+        from .inventory import TABS
+
+        skip = set(self.cfg["inventory"].get("skip_tabs") or [])
+        return [t for t in TABS if t not in skip]
+
+    def finish_in(self, now: float | None = None) -> float | None:
+        """Seconds until the snapshot finishes by itself: once every needed tab has a page and no new
+        page came for inventory.auto_finish_after seconds (so you can still scroll a long tab).
+        None while tabs are missing or auto-finish is off."""
+        wait = self.cfg["inventory"].get("auto_finish_after", 4)
+        if not self.collecting or not wait or self.last_page_at is None:
+            return None
+        if any(t not in self.tabs_seen for t in self.needed_tabs):
+            return None
+        return max(0.0, wait - ((now or time.time()) - self.last_page_at))
+
+    def grind_time(self) -> float:
+        if self.which == "start":
+            return self.last_page_at or time.time()
+        return self.pressed_at or time.time()
 
     @property
     def collecting(self) -> bool:
@@ -34,9 +61,10 @@ class SnapFlow:
         """Grab EXP/level/mesos now. Returns what was read so it can be shown for checking."""
         from .anchors import shifted
 
-        self.which = which
-        self.pages = []
-        self.status_frame = self.grab()
+        frame = self.grab()          # first: if the capture fails, nothing has changed
+        self.which, self.pages, self.status_frame = which, [], frame
+        self.pressed_at = time.time()
+        self.tabs_seen, self.last_page_at = set(), None
         try:
             fc = shifted(self.cfg, self.status_frame)
         except LookupError:
@@ -49,7 +77,18 @@ class SnapFlow:
         return self.status
 
     def add_page(self, frame=None) -> int:
-        self.pages.append(frame if frame is not None else self.grab())
+        from .anchors import shifted
+        from .inventory import Grid, detect_tab
+
+        frame = frame if frame is not None else self.grab()
+        self.pages.append(frame)
+        self.last_page_at = time.time()
+        try:
+            tab = detect_tab(frame, Grid.from_cfg(shifted(self.cfg, frame, ("inventory",))["inventory"]))
+        except Exception:
+            tab = None
+        if tab:
+            self.tabs_seen.add(tab)
         return len(self.pages)
 
     def poll(self) -> bool:
@@ -62,11 +101,16 @@ class SnapFlow:
             return True
         return False
 
-    def finish(self) -> dict:
+    def finish(self, progress=None) -> dict:
+        """Read and save the snapshot. Its time is when the grind starts or ends: for a start
+        snapshot, when the last page was captured (reading the pages afterwards doesn't count); for
+        an end snapshot, when End was pressed (paging through the inventory isn't grinding)."""
         if not self.collecting:
             raise RuntimeError("No snapshot in progress.")
+        when = self.grind_time()
         cat = Catalog(self.cfg["inventory"]["catalog_dir"])
-        snap = build_snapshot(self.cfg, self.status_frame, {"Inventory": self.pages}, cat)
+        snap = build_snapshot(self.cfg, self.status_frame, {"Inventory": self.pages}, cat, when=when,
+                              status=self.status, progress=progress)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         folder = save_snapshot(snap, Path(self.cfg["inventory"]["snapshot_dir"]) / f"{self.which}-{stamp}",
                                self.status_frame, {"Inventory": self.pages})

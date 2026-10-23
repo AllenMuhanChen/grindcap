@@ -66,6 +66,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # cosmetics) aren't in the item data, so they only add misreads. The open tab is detected
         # from the highlighted tab button.
         "skip_tabs": ["Cash", "Deco"],
+        # Finish a snapshot by itself this many seconds after the last new page, once every counted
+        # tab has a page (0 = only when you press Finish).
+        "auto_finish_after": 4,
         # Name new items by matching their icons with the game's data from maplestory.io
         # (region MCW = MapleStory Classic World). Downloaded once into <catalog_dir>/itemdb/.
         "itemdb": {"enabled": True, "region": "MCW", "version": "1", "min_ratio": 1.25},

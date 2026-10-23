@@ -69,7 +69,13 @@ gui.py       tkinter always-on-top control window over SnapFlow; work runs in th
              priority over auto-capture polls. Entry point grindcap-gui (no console). One session at a
              time: sessions.running() (newest start newer than every end) greys out Start, enables End,
              shows a running timer + map and a Discard button (deletes that start snapshot).
-             User cares most about Net mesos/hr incl. items and EXP/hr: those lead every summary.
+             User cares most about Net mesos/hr incl. items and EXP/hr: those lead every summary
+             (then revenue/hr and cost/hr). Finish runs in the background with progress messages;
+             auto-finish when SnapFlow.finish_in() hits 0 (all non-skipped tabs seen via detect_tab,
+             no new page for auto_finish_after s). Snapshot time: start = last page captured, end =
+             End pressed. build_snapshot(status=...) reuses the Start readings; duplicate pages and
+             unnamed items already searched (db_tried) are skipped, so a known inventory reads in ~1 s.
+             wincap.grab retries 3x and never switches WGC off for good after a black frame.
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```

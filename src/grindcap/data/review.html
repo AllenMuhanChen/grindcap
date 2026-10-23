@@ -196,6 +196,8 @@ function render() {
   $("#stats").innerHTML =
     `<div class="stat big"><b>${fmt(s.net_per_hr)}</b><span>Net mesos / hr incl. items</span></div>
      <div class="stat big"><b>${fmt(s.exp_per_hr)}</b><span>EXP / hr</span></div>
+     <div class="stat"><b class="pos">${fmt(s.revenue_per_hr)}</b><span>Revenue / hr</span></div>
+     <div class="stat"><b class="neg">${fmt(s.cost_per_hr)}</b><span>Cost / hr</span></div>
      <div class="stat"><b>${hm(s.minutes)}</b><span>Time (h:mm)</span></div>
      <div class="stat small"><b>${fmt(s.mesos)}</b><span>Raw mesos gained (${fmt(s.mesos_per_hr)}/hr)</span></div>`;
 

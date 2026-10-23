@@ -155,7 +155,28 @@ class GameWindow:
                                "(and not minimized)? Run `grindcap windows` to see window titles.")
         return hit  # (hwnd, exact title, client rect)
 
-    def grab(self) -> np.ndarray:
+    def grab(self, tries: int = 3, wait: float = 0.4) -> np.ndarray:
+        """A picture of the game window. A failed or black grab is retried a few times (the game can
+        show a black frame while loading a map or switching windows), and a capture method that
+        failed once is tried again next time rather than switched off for good."""
+        last = None
+        for i in range(tries):
+            try:
+                return self._grab_once()
+            except CaptureError as e:
+                last = e
+                if "minimized" in str(e) or "Couldn't find" in str(e) or "only works on Windows" in str(e):
+                    break
+                self._reset_wgc()
+                time.sleep(wait)
+        raise last
+
+    def _reset_wgc(self):
+        if self._wgc is not None:
+            self._wgc.stop()
+        self._wgc = None
+
+    def _grab_once(self) -> np.ndarray:
         if sys.platform != "win32":
             raise CaptureError("Game-window capture only works on Windows.")
         hwnd, exact, rect = self.find()
@@ -168,17 +189,16 @@ class GameWindow:
             try:
                 if m == "wgc" and not self._wgc_failed:
                     if self._wgc is None or self.window_title != exact:
-                        if self._wgc:
-                            self._wgc.stop()
+                        self._reset_wgc()
                         self._wgc, self.window_title = _WGC(exact, hwnd), exact
                     img = self._wgc.latest()
                     if _looks_blank(img):
-                        raise CaptureError("no frame")
+                        raise CaptureError("black picture")
                     _check_size(img, hwnd, rect)
                 elif m == "printwindow":
                     img = _printwindow(hwnd)
                     if _looks_blank(img):
-                        raise CaptureError("black image")
+                        raise CaptureError("black picture")
                 elif m == "screen":
                     # A plain screenshot shows whatever is on top, so only trust it if the game is.
                     if not winfind.is_foreground(hwnd):
@@ -189,13 +209,14 @@ class GameWindow:
                 self.method = m
                 return img
             except ImportError:
-                self._wgc_failed = True
+                self._wgc_failed = True          # windows-capture isn't installed: don't keep trying
                 errors.append(f"{m}: windows-capture not installed")
-            except Exception as e:  # try the next method
+            except Exception as e:  # try the next method; WGC is tried again on the next grab
                 if m == "wgc":
-                    self._wgc_failed = True
+                    self._reset_wgc()
                 errors.append(f"{m}: {e}")
-        raise CaptureError("Couldn't capture the game window: " + "; ".join(errors))
+        raise CaptureError("Couldn't capture the game window (" + "; ".join(errors) + "). "
+                           "If the game was loading or minimized, just try again.")
 
     def diagnose(self) -> list[tuple[str, np.ndarray | None, str]]:
         """Try every method separately: [(method, image or None, what happened)]."""

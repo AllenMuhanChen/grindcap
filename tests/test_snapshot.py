@@ -407,3 +407,22 @@ def test_wrong_level_corrected_from_previous_level():
     assert r["exp"] == 10 and r["level"] in (26, 27) and r["level_options"] == [26, 27]
     # read as 27 and it fits: no doubt
     assert resolve("1010.02%1", 27, prior=26)["level_options"] == []
+
+
+def test_snapflow_finishes_itself_after_every_tab_and_times_the_grind(tmp_path, monkeypatch):
+    from grindcap.app import SnapFlow
+    from grindcap import inventory
+
+    c = cfg()
+    c.data["inventory"]["skip_tabs"] = ["Equip", "Setup", "Cash", "Deco"]
+    c.data["inventory"]["auto_finish_after"] = 3
+    tabs = iter(["Use", "Etc"])
+    monkeypatch.setattr(inventory, "detect_tab", lambda frame, grid: next(tabs))
+    flow = SnapFlow(c, lambda: inventory_screen([(1, 5)] + [None] * 23))
+    flow.start("start")
+    flow.add_page()
+    assert flow.finish_in() is None                      # Etc not seen yet
+    flow.add_page()
+    t = flow.last_page_at
+    assert flow.finish_in(t + 1) == pytest.approx(2) and flow.finish_in(t + 5) == 0
+    assert flow.grind_time() == t                        # the session starts at the last page

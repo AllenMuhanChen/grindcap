@@ -169,6 +169,9 @@ class TextReader:
             text = self._tess.image_to_string(
                 self.preprocess(c, f, interp), config="--psm 7 -c tessedit_char_whitelist=0123456789/,.%[]()")
             reads.append(self.parse_pair(text.strip()) if self.pair else self.parse(text.strip()))
+            vals = [r.value for r in reads]
+            if len(reads) >= 2 and vals[0] is not None and len(set(vals)) == 1:
+                break   # the first readings agree: no need for more (each OCR run costs ~0.15 s)
         counts = Counter(r.value for r in reads if r.value is not None)
         if not counts:
             return reads[0]

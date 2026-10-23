@@ -120,3 +120,12 @@ def test_session_names_saved_flag_and_delete(tmp_path):
     assert not e.exists() and s.exists()
     sessions.delete(root, "end-2")
     assert not s.exists() and sessions.list_sessions(root) == []
+
+
+def test_revenue_and_cost(tmp_path):
+    cat, root, s, e = setup(tmp_path)
+    r = compare(load_snapshot(s), load_snapshot(e), cat)
+    # mesos 500 -> 900; Snail Shell +40 at NPC 3; Red Potion -40 at NPC 25; item-003 has no price
+    assert (r["revenue"], r["cost"]) == (400 + 120, 1000)
+    assert r["revenue_per_hr"] == 520 and r["cost_per_hr"] == 1000      # the session is one hour
+    assert r["net_mesos_incl_items"] == r["revenue"] - r["cost"]

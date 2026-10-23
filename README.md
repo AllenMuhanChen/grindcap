@@ -25,8 +25,8 @@ grindcap-gui
 A small window opens and stays on top of everything. It captures the MapleStory window directly, even when other windows cover it (the game just can't be minimized).
 
 1. Click **Start snapshot**. It reads your EXP and mesos right away and shows them, so you can check.
-2. In the game, open your inventory and scroll through every tab, top to bottom. Pages are captured automatically each time you stop scrolling. You can also press **F8** to capture a page by hand.
-3. Click **Finish** (or press **F10**).
+2. In the game, open your inventory and go through every tab, top to bottom. Pages are captured automatically each time you stop scrolling (or press **F8**). The window ticks off the tabs it has seen.
+3. Once every counted tab (Equip, Use, Setup, Etc) has a page, it finishes by itself a few seconds after the last new page (`inventory.auto_finish_after`, 4 s); keep scrolling to add pages and the countdown restarts. Or click **Finish** / press **F10**. The session clock starts at the last page; reading the pages happens in the background with progress shown.
 4. Grind. Then do the same with **End snapshot**.
 5. Click **Compare** to see EXP/hr, mesos/hr and items gained or used, plus a report with item icons.
 
