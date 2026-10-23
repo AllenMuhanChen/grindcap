@@ -96,21 +96,25 @@ class TextReader:
         self._last_hash = None
         self._last = Reading(None)
 
-    def preprocess(self, c: np.ndarray) -> np.ndarray:
+    def preprocess(self, c: np.ndarray, f: int | None = None, interp=None) -> np.ndarray:
         import cv2
 
         g = cv2.cvtColor(c, cv2.COLOR_BGR2GRAY)
         # Scale so text is roughly 40-60 px tall, which is where Tesseract does best.
-        f = self.upscale or max(1, round(50 / max(1, g.shape[0])))
-        g = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC)
+        f = f or self.upscale or max(1, round(50 / max(1, g.shape[0])))
+        g = cv2.resize(g, None, fx=f, fy=f, interpolation=cv2.INTER_CUBIC if interp is None else interp)
         _, th = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         if th.mean() < 127:  # Tesseract wants dark text on light background
             th = 255 - th
         return cv2.copyMakeBorder(th, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
 
+    THOUSANDS = re.compile(r"(?<=\d)[.,' ](?=\d{3}(?!\d))")
+
     @classmethod
     def parse(cls, text: str) -> Reading:
-        nums = [int(n.replace(",", "")) for n in cls.NUM.findall(text)]
+        # The game's thousands comma often OCRs as a period or a space: "53.791" means 53,791.
+        clean = cls.THOUSANDS.sub("", text)
+        nums = [int(n.replace(",", "")) for n in cls.NUM.findall(clean)]
         if not nums:
             return Reading(None, raw=text)
         return Reading(nums[0], nums[1] if len(nums) > 1 else None, raw=text)
@@ -120,11 +124,34 @@ class TextReader:
         h = hashlib.blake2b(c.tobytes(), digest_size=8).digest()
         if h == self._last_hash:
             return self._last
-        img = self.preprocess(c)
-        text = self._tess.image_to_string(
-            img, config="--psm 7 -c tessedit_char_whitelist=0123456789/,.%[]()")
-        self._last_hash, self._last = h, self.parse(text.strip())
+        self._last_hash, self._last = h, self.vote(c)
         return self._last
+
+    def vote(self, c: np.ndarray) -> Reading:
+        """OCR the crop at a few scales and keep the most common reading.
+
+        Tiny pixel fonts are fragile: one scale can drop or change a digit. Majority wins; ties go to
+        the default scale.
+        """
+        import cv2
+        from collections import Counter
+
+        base = self.upscale or max(1, round(50 / max(1, c.shape[0])))
+        tries = [(base, cv2.INTER_CUBIC), (base, cv2.INTER_NEAREST), (base + 1, cv2.INTER_NEAREST),
+                 (max(2, base - 1), cv2.INTER_NEAREST), (base + 1, cv2.INTER_CUBIC)]
+        reads = []
+        for f, interp in tries:
+            text = self._tess.image_to_string(
+                self.preprocess(c, f, interp), config="--psm 7 -c tessedit_char_whitelist=0123456789/,.%[]()")
+            reads.append(self.parse(text.strip()))
+        counts = Counter(r.value for r in reads if r.value is not None)
+        if not counts:
+            return reads[0]
+        best = max(counts.values())
+        for r in reads:  # first (default scale) among the most common
+            if r.value is not None and counts[r.value] == best:
+                return r
+        return reads[0]
 
 
 def build_readers(cfg, strict: bool = False) -> dict:

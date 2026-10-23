@@ -43,6 +43,10 @@ def test_bar_reader_with_text_overlay(hp):
 
 
 def test_text_parse():
+    assert TextReader.parse("53.791").value == 53791       # comma misread as a period
+    assert TextReader.parse("53 791").value == 53791
+    assert TextReader.parse("1.234.567").value == 1234567
+    assert TextReader.parse("6.10%").value == 6               # a real decimal is left alone
     assert TextReader.parse("312/450").value == 312
     assert TextReader.parse("[312/450]").max == 450
     assert TextReader.parse("1,234,567").value == 1234567
@@ -114,3 +118,13 @@ def test_replay_from_video(tmp_path):
     s = summarize(Tracker(make_cfg(), VideoSource(str(path), fps=8)).run())
     assert s["kills"] == truth["kills"]
     assert s["touches"] == truth["touches"]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_real_game_exp_crop():
+    """EXP number cropped from the real game (MapleStory Classic, 15 px tall)."""
+    from pathlib import Path
+
+    img = cv2.imread(str(Path(__file__).parent / "fixtures" / "exp_53791.png"))
+    r = TextReader([0, 0, img.shape[1], img.shape[0]])
+    assert r.read(img).value == 53791
