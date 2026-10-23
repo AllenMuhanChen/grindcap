@@ -1,0 +1,99 @@
+"""Configuration: where things are on screen, what your skills cost, and detection thresholds.
+
+The config is a plain YAML file (default: config.yaml next to where you run grindcap).
+`grindcap calibrate` writes the reader boxes for you; everything else you edit by hand.
+"""
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    "capture": {
+        # mss monitor index: 1 is the primary monitor. 0 is all monitors stitched together.
+        "monitor": 1,
+        # Optional sub-rectangle of the monitor to grab: {left, top, width, height}.
+        # Reader boxes are always relative to this area (or to the whole monitor if null).
+        "region": None,
+        # Frames per second to sample. 8 is enough to separate individual hits.
+        "fps": 8,
+    },
+    "character": {
+        "level": 30,
+        # MP cost of each skill you cast. An MP drop that matches a cost is counted as that cast.
+        "skills": {"Power Strike": 4, "Final Attack": 8},
+        # Only needed when HP/MP are read as bars (bars give a fraction, this turns it into points).
+        "max_hp": None,
+        "max_mp": None,
+    },
+    "readers": {
+        # mode "text": OCR the numbers in the box (e.g. "312/450"). Needs Tesseract installed.
+        # mode "bar":  measure how full a coloured bar is. No OCR needed.
+        # box: [x, y, width, height] in pixels, relative to the capture area.
+        "hp": {"mode": "bar", "box": None, "fill_rgb": None, "tol": 45},
+        "mp": {"mode": "bar", "box": None, "fill_rgb": None, "tol": 45},
+        "exp": {"mode": "text", "box": None},
+        # Your meso total in the inventory window (keep the inventory open while grinding).
+        "mesos": {"mode": "text", "box": None},
+    },
+    "detection": {
+        # A reading must stay the same for this many frames before it counts. Filters animation flicker.
+        "settle_frames": 2,
+        # HP changes smaller than this (points) are ignored.
+        "hp_noise": 1,
+        # HP gains up to this size are natural regeneration; bigger gains are potions or heals.
+        "hp_regen_max": 20,
+        "mp_regen_max": 10,
+        # An MP drop within this many points of a skill cost counts as that skill.
+        "mp_tol": 1,
+        # Ignore EXP readings that jump by more than this many kills at once (OCR misreads).
+        "max_kills_per_step": 8,
+    },
+    "session": {
+        "monster": "Unknown",
+        # EXP per kill of the monster you are farming. Used to split kills that land in the same frame.
+        "monster_exp": None,
+        "out_dir": "sessions",
+        # Tesseract binary, if it is not on PATH (Windows example: C:/Program Files/Tesseract-OCR/tesseract.exe)
+        "tesseract_cmd": None,
+    },
+}
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+@dataclass
+class Config:
+    data: dict[str, Any] = field(default_factory=lambda: copy.deepcopy(DEFAULT_CONFIG))
+    path: Path | None = None
+
+    def __getitem__(self, key: str) -> Any:
+        return self.data[key]
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Config":
+        p = Path(path)
+        raw = yaml.safe_load(p.read_text()) if p.exists() else {}
+        return cls(_merge(DEFAULT_CONFIG, raw or {}), p)
+
+    def save(self, path: str | Path | None = None) -> Path:
+        p = Path(path or self.path or "config.yaml")
+        p.write_text(yaml.safe_dump(self.data, sort_keys=False))
+        self.path = p
+        return p
+
+    def configured_readers(self) -> dict[str, dict]:
+        """Readers that have a box set; unconfigured ones are skipped."""
+        return {k: v for k, v in self.data["readers"].items() if v.get("box")}

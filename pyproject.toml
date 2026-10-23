@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "grindcap"
+version = "0.1.0"
+description = "Screen-capture tracker for MapleStory Classic grinding sessions: kills, touches, casts, mesos, EXP/hr."
+requires-python = ">=3.10"
+dependencies = [
+  "mss>=9",
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+grindcap = "grindcap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

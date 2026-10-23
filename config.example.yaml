@@ -1,0 +1,44 @@
+# grindcap config. Copy to config.yaml and edit.
+# Reader boxes are filled in by `grindcap calibrate`; you can also type them as [x, y, width, height].
+# See src/grindcap/config.py for what every field means.
+capture:
+  monitor: 1
+  region: null
+  fps: 8
+character:
+  level: 30
+  skills:
+    Power Strike: 4
+    Final Attack: 8
+  max_hp: null
+  max_mp: null
+readers:
+  hp:
+    mode: bar
+    box: null
+    fill_rgb: null
+    tol: 45
+  mp:
+    mode: bar
+    box: null
+    fill_rgb: null
+    tol: 45
+  exp:
+    mode: text
+    box: null
+  mesos:
+    mode: text
+    box: null
+detection:
+  settle_frames: 2
+  hp_noise: 1
+  hp_regen_max: 20
+  mp_regen_max: 10
+  mp_tol: 1
+  max_kills_per_step: 8
+session:
+  monster: Green Mushroom
+  monster_exp: 26
+  out_dir: sessions
+  tesseract_cmd: null
+
