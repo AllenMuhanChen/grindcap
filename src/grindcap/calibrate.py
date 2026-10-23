@@ -137,13 +137,14 @@ def calibrate_anchor(cfg, frame: np.ndarray, name: str, prompt: str) -> None:
     print(f"  {name} anchor saved: the tool will now find this window wherever you move it")
 
 
-def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
-    import cv2
-
+def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None, save=None) -> None:
+    """Ask for each box in turn. `save` is called after every step, so quitting halfway keeps progress."""
+    save = save or (lambda: None)
     names = only or list(cfg["readers"]) + ["inventory"]
     for name in names:
         if name == "inventory":
             calibrate_inventory(cfg, frame)
+            save()
             continue
         rc = cfg["readers"][name]
         title = PROMPTS.get((name, rc.get("mode", "bar")), name) + "  [Enter = confirm, C = skip]"
@@ -158,9 +159,11 @@ def calibrate(cfg, frame: np.ndarray, only: list[str] | None = None) -> None:
             print(f"  {name}: box {rc['box']}, fill colour {rc['fill_rgb']}")
         else:
             print(f"  {name}: box {rc['box']} (text)")
+        save()
     if any(n in ("exp", "level", "hp", "mp") for n in names):
         calibrate_anchor(cfg, frame, "status",
                          "Landmark: box the word EXP (or LV) on the bottom bar, without the numbers")
+        save()
 
 
 def overlay(cfg, frame: np.ndarray, readings: dict | None = None) -> np.ndarray:

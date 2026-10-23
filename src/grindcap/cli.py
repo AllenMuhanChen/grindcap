@@ -48,7 +48,12 @@ def cmd_calibrate(cfg, a):
     from .calibrate import calibrate, load_frame
 
     frame = load_frame(a.image, a.video, a.at, _screen(cfg))
-    calibrate(cfg, frame, a.only)
+    print("Progress is saved after every step. Press C to skip a step you've already done.")
+    try:
+        calibrate(cfg, frame, a.only, save=lambda: cfg.save(a.config))
+    except KeyboardInterrupt:
+        print("\nStopped. Everything up to the last finished step is saved.")
+        return
     print(f"Saved {cfg.save(a.config)}")
 
 
