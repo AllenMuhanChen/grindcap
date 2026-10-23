@@ -66,6 +66,11 @@ def client_rect(hwnd) -> dict | None:
     return {"left": pt.x, "top": pt.y, "width": r.right - r.left, "height": r.bottom - r.top}
 
 
+def is_foreground(hwnd) -> bool:
+    u = _user32()
+    return bool(u and u.GetForegroundWindow() == hwnd)
+
+
 def is_minimized(hwnd) -> bool:
     u = _user32()
     return bool(u and u.IsIconic(hwnd))

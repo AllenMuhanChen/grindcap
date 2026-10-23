@@ -158,6 +158,9 @@ class GameWindow:
                     if _looks_blank(img):
                         raise CaptureError("black image")
                 elif m == "screen":
+                    # A plain screenshot shows whatever is on top, so only trust it if the game is.
+                    if not winfind.is_foreground(hwnd):
+                        raise CaptureError("game isn't the window in front")
                     img = _screen(rect)
                 else:
                     continue
@@ -171,6 +174,32 @@ class GameWindow:
                     self._wgc_failed = True
                 errors.append(f"{m}: {e}")
         raise CaptureError("Couldn't capture the game window: " + "; ".join(errors))
+
+    def diagnose(self) -> list[tuple[str, np.ndarray | None, str]]:
+        """Try every method separately: [(method, image or None, what happened)]."""
+        out = []
+        try:
+            hwnd, exact, rect = self.find()
+        except CaptureError as e:
+            return [("find", None, str(e))]
+        out.append(("find", None, f"found window {exact!r}, {rect['width']}x{rect['height']}, "
+                                  f"{'minimized' if winfind.is_minimized(hwnd) else 'not minimized'}, "
+                                  f"{'in front' if winfind.is_foreground(hwnd) else 'behind other windows'}"))
+        try:
+            w = _WGC(exact)
+            img = w.latest(3.0)
+            w.stop()
+            out.append(("wgc", img, "ok" if not _looks_blank(img) else "no picture (blank or no frame)"))
+        except ImportError as e:
+            out.append(("wgc", None, f"windows-capture is not installed ({e}). Run: pip install windows-capture"))
+        except Exception as e:
+            out.append(("wgc", None, f"failed: {type(e).__name__}: {e}"))
+        try:
+            img = _printwindow(hwnd)
+            out.append(("printwindow", img, "ok" if not _looks_blank(img) else "black image (the game blocks it)"))
+        except Exception as e:
+            out.append(("printwindow", None, f"failed: {type(e).__name__}: {e}"))
+        return out
 
     def close(self):
         if self._wgc:

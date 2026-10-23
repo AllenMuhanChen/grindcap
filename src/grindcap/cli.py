@@ -56,13 +56,29 @@ def cmd_windows(cfg, a):
 
 
 def cmd_test_capture(cfg, a):
-    """Grab the game window once and save it, reporting which capture method worked."""
+    """Try each way of capturing the game window, save what each one got, and say what happened."""
     import cv2
 
     src = _screen(cfg)
-    img = src.grab_one()
     out = Path("captures")
     out.mkdir(exist_ok=True)
+    if src.game is not None:
+        print("Testing capture methods (keep the game open and NOT minimized; it can be behind other windows):")
+        for method, img, msg in src.game.diagnose():
+            line = f"  {method:<12} {msg}"
+            if img is not None:
+                p = out / f"test_{method}.png"
+                cv2.imwrite(str(p), img)
+                line += f"   -> saved {p}"
+            print(line)
+        print()
+    from .wincap import CaptureError
+
+    try:
+        img = src.grab_one()
+    except CaptureError as e:
+        print(f"Normal capture failed: {e}")
+        return
     p = out / "test_capture.png"
     cv2.imwrite(str(p), img)
     title = src.game.window_title if src.game and src.game.window_title else "(screen)"
