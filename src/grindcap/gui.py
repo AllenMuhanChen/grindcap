@@ -60,7 +60,8 @@ def main(config_path: str = "config.yaml"):
     b_summary = ttk.Button(frm, text="Summary chart", command=lambda: review(page="summary"))
     b_discard = ttk.Button(frm, text="Discard", command=lambda: discard())
     timer = tk.StringVar(value="")
-    timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"))
+    timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"), wraplength=230,
+                          justify="left")   # wraps long map names instead of widening the window
     session = {"run": None}   # the start snapshot waiting for its end, if any
     processing = {"on": False}  # a finished snapshot is being read in the background
 
@@ -109,7 +110,7 @@ def main(config_path: str = "config.yaml"):
             timer.set("")
             return
         secs = int(time.time() - run["time"])
-        where = f" · {run['map']}" if run.get("map") else ""
+        where = f"\n{run['map']}" if run.get("map") else ""
         timer.set(f"Session running {secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}{where}")
 
     def discard():
