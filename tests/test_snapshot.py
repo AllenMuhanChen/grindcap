@@ -441,3 +441,47 @@ def test_tab_comes_from_the_items_on_the_page(tmp_path):
     assert tab_from_items(etc_page, cat, db) == "Etc"
     mixed = [[("item-001", 3), ("item-003", 1)]]            # 1 vs 1: not sure, use the tab button
     assert tab_from_items(mixed, cat, db) is None
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_mesos_from_inventory_field():
+    from pathlib import Path
+
+    from grindcap.inventory import Grid
+    from grindcap.statusbar import read_mesos_field
+
+    fx = Path(__file__).parent / "fixtures"
+    clear = cv2.imread(str(fx / "game_frame.png"))
+    for dx, dy in ((0, 0), (3, -2), (-2, 3)):          # grid boxes drawn a little off
+        g = Grid([1494 + dx, 139 + dy, 44, 44], [1695 + dx, 377 + dy, 44, 44], cols=5, rows=6)
+        assert read_mesos_field(clear, g)[0] == 86676
+    covered = cv2.imread(str(fx / "use_tab_tooltip.png"))   # a tooltip over the field: no guess
+    g = Grid([1504, 138, 44, 44], [1706, 377, 44, 44], cols=5, rows=6)
+    assert read_mesos_field(covered, g)[0] is None
+
+
+ANT = [[20, 200, 12, 176, 4], [21, 6, 1, 1, 200], [11, 19, 0, 0, 0], [163, 98, 6, 0, 0], [0] * 5, [0] * 5]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_third_real_frame_ant_tunnel():
+    """Etc tab in Ant Tunnel IV: meso total 222,540, level 33, 2,595 EXP [1.87%], dark minimap."""
+    from pathlib import Path
+
+    from grindcap.digits import StackDigits
+    from grindcap.inventory import Grid
+    from grindcap.mapname import read_map
+    from grindcap.statusbar import read_exp_texts, read_level, read_mesos_field, resolve_many
+
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / "etc_ant_tunnel.png"))
+    g = Grid([1492, 140, 44, 44], [1694, 379, 44, 44], cols=5, rows=6)
+    assert read_mesos_field(frame, g)[0] == 222540
+    lv = read_level(frame, None)
+    assert (lv, resolve_many(read_exp_texts(frame, None), lv)["exp"]) == (33, 2595)
+    maps = [{"streetName": "Dungeon", "name": n} for n in ("Ant Tunnel I", "Ant Tunnel II", "Ant Tunnel III",
+                                                            "Ant Tunnel IV", "Deep Ant Tunnel I")]
+    m = read_map(frame, maps)
+    assert (m["street"], m["name"]) == ("Dungeon", "Ant Tunnel IV")
+    boxes = [b for row in g.slot_boxes() for b in row]
+    got = [r.value for r in StackDigits().read_slots(frame, boxes, *g.pitch())]
+    assert got == [n or None for row in ANT for n in row]

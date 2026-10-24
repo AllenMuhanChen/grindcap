@@ -54,14 +54,18 @@ sessions.py  list_sessions (each end snapshot + latest start before it; id = end
              (keeps a start another session uses). review.py re-exports list_sessions.
 mapname.py   Minimap map name: template-match data/minimap_header.png ("MINI MAP" bar, 1920x1080; scaled
              by frame height), Tesseract on the street + map lines, snapped to MCW map names (maps.json in
-             <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Stored as snapshot["map"].
+             <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Several OCR variants per line
+             (plain + white-letters-only); the pair closest to a real map wins. Stored as snapshot["map"].
 statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one digit per tile, vote; in the
              level box +-25 px, else searched in the bottom-left of the window), read_exp_texts (right of
              the "EXP." label found by template data/exp_label.png; calibrated box only as fallback),
              resolve: try every exp/pct split ("[" OCRs as 1) and keep one where exp/EXP_TO_NEXT[lv]*100
              rounds to pct (+-0.0051). Tile level that fits wins; else levels prior..prior+5 (prior = latest
              earlier snapshot with a confirmed level, or config level +69), several fitting -> level_options
-             shown on the review page. Verified on both fixtures (26/53791, 27/10), also with bad boxes.
+             shown on the review page. Verified on fixtures (26/53791, 27/10, 33/2595), also with bad boxes.
+             read_mesos_field: the white meso field below the grid (located from the grid, not a box),
+             dark digits, groups-of-3 check, 2 sizes agreeing; None if covered. build_snapshot reads it on
+             every page and takes the majority (mesos_checked). Fixture etc_ant_tunnel.png: 222,540.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

@@ -136,13 +136,17 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     inv = cfg["inventory"]
     digits = StackDigits(Path(inv["catalog_dir"]) / "digits.npz")
     itemdb = open_itemdb(cfg)
+    from collections import Counter
+
     from .inventory import detect_tab, tab_from_items
+    from .statusbar import read_mesos_field
 
     say = progress or (lambda text: None)
     skip = set(inv.get("skip_tabs") or [])
     by_tab: dict[str, list] = {}
     first_page, boxes, merge_log, skipped = None, {}, {}, {}
     total = sum(len(v) for v in tab_pages.values())
+    meso_reads = []      # the meso total, read on every page: the majority wins
     done, seen = 0, []
     for given, frames in tab_pages.items():
         for i, f in enumerate(frames, 1):
@@ -152,6 +156,9 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
             key = f"{given}_{i:02d}"              # = the screenshot's file name in the snapshot folder
             if first_page is None:
                 first_page = (f, fc)
+            if max(Counter(v for v, _ in meso_reads if v is not None).values(), default=0) < 3:
+                mv, mraw = read_mesos_field(f, grid, cfg["session"].get("tesseract_cmd"))
+                meso_reads.append((mv, mraw))
             looks = detect_tab(f, grid) or given   # the open tab, from the highlighted tab button
             sig = _grid_crop_sig(f, grid)
             if sig is not None and any(float(np.abs(sig - o).mean()) < 1.0 for o in seen):
@@ -184,9 +191,14 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
             status = read_status(shifted(cfg, status_frame, ("status",)), status_frame, when=when)
         map_frame = status_frame if status_frame is not None else (first_page[0] if first_page else None)
         where = read_map_safe(cfg, map_frame) if map_frame is not None else None
-    if first_page is not None and status.get("mesos") is None:
-        # The meso total lives in the inventory window, so read it from an inventory page.
-        f, fc = first_page
+    # The meso total lives in the inventory window: use what most pages agree on.
+    seen_m = Counter(v for v, _ in meso_reads if v is not None)
+    if seen_m:
+        status["mesos"], n = seen_m.most_common(1)[0]
+        status["mesos_raw"] = f"{n} of {len(meso_reads)} pages read {status['mesos']}"
+        status["mesos_checked"] = n >= 2 or len(meso_reads) == 1
+    elif first_page is not None and status.get("mesos") is None:
+        f, fc = first_page                    # old way: the calibrated meso box
         m = read_mesos(fc, f)
         if m is not None:
             status["mesos"] = m
@@ -200,6 +212,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "status_raw": {k: v for k, v in status.items() if k.endswith("_raw")},
         "exp_pct": status.get("exp_pct"),
         "exp_checked": status.get("exp_checked"),
+        "mesos_checked": status.get("mesos_checked"),
         "level_options": status.get("level_options") or [],
         "map": where,
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},

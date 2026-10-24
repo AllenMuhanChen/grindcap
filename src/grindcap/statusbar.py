@@ -221,3 +221,42 @@ def resolve(text: str, level_read: int | None, prior: int | None = None, up: int
             "level_fixed": level_read is not None and lv != level_read,
             # several levels fit this EXP and the tiles didn't settle it: worth a look in the review
             "level_options": options if len(options) > 1 and level_read not in options else []}
+
+
+MESO_TEXT = re.compile(r"^\d{1,3}([.,]\d{3})*$")   # 86,676 (the comma often reads as a period)
+
+
+def read_mesos_field(frame, grid, tesseract_cmd=None) -> tuple[int | None, str]:
+    """The meso total in the inventory window: a white field below the item grid, found from the
+    grid's position (so it moves with the window). Dark digits on white, read at a few sizes; a
+    reading counts only if it looks like a meso total (groups of 3 digits) and two sizes agree.
+    Returns (None, why) when the field isn't plain white, e.g. a tooltip is over it."""
+    import cv2
+
+    px, py = grid.pitch()
+    x0, ly = grid.first[0], grid.last[1]
+    xa, ya = int(x0 + 0.1 * px), int(ly + 1.0 * py)
+    xb, yb = int(x0 + 4.6 * px), int(ly + 2.0 * py)
+    reg = frame[max(0, ya):max(0, yb), max(0, xa):max(0, xb)]
+    if reg.size == 0:
+        return None, "field outside the picture"
+    g = cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY)
+    white = g > 235
+    rows = np.flatnonzero(white.mean(axis=1) > 0.5)
+    cols = np.flatnonzero(white[rows].mean(axis=0) > 0.5) if rows.size else rows
+    if rows.size < 0.15 * py or cols.size < 0.8 * px:
+        return None, "meso field not visible (covered?)"
+    fld = g[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]
+    votes, texts = Counter(), []
+    for k in (4, 3, 5):
+        u = cv2.resize(fld, None, fx=k, fy=k, interpolation=cv2.INTER_CUBIC)
+        _, th = cv2.threshold(u, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        th = cv2.copyMakeBorder(th, 12, 12, 12, 12, cv2.BORDER_CONSTANT, value=255)
+        t = _ocr(th, "--psm 7 -c tessedit_char_whitelist=0123456789,.", tesseract_cmd).replace(" ", "")
+        texts.append(t)
+        if MESO_TEXT.match(t):
+            v = int(re.sub(r"\D", "", t))
+            votes[v] += 1
+            if votes[v] >= 2:
+                return v, " | ".join(texts)
+    return None, " | ".join(texts)
