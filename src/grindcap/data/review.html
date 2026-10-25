@@ -63,6 +63,7 @@ button:hover { border-color: var(--accent); }
 #msg { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 6px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 #msg.show { opacity: .92; }
 .status td input { width: 110px; }
+.status img.meso { margin-top: 4px; max-width: 240px; image-rendering: pixelated; border: 1px solid var(--line, #ccc); border-radius: 4px; }
 .sessbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 10px; }
 .sessbar input.sname { width: 380px; font-weight: 600; }
 .sessbar input.smap { width: 260px; }
@@ -213,11 +214,14 @@ function render() {
       out.push(`<span class="tag warn">level unclear: ${x.level_options.join(" or ")} fit the EXP shown; type the right one</span>`);
     if (x.exp_checked === false && x.exp.read != null)
       out.push(`<span class="tag warn" title="${esc(x.raw.exp_raw || "")}">EXP didn't match the level's EXP table; check it</span>`);
+    if (x.mesos_checked === false && x.mesos.read != null)
+      out.push(`<span class="tag warn" title="${esc(x.raw.mesos_raw || "")}">pages disagreed on mesos; check the picture</span>`);
     return out.join(" ");
   };
   $("#status").innerHTML = `<tr><th class="l">Snapshot</th><th>Level</th><th>EXP</th><th>Mesos</th></tr>` +
     ["start", "end"].map(n => `<tr><td class="l">${n} <span class="muted">${esc(st[n].when || "")}</span> ${note(n)}</td>
-      <td>${field(n, "level")}</td><td>${field(n, "exp")}</td><td>${field(n, "mesos")}</td></tr>`).join("");
+      <td>${field(n, "level")}</td><td>${field(n, "exp")}</td><td>${field(n, "mesos")}${st[n].mesos_crop ? `<br><img class="meso" alt="meso field" title="as captured: type the total above if it was misread"
+        src="/mesocrop?session=${encodeURIComponent(SID)}&snap=${n}&t=${Date.now()}">` : ""}</td></tr>`).join("");
   $("#status").querySelectorAll("input").forEach(i => i.onchange = () => edit({op: "status", snap: i.dataset.snap, field: i.dataset.field, value: i.value}));
 
   const cov = D.covered || {start: [], end: []};

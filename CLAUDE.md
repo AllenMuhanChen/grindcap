@@ -66,6 +66,10 @@ statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one d
              read_mesos_field: the white meso field below the grid (located from the grid, not a box),
              dark digits, groups-of-3 check, 2 sizes agreeing; None if covered. build_snapshot reads it on
              every page and takes the majority (mesos_checked). Fixture etc_ant_tunnel.png: 222,540.
+             Field rows = the longest run of white rows (the light panel above is near-white too; spanning
+             it cropped in the field's border, read as a leading "1"). The page + box used is saved as
+             snapshot["mesos_field"]; the review page shows that crop next to the mesos inputs (/mesocrop;
+             older snapshots derive the box from two slot boxes). Fixture equip_burnt_land.png: 492,177.
 snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |

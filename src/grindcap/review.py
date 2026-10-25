@@ -91,6 +91,8 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
         status[name]["when"] = snap.get("when")
         status[name]["level_options"] = [] if fx.get("level") else snap.get("level_options") or []
         status[name]["exp_checked"] = snap.get("exp_checked")
+        status[name]["mesos_checked"] = snap.get("mesos_checked")
+        status[name]["mesos_crop"] = meso_field(snap) is not None
         status[name]["raw"] = snap.get("status_raw") or {}
     summary = {k: r[k] for k in ("minutes", "exp", "exp_per_hr", "levels", "mesos", "mesos_per_hr",
                                  "items_gained_value", "items_used_value", "net_mesos_incl_items",
@@ -247,6 +249,52 @@ def slot_crop_png(folder, ref: str, scale: int = 3) -> bytes | None:
     return buf.tobytes() if ok else None
 
 
+def meso_field(snap: dict) -> dict | None:
+    """{"page", "box"} of the meso field in one of the snapshot's pages. Saved by build_snapshot;
+    for older snapshots, worked out from two slot boxes of one page (rows and columns both differ)."""
+    if snap.get("mesos_field"):
+        return snap["mesos_field"]
+    import re
+
+    from .inventory import Grid
+    from .statusbar import meso_field_box
+
+    pages: dict[str, list] = {}
+    for sl in snap.get("slots", []):
+        m = re.match(r"(.+):r(\d+)c(\d+)$", sl.get("ref") or "")
+        if m and sl.get("box"):
+            pages.setdefault(m[1], []).append((int(m[2]), int(m[3]), sl["box"]))
+    for page, ss in sorted(pages.items()):
+        a = min(ss, key=lambda t: (t[0], t[1]))
+        b = max(ss, key=lambda t: (t[0], t[1]))
+        if b[0] == a[0] or b[1] == a[1]:
+            continue
+        px, py = (b[2][0] - a[2][0]) / (b[1] - a[1]), (b[2][1] - a[2][1]) / (b[0] - a[0])
+        first = [a[2][0] - (a[1] - 1) * px, a[2][1] - (a[0] - 1) * py, *a[2][2:]]
+        g = Grid(first, [first[0] + 4 * px, first[1] + 5 * py, *a[2][2:]], cols=5, rows=6)
+        return {"page": page, "box": meso_field_box(g)}
+    return None
+
+
+def meso_crop_png(folder, scale: int = 2) -> bytes | None:
+    """The meso field as captured, so a misread total can be checked and typed in."""
+    import cv2
+
+    where = meso_field(load_snapshot(folder))
+    if not where:
+        return None
+    img = cv2.imread(str(Path(folder) / f"{where['page']}.png"))
+    if img is None:
+        return None
+    x, y, w, h = where["box"]
+    crop = img[max(0, y):y + h, max(0, x):x + w]
+    if crop.size == 0:
+        return None
+    crop = cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+    ok, buf = cv2.imencode(".png", crop)
+    return buf.tobytes() if ok else None
+
+
 # ---------------------------------------------------------------- local web page
 
 def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: int = 0):
@@ -314,6 +362,10 @@ def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: i
                 if u.path == "/crop":
                     s = session(q.get("session"))
                     png = slot_crop_png(s[q["snap"]], q["ref"])
+                    return self._send(200, png, "image/png") if png else self._send(404, b"")
+                if u.path == "/mesocrop":
+                    s = session(q.get("session"))
+                    png = meso_crop_png(s[q["snap"]])
                     return self._send(200, png, "image/png") if png else self._send(404, b"")
                 if u.path == "/icon":
                     p = Catalog(cat_dir).icons_dir / f"{q['id']}.png"

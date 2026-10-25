@@ -139,7 +139,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     from collections import Counter
 
     from .inventory import detect_tab, tab_from_items
-    from .statusbar import read_mesos_field
+    from .statusbar import meso_field_box, read_mesos_field
 
     say = progress or (lambda text: None)
     skip = set(inv.get("skip_tabs") or [])
@@ -147,6 +147,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
     first_page, boxes, merge_log, skipped = None, {}, {}, {}
     total = sum(len(v) for v in tab_pages.values())
     meso_reads = []      # the meso total, read on every page: the majority wins
+    meso_where = []      # (value, page + field box) per read, for the picture on the review page
     done, seen = 0, []
     for given, frames in tab_pages.items():
         for i, f in enumerate(frames, 1):
@@ -159,6 +160,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
             if max(Counter(v for v, _ in meso_reads if v is not None).values(), default=0) < 3:
                 mv, mraw = read_mesos_field(f, grid, cfg["session"].get("tesseract_cmd"))
                 meso_reads.append((mv, mraw))
+                meso_where.append((mv, {"page": key, "box": meso_field_box(grid)}))
             looks = detect_tab(f, grid) or given   # the open tab, from the highlighted tab button
             sig = _grid_crop_sig(f, grid)
             if sig is not None and any(float(np.abs(sig - o).mean()) < 1.0 for o in seen):
@@ -202,6 +204,9 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         m = read_mesos(fc, f)
         if m is not None:
             status["mesos"] = m
+    # where the meso field is (a page that read the value used, else the first page tried)
+    mesos_field = next((w for v, w in meso_where if v == status.get("mesos")),
+                       meso_where[0][1] if meso_where else None)
     return {
         "time": when if when is not None else time.time(),
         "when": datetime.fromtimestamp(when or time.time()).isoformat(timespec="seconds"),
@@ -213,6 +218,7 @@ def build_snapshot(cfg, status_frame, tab_pages: dict[str, list[np.ndarray]], ca
         "exp_pct": status.get("exp_pct"),
         "exp_checked": status.get("exp_checked"),
         "mesos_checked": status.get("mesos_checked"),
+        "mesos_field": mesos_field,
         "level_options": status.get("level_options") or [],
         "map": where,
         "tabs": {t: [[list(s) for s in row] for row in rows] for t, rows in tabs.items()},

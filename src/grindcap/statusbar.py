@@ -223,7 +223,29 @@ def resolve(text: str, level_read: int | None, prior: int | None = None, up: int
             "level_options": options if len(options) > 1 and level_read not in options else []}
 
 
+def _longest_run(mask: np.ndarray) -> np.ndarray:
+    """Indices of the longest run of True in a 1-D mask (empty if none)."""
+    best, start = (0, 0), None
+    for i, m in enumerate(list(mask) + [False]):
+        if m and start is None:
+            start = i
+        elif not m and start is not None:
+            if i - start > best[1] - best[0]:
+                best = (start, i)
+            start = None
+    return np.arange(*best)
+
+
 MESO_TEXT = re.compile(r"^\d{1,3}([.,]\d{3})*$")   # 86,676 (the comma often reads as a period)
+
+
+def meso_field_box(grid) -> list[int]:
+    """[x, y, w, h] around the meso field below the item grid (with some margin)."""
+    px, py = grid.pitch()
+    x0, ly = grid.first[0], grid.last[1]
+    xa, ya = int(x0 + 0.1 * px), int(ly + 1.0 * py)
+    xb, yb = int(x0 + 4.6 * px), int(ly + 2.0 * py)
+    return [xa, ya, xb - xa, yb - ya]
 
 
 def read_mesos_field(frame, grid, tesseract_cmd=None) -> tuple[int | None, str]:
@@ -234,16 +256,17 @@ def read_mesos_field(frame, grid, tesseract_cmd=None) -> tuple[int | None, str]:
     import cv2
 
     px, py = grid.pitch()
-    x0, ly = grid.first[0], grid.last[1]
-    xa, ya = int(x0 + 0.1 * px), int(ly + 1.0 * py)
-    xb, yb = int(x0 + 4.6 * px), int(ly + 2.0 * py)
-    reg = frame[max(0, ya):max(0, yb), max(0, xa):max(0, xb)]
+    xa, ya, w, h = meso_field_box(grid)
+    reg = frame[max(0, ya):max(0, ya + h), max(0, xa):max(0, xa + w)]
     if reg.size == 0:
         return None, "field outside the picture"
     g = cv2.cvtColor(reg, cv2.COLOR_BGR2GRAY)
     white = g > 235
-    rows = np.flatnonzero(white.mean(axis=1) > 0.5)
-    cols = np.flatnonzero(white[rows].mean(axis=0) > 0.5) if rows.size else rows
+    # The longest run of white rows is the field. The light panel above it (the bottom of the grid)
+    # is near-white too: taking every white row spanned the field's dark top border, and its corner
+    # read as a leading "1" (222,540 -> 1222,540; a total of 92,177 would pass as 192,177).
+    rows = _longest_run(white.mean(axis=1) > 0.5)
+    cols = np.flatnonzero(white[rows].mean(axis=0) > 0.5) if rows.size else rows   # digits break the run
     if rows.size < 0.15 * py or cols.size < 0.8 * px:
         return None, "meso field not visible (covered?)"
     fld = g[rows[0]:rows[-1] + 1, cols[0]:cols[-1] + 1]

@@ -485,3 +485,22 @@ def test_third_real_frame_ant_tunnel():
     boxes = [b for row in g.slot_boxes() for b in row]
     got = [r.value for r in StackDigits().read_slots(frame, boxes, *g.pitch())]
     assert got == [n or None for row in ANT for n in row]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_mesos_field_border_is_not_a_digit():
+    """The light panel above the field used to be taken as part of it, so the field's dark top
+    border was cropped in and its corner read as a leading "1" (492,177 -> 1492,177; a smaller
+    total such as 92,177 would have passed as 192,177). Grid boxes a little off either way."""
+    from pathlib import Path
+
+    from grindcap.inventory import Grid
+    from grindcap.statusbar import read_mesos_field
+
+    fx = Path(__file__).parent / "fixtures"
+    for name, first, last, truth in (("etc_ant_tunnel.png", (1492, 140), (1694, 379), 222540),
+                                     ("equip_burnt_land.png", (1486, 137), (1688, 378), 492177)):
+        frame = cv2.imread(str(fx / name))
+        for dx, dy in ((0, -6), (3, -3), (0, 0), (-3, 3), (6, -6)):
+            g = Grid([first[0] + dx, first[1] + dy, 44, 44], [last[0] + dx, last[1] + dy, 44, 44], cols=5, rows=6)
+            assert read_mesos_field(frame, g)[0] == truth, (name, dx, dy)

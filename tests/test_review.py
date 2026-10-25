@@ -142,3 +142,34 @@ def test_summary_points_saved_sessions(tmp_path):
     assert (p["id"], p["exp_per_hr"], p["mesos_per_hr"]) == ("end-1", 2000, 400)
     assert p["net_per_hr"] == 400 + 120 - 1000
     assert len(summary_data(root, cat, saved_only=False)["sessions"]) == 1
+
+
+def test_meso_field_picture(tmp_path):
+    """The review page shows the meso field as captured; older snapshots find it from two slot boxes."""
+    import shutil
+    from pathlib import Path
+
+    import cv2
+
+    from grindcap.inventory import Grid
+    from grindcap.review import meso_crop_png, meso_field
+    from grindcap.statusbar import meso_field_box
+
+    g = Grid([1486, 137, 44, 44], [1688, 378, 44, 44], cols=5, rows=6)
+    b = g.slot_boxes()
+    folder = tmp_path / "end-1"
+    snap(folder, 0, [])
+    data = json.loads((folder / "snapshot.json").read_text())
+    data["slots"] = [{"ref": "Equip_01:r1c1", "item": "item-001", "qty": 1, "box": list(b[0][0])},
+                     {"ref": "Equip_01:r3c4", "item": "item-001", "qty": 1, "box": list(b[2][3])}]
+    (folder / "snapshot.json").write_text(json.dumps(data))
+    shutil.copy(Path(__file__).parent / "fixtures" / "equip_burnt_land.png", folder / "Equip_01.png")
+    where = meso_field(load_snapshot(folder))
+    assert where["page"] == "Equip_01"
+    assert max(abs(p - q) for p, q in zip(where["box"], meso_field_box(g))) <= 1
+    png = meso_crop_png(folder)
+    img = cv2.imdecode(__import__("numpy").frombuffer(png, "uint8"), cv2.IMREAD_COLOR)
+    assert img.shape[1] == 2 * where["box"][2]
+    data["mesos_field"] = {"page": "Equip_01", "box": [1, 2, 3, 4]}       # saved by build_snapshot
+    (folder / "snapshot.json").write_text(json.dumps(data))
+    assert meso_field(load_snapshot(folder))["box"] == [1, 2, 3, 4]
