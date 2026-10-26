@@ -504,3 +504,34 @@ def test_mesos_field_border_is_not_a_digit():
         for dx, dy in ((0, -6), (3, -3), (0, 0), (-3, 3), (6, -6)):
             g = Grid([first[0] + dx, first[1] + dy, 44, 44], [last[0] + dx, last[1] + dy, 44, 44], cols=5, rows=6)
             assert read_mesos_field(frame, g)[0] == truth, (name, dx, dy)
+
+
+EXCAVATION = [[20, 3, 23, 150, 200], [200, 100, 1, 3, 6], [200, 16, 40, 200, 200],
+              [163, 200, 25, 200, 200], [3, 100, 200, 200, 200], [200, 200, 9, 158, 56]]
+
+
+@pytest.mark.skipif(not HAS_TESS, reason="Tesseract not installed")
+def test_fourth_real_frame_excavation_site():
+    """Etc tab in Excavation Site III, level 38, 78 EXP [0.03%], 690,917 mesos. Used to misread:
+    163 as 168 (an icon showing through the 3 made it fit 8 as well), the level as 7 (orange cliff
+    left of the status bar taken for a level tile) and the map as Excavation Site I ("ill")."""
+    from pathlib import Path
+
+    from grindcap.digits import StackDigits
+    from grindcap.inventory import Grid, detect_tab
+    from grindcap.mapname import read_map
+    from grindcap.statusbar import read_exp_texts, read_level, read_mesos_field, resolve_many
+
+    frame = cv2.imread(str(Path(__file__).parent / "fixtures" / "etc_excavation.png"))
+    for dx, dy in ((0, 0), (3, -2), (-2, 3)):
+        g = Grid([1487 + dx, 139 + dy, 44, 44], [1689 + dx, 378 + dy, 44, 44], cols=5, rows=6)
+        boxes = [b for row in g.slot_boxes() for b in row]
+        got = [r.value for r in StackDigits().read_slots(frame, boxes, *g.pitch())]
+        assert got == [n for row in EXCAVATION for n in row], (dx, dy)
+        assert read_mesos_field(frame, g)[0] == 690917
+        assert detect_tab(frame, g) == "Etc"
+    lv = read_level(frame, None)
+    assert (lv, resolve_many(read_exp_texts(frame, None), lv)["exp"]) == (38, 78)
+    maps = [{"streetName": "Victoria Road", "name": f"Excavation Site {n}"} for n in ("I", "II", "III", "IV")]
+    m = read_map(frame, maps)
+    assert (m["street"], m["name"]) == ("Victoria Road", "Excavation Site III")

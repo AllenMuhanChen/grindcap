@@ -98,6 +98,17 @@ def download_maps(folder: str | Path, region="MCW", version="1") -> list[dict]:
     return maps
 
 
+def _numerals(name: str) -> str:
+    """A last word made only of I-like strokes is a Roman numeral the OCR spelt with l, i, 1 or |:
+    "Excavation Site ill" -> "Excavation Site III" (else it snaps to the shorter "Excavation Site I")."""
+    words = name.split()
+    if len(words) > 1 and re.fullmatch(r"[iIl1|!]+", words[-1]):
+        words[-1] = "I" * len(words[-1])
+    elif len(words) > 1 and re.fullmatch(r"[iIl1|!]*[vVxX][iIl1|!]*", words[-1]):
+        words[-1] = re.sub(r"[iIl1|!]", "I", words[-1]).upper()
+    return " ".join(words)
+
+
 def snap_name(street: str, name: str, maps: list[dict], cutoff: float = 0.75):
     """Closest real (street, name) to what was read, or None."""
     r = snap_score(street, name, maps, cutoff)
@@ -108,6 +119,7 @@ def snap_score(street: str, name: str, maps: list[dict], cutoff: float = 0.75):
     """(similarity, (street, name)) of the closest real map, or None."""
     if not maps:
         return None
+    name = _numerals(name)
     key = f"{street} | {name}".lower()
     best, br = None, 0.0
     for m in maps:

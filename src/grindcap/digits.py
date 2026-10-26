@@ -32,6 +32,8 @@ DIGIT_TOP = 20                                       # native px from slot top t
 MAX_DIGITS = 5
 END_COST = 0.45   # 1 - correlation; above this, "no digit here" (true digits ~<0.2, non-digits >0.5)
 SEARCH = 4        # native px searched around the expected digit position, per page
+TIE = 0.06        # costs this close: decide on the pixels where the two digits differ (3 vs 8)
+DIFF_GREY = 60    # grey levels; template pixels differing more than this tell two digits apart
 
 BUILTIN = Path(__file__).parent / "data" / "stack_digits.npz"
 NATIVE_W = (800, 1024, 1280, 1366, 1600, 1920)
@@ -228,22 +230,37 @@ class StackDigits:
         """Read the number whose first digit's top-left is native pixel (u, v)."""
         text, costs = "", []
         while len(text) < MAX_DIGITS:
-            best, bc = None, END_COST
+            scored = []
             for d, t in self.templates.items():
                 p = view.crop(u, v, ADV[d], FONT_H)
-                if p is None:
-                    continue
-                c = t.cost(p)
-                if c < bc:
-                    best, bc = d, c
-            if best is None:
+                if p is not None:
+                    scored.append((t.cost(p), d, p))
+            scored = sorted(s for s in scored if s[0] < END_COST)
+            if not scored:
                 break
+            bc, best, p = scored[0]
+            if len(scored) > 1 and scored[1][0] - bc < TIE:
+                best = self._tiebreak(best, scored[1][1], p)
+                bc = next(c for c, d, _ in scored if d == best)
             text += best
             costs.append(round(bc, 3))
             u += ADV[best]
         if text.startswith("0"):
             return SlotReading(None, text, costs)   # a stack count never starts with 0: not a number
         return SlotReading(int(text) if text else None, text, costs)
+
+    def _tiebreak(self, a: str, b: str, patch: np.ndarray) -> str:
+        """Two digits fit about equally well overall (3 and 8 share most pixels, and an icon showing
+        through the holes blurs the rest): compare grey levels only where the two templates differ."""
+        ta, tb = self.templates[a], self.templates[b]
+        if ta.img.shape != tb.img.shape or patch.shape != ta.img.shape:
+            return a
+        m = (ta.mask | tb.mask) & (np.abs(ta.img - tb.img) > DIFF_GREY)
+        if not m.any():
+            return a
+        pv = patch[m].astype(np.float64)
+        da, db = np.abs(pv - ta.img[m]).mean(), np.abs(pv - tb.img[m]).mean()
+        return b if db < da else a
 
     def _first_cost(self, view, u, v) -> float:
         cs = [t.cost(p) for d, t in self.templates.items() if d != "0"

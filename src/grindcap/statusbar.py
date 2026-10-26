@@ -42,10 +42,25 @@ def level_tiles(region: np.ndarray) -> list[tuple[int, int]]:
     return spans
 
 
+def _is_tile(reg, span) -> bool:
+    """An orange level tile: about square, mostly orange, with a white digit on it. Orange scenery left
+    of the status bar (cliffs, lava) passes the colour test but is tall, patchy and has no white digit."""
+    a, b = span
+    r = reg[:, a:b].astype(np.int16)
+    orange = (r[..., 2] > 200) & (r[..., 1] > 80) & (r[..., 1] < 190) & (r[..., 0] < 90)
+    rows = np.flatnonzero(orange.sum(axis=1) > 2)
+    if rows.size == 0:
+        return False
+    h = rows[-1] - rows[0] + 1
+    box = r[rows[0]:rows[-1] + 1]
+    white = (box.min(axis=2) > 150).mean()
+    return 0.7 <= h / (b - a) <= 1.6 and orange[rows[0]:rows[-1] + 1].mean() >= 0.5 and white >= 0.05
+
+
 def _read_tiles(reg, tesseract_cmd=None) -> int | None:
     import cv2
 
-    spans = level_tiles(reg)
+    spans = [s for s in level_tiles(reg) if _is_tile(reg, s)]
     if not spans:
         return None
     # keep the tiles that sit together (the level), drop stray orange further away

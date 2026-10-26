@@ -347,9 +347,13 @@ def _identify_slot(catalog: Catalog, itemdb, sig, img, patch, threshold: float, 
         it = catalog.items[iid]
         db = it.get("db")
         if db and patch is not None:
-            sc = itemdb.scores(patch, [db["id"]] + list(db.get("neighbors") or []))
-            if sc and min(sc, key=sc.get) == db["id"]:
-                return iid
+            # Every close catalog item is checked, not only the closest: ores that differ only in
+            # colour all fall within the signature threshold, and the closest can be the wrong one.
+            named = {catalog.items[c]["db"]["id"]: c for c in reversed(cands) if catalog.items[c].get("db")}
+            sc = itemdb.scores(patch, list(named) + list(db.get("neighbors") or []))
+            best = min(sc, key=sc.get) if sc else None
+            if best in named and sc[best] <= itemdb.max_score:
+                return named[best]
         elif it.get("name") or patch is None or it.get("db_tried"):
             return iid      # named by you, or already searched for and not in the item data
         else:

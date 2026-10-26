@@ -26,12 +26,16 @@ digits.py    StackDigits: stack numbers in the game's font. Maps the screen back
              left to right at fixed advances (8 px, "1" = 5 px) by masked normalised correlation.
              Built-in templates: data/stack_digits.npz, rebuilt by scripts/build_stack_digits.py from
              tests/fixtures/game_frame.png. `teach-digits` = check + corrections (data/digits.npz).
+             Two digits within TIE 0.06 (3 vs 8 with an icon in the holes) are decided by grey-level
+             distance on the pixels where the two templates differ (>60 levels). Fixture etc_excavation.png.
 itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), version 1: names, icons,
              NPC sell price (per item, lazily). identify(native BGR patch): masked TM_SQDIFF of every
              Etc/Use/Setup icon (alpha>200) slid over the slot; accept if best name beats the next name
              by min_ratio 1.25. inventory._identify_slot: catalog signature -> fast re-check against the
              item's db icon + its stored look-alike neighbours -> else full identify; one catalog id per
-             db id (extra looks saved as icons/<id>.altN.npy). On the real frame 18/18 correct, ratio >= 1.29.
+             db id (extra looks saved as icons/<id>.altN.npy). The fast re-check scores the db ids of ALL
+             catalog candidates within threshold (+ the closest one's neighbours): ores that differ only in
+             colour are all within the signature threshold, so the closest candidate can be wrong. On the real frame 18/18 correct, ratio >= 1.29.
              Categories Etc/Use/Setup/Equip (non-cash, ~2470 icons); rank() first shortlists 120 icons by
              half-size matching (true best ranked <= 57 on fixtures). inventory.detect_tab reads the active
              (pink) tab button (largest red block: a tab with new items flashes), but the items decide
@@ -54,9 +58,11 @@ sessions.py  list_sessions (each end snapshot + latest start before it; id = end
              (keeps a start another session uses). review.py re-exports list_sessions.
 mapname.py   Minimap map name: template-match data/minimap_header.png ("MINI MAP" bar, 1920x1080; scaled
              by frame height), Tesseract on the street + map lines, snapped to MCW map names (maps.json in
-             <catalog_dir>/itemdb, from maplestory.io /map) by difflib. Several OCR variants per line
+             <catalog_dir>/itemdb, from maplestory.io /map) by difflib. A last word of I-like strokes
+             ("ill", "l1") is turned into a Roman numeral first. Several OCR variants per line
              (plain + white-letters-only); the pair closest to a real map wins. Stored as snapshot["map"].
-statusbar.py read_level (orange LV tiles -> white mask -> Tesseract psm 8, one digit per tile, vote; in the
+statusbar.py read_level (orange LV tiles, kept only if square-ish, >=50% orange, with white on them:
+             orange scenery left of the status bar otherwise became a 1-digit level -> white mask -> Tesseract psm 8, one digit per tile, vote; in the
              level box +-25 px, else searched in the bottom-left of the window), read_exp_texts (right of
              the "EXP." label found by template data/exp_label.png; calibrated box only as fallback),
              resolve: try every exp/pct split ("[" OCRs as 1) and keep one where exp/EXP_TO_NEXT[lv]*100
