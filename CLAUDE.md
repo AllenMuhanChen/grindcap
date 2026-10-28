@@ -85,6 +85,8 @@ anchors.py   Template-matched anchors (inventory title bar, status-bar label) fo
 wincap.py    GameWindow: capture the game window by title. Windows Graphics Capture (works when covered,
              not when minimized) -> PrintWindow -> plain screenshot. winfind.py: Win32 window lookup.
 app.py       SnapFlow: toolkit-free snapshot workflow (start, add_page, poll with PageWatcher, finish, compare).
+grindcap.bat Windows double-click launcher (cd to repo, start .venv\Scripts\grindcap-gui.exe); grindcap-debug.bat
+             keeps a console for errors; make-shortcut.bat makes a Desktop .lnk to grindcap.bat.
 gui.py       tkinter always-on-top control window over SnapFlow; work runs in threads, button presses take
              priority over auto-capture polls. Entry point grindcap-gui (no console). One session at a
              time: sessions.running() (newest start newer than every end) greys out Start, enables End,

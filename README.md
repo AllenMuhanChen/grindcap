@@ -22,6 +22,8 @@ pip install -e ".[ocr,dev]"
 grindcap-gui
 ```
 
+After setup, double-click **`grindcap.bat`** in this folder to open the window (no terminal needed). Run **`make-shortcut.bat`** once to put a grindcap shortcut on your Desktop. If the window never appears, run **`grindcap-debug.bat`** to see the error.
+
 A small window opens and stays on top of everything. It captures the MapleStory window directly, even when other windows cover it (the game just can't be minimized).
 
 1. Click **Start snapshot**. It reads your EXP and mesos right away and shows them, so you can check.
