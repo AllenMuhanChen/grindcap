@@ -7,6 +7,10 @@ directly, so you don't have to switch windows at the right moment.
   then open your inventory and scroll through every tab: pages are captured automatically
   (or press Capture page / F8). Press Finish / F10 when done.
   Compare                          EXP/hr, mesos/hr and items, plus the full report
+  Pause / Resume                   paused time doesn't count towards the session's per-hour rates
+
+While a session runs, EXP is read off the status bar every gui.live_every seconds and EXP/hr so far is
+shown under the timer. Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
 """
 from __future__ import annotations
 
@@ -30,6 +34,8 @@ def main(config_path: str = "config.yaml"):
     source = ScreenSource(c["monitor"], c["region"], c["fps"], c.get("window_title"))
 
     from .app import SnapFlow
+    from .sessions import active_seconds, is_paused, set_paused
+    from .snapshot import key_figures
 
     flow = SnapFlow(cfg, source.grab_one)
     jobs: queue.Queue = queue.Queue()     # results from worker threads -> UI thread
@@ -59,11 +65,14 @@ def main(config_path: str = "config.yaml"):
     b_review = ttk.Button(frm, text="Review / fix sessions", command=lambda: review())
     b_summary = ttk.Button(frm, text="Summary chart", command=lambda: review(page="summary"))
     b_discard = ttk.Button(frm, text="Discard", command=lambda: discard())
+    b_pause = ttk.Button(frm, text="Pause", command=lambda: toggle_pause())
     timer = tk.StringVar(value="")
     timer_lbl = ttk.Label(frm, textvariable=timer, font=("Segoe UI", 11, "bold"), wraplength=230,
                           justify="left")   # wraps long map names instead of widening the window
     session = {"run": None}   # the start snapshot waiting for its end, if any
     processing = {"on": False}  # a finished snapshot is being read in the background
+    live = {"line": "", "next": 0.0}  # latest EXP/hr so far, and when to read it next
+    live_every = (cfg.data.get("gui") or {}).get("live_every", 60)
 
     def refresh_running():
         from .sessions import running
@@ -72,10 +81,13 @@ def main(config_path: str = "config.yaml"):
             session["run"] = running(cfg["inventory"]["snapshot_dir"])
         except Exception:
             session["run"] = None
+        if not session["run"]:
+            live["line"] = ""
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
 
     def layout(collecting: bool):
-        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard):
+        for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard,
+                  b_pause):
             w.grid_remove()
         if processing["on"]:
             # reading the pages: nothing to press; the session timer already runs for a start snapshot
@@ -100,8 +112,10 @@ def main(config_path: str = "config.yaml"):
             b_start.state(["disabled"] if run else ["!disabled"])
             b_end.state(["!disabled"] if run else ["disabled"])
             if run:
-                timer_lbl.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
-                b_discard.grid(row=4, column=2, sticky="e", pady=(6, 0))
+                timer_lbl.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+                b_pause.grid(row=5, column=0, sticky="ew", padx=2, pady=(4, 0))
+                b_discard.grid(row=5, column=2, sticky="e", pady=(4, 0))
+                b_pause.configure(text="Resume" if is_paused(run.get("pauses")) else "Pause")
             update_timer()
 
     def update_timer():
@@ -109,9 +123,24 @@ def main(config_path: str = "config.yaml"):
         if not run:
             timer.set("")
             return
-        secs = int(time.time() - run["time"])
+        pauses = run.get("pauses") or []
+        secs = int(active_seconds(run["time"], time.time(), pauses))
+        clock = f"{secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}"
+        head = f"PAUSED at {clock}" if is_paused(pauses) else f"Session running {clock}"
         where = f"\n{run['map']}" if run.get("map") else ""
-        timer.set(f"Session running {secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}{where}")
+        line = f"\n{live['line']}" if live["line"] else ""
+        timer.set(f"{head}{where}{line}")
+
+    def toggle_pause():
+        run = session["run"]
+        if not run or not run.get("folder"):
+            return
+        run["pauses"] = set_paused(run["folder"], not is_paused(run.get("pauses")))
+        paused = is_paused(run["pauses"])
+        status.set("Paused: this time won't count towards the per-hour rates." if paused else "Resumed.")
+        if not paused:
+            live["next"] = time.time() + 5          # fresh EXP/hr soon after resuming
+        layout(False)
 
     def discard():
         """Throw away a start snapshot taken by mistake, so a new session can be started."""
@@ -148,6 +177,9 @@ def main(config_path: str = "config.yaml"):
 
     def do_start(which):
         st = flow.start(which)
+        run = session["run"]
+        if which == "end" and run and run.get("folder") and is_paused(run.get("pauses")):
+            run["pauses"] = set_paused(run["folder"], False, flow.pressed_at)  # End ends the pause
         exp = st.get("exp")
         mes = st.get("mesos")
         where = (st.get("map") or {}).get("name") or "map not read"
@@ -158,7 +190,17 @@ def main(config_path: str = "config.yaml"):
         return ("page", flow.add_page())
 
     def do_finish():
-        return ("finished", flow.finish(progress=lambda text: jobs.put(("ok", ("progress", text)))))
+        info = flow.finish(progress=lambda text: jobs.put(("ok", ("progress", text))))
+        if info["which"] == "end":
+            try:          # the headline numbers right away, no Compare press needed
+                flow.compare()
+                info["result"] = flow.last_result
+            except Exception:
+                traceback.print_exc()
+        return ("finished", info)
+
+    def do_live(folder):
+        return ("live", flow.live(folder))
 
     def finish_now():
         """Stop collecting pages and read them in the background. For a start snapshot the session
@@ -236,7 +278,17 @@ def main(config_path: str = "config.yaml"):
                        f"{info['count']} items in total).")
             readout.set(f"EXP {info['exp']}   Level {info['level']}   Mesos {info['mesos']}")
             if info["which"] == "end":
-                status.set(status.get() + " Press Compare, or Review / fix to check what changed.")
+                live["line"] = ""
+                if info.get("result"):
+                    readout.set("\n".join(key_figures(info["result"])))
+                status.set(status.get() + " Compare shows every item; Review / fix to check what changed.")
+            else:
+                live["next"] = time.time() + live_every
+        elif kind == "live":
+            r = result[1]
+            if r and session["run"]:
+                live["line"] = f"EXP/hr so far {r['exp_per_hr']:,.0f}   (+{r['exp']:,.0f} EXP in {r['minutes']:.0f} min)"
+            update_timer()
         elif kind == "compared":
             _, text, report = result
             show_text("Comparison", text, report)
@@ -276,9 +328,14 @@ def main(config_path: str = "config.yaml"):
             left = flow.finish_in()
             if auto.get() and left is not None and left <= 0:
                 finish_now()                      # every tab captured and nothing new for a few seconds
+        run = session["run"]
         if waiting and not busy.locked():
             fn, args = waiting.pop(0)
             run_bg(fn, *args)
+        elif (live_every and run and run.get("folder") and not flow.collecting and not processing["on"]
+              and not is_paused(run.get("pauses")) and time.time() >= live["next"] and not busy.locked()):
+            live["next"] = time.time() + live_every
+            run_bg(do_live, run["folder"], retry=False)
         elif flow.collecting and not processing["on"] and auto.get() and not busy.locked():
             def poll():
                 return ("page", len(flow.pages)) if flow.poll() else ("idle",)

@@ -94,6 +94,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Ignore EXP readings that jump by more than this many kills at once (OCR misreads).
         "max_kills_per_step": 8,
     },
+    "gui": {
+        # While a session runs, read EXP off the status bar this often (seconds) and show EXP/hr so far
+        # (0 = off).
+        "live_every": 60,
+    },
     "session": {
         "monster": "Unknown",
         # EXP per kill of the monster you are farming. Used to split kills that land in the same frame.

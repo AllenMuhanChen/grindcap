@@ -4,11 +4,15 @@ Snapshots live in <snapshot_dir>/start-*/ and end-*/. Each end snapshot is paire
 snapshot taken before it; the session's id is the end folder's name. What you change about a session
 (name, map, saved) is kept in <snapshot_dir>/sessions.json. The map is read from the minimap when a
 snapshot is taken (see mapname.py); the name defaults to "<map> · <start time> · <minutes> min".
+
+Pauses are kept next to the start snapshot in pauses.json, as [[paused_at, resumed_at], ...] (resumed_at is
+null while paused). Paused time is left out of a session's minutes and per-hour rates.
 """
 from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +39,45 @@ def _info(p: Path) -> dict | None:
     return {"time": d.get("time", 0), "map": d.get("map")}
 
 
+def load_pauses(folder) -> list[list]:
+    p = Path(folder) / "pauses.json"
+    try:
+        return json.loads(p.read_text()) if p.exists() else []
+    except Exception:
+        return []
+
+
+def is_paused(pauses: list) -> bool:
+    return bool(pauses) and pauses[-1][1] is None
+
+
+def set_paused(folder, paused: bool, now: float | None = None) -> list[list]:
+    """Pause or resume the session whose start snapshot is in `folder`. Returns the pauses."""
+    now = now or time.time()
+    pauses = load_pauses(folder)
+    if paused and not is_paused(pauses):
+        pauses.append([now, None])
+    elif not paused and is_paused(pauses):
+        pauses[-1][1] = now
+    else:
+        return pauses
+    (Path(folder) / "pauses.json").write_text(json.dumps(pauses))
+    return pauses
+
+
+def paused_seconds(pauses: list, t0: float, t1: float) -> float:
+    """Paused time between t0 and t1 (a pause still running counts until t1)."""
+    total = 0.0
+    for a, b in pauses or []:
+        a, b = max(a, t0), min(t1 if b is None else b, t1)
+        total += max(0.0, b - a)
+    return total
+
+
+def active_seconds(start_time: float, end_time: float, pauses: list) -> float:
+    return max(0.0, end_time - start_time - paused_seconds(pauses, start_time, end_time))
+
+
 def running(root) -> dict | None:
     """The start snapshot still waiting for its end snapshot (newer than every end), or None."""
     root = Path(root)
@@ -45,7 +88,7 @@ def running(root) -> dict | None:
     ends = [i2["time"] for q in root.glob("end-*") if (i2 := _info(q))]
     if ends and max(ends) >= t:
         return None
-    return {"folder": str(p), "time": t, "map": (i.get("map") or {}).get("name")}
+    return {"folder": str(p), "time": t, "map": (i.get("map") or {}).get("name"), "pauses": load_pauses(p)}
 
 
 def default_name(map_name: str | None, start_time: float, minutes: float) -> str:
@@ -70,7 +113,7 @@ def list_sessions(root) -> list[dict]:
         m = meta.get(p.name, {})
         read = (si.get("map") or e.get("map") or {}).get("name")
         map_name = m.get("map") or read
-        minutes = (e["time"] - st) / 60
+        minutes = active_seconds(st, e["time"], load_pauses(sp)) / 60
         out.append({
             "id": p.name, "start": str(sp), "end": str(p), "time": e["time"], "start_time": st,
             "minutes": round(minutes, 1), "map": map_name, "map_read": read,

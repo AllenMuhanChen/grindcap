@@ -137,6 +137,30 @@ class SnapFlow:
                 "exp": snap["exp"], "mesos": snap["mesos"], "kinds": len(snap["items"]),
                 "count": sum(snap["items"].values()), "map": (snap.get("map") or {}).get("name")}
 
+    def live(self, start_folder) -> dict | None:
+        """Read EXP/level off the status bar now and work out EXP/hr since the start snapshot (paused
+        time left out). Each reading is appended to <start>/live.jsonl. None if the EXP wasn't read."""
+        import json
+
+        from .anchors import shifted
+        from .snapshot import apply_fixes, live_exp
+
+        start = load_snapshot(start_folder)
+        frame = self.grab()
+        now = time.time()
+        try:
+            fc = shifted(self.cfg, frame)
+        except LookupError:
+            fc = self.cfg
+        lv = apply_fixes(start).get("level")
+        reading = read_status(fc, frame, prior=int(lv) if lv else None)
+        r = live_exp(start, reading, now)
+        with open(Path(start_folder) / "live.jsonl", "a") as fh:
+            fh.write(json.dumps({"time": now, "exp": reading.get("exp"), "level": reading.get("level"),
+                                 "checked": bool(reading.get("exp_checked")),
+                                 "exp_per_hr": r["exp_per_hr"] if r else None}) + "\n")
+        return r
+
     def cancel(self):
         self.which, self.watcher, self.pages = None, None, []
 
@@ -147,5 +171,6 @@ class SnapFlow:
             raise RuntimeError("Take a start snapshot and an end snapshot first.")
         cat = Catalog(self.cfg["inventory"]["catalog_dir"])
         r = compare(load_snapshot(start), load_snapshot(end), cat, minutes)
+        self.last_result = r
         report = html_report(r, cat, Path(end) / "report.html")
         return format_compare(r), report

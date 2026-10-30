@@ -265,6 +265,9 @@ def load_snapshot(path: str | Path) -> dict:
     fx = p.parent / "fixes.json"
     snap["fixes"] = json.loads(fx.read_text()) if fx.exists() else {}
     snap["folder"] = str(p.parent)
+    from .sessions import load_pauses
+
+    snap["pauses"] = load_pauses(p.parent)    # only a start snapshot has any
     return snap
 
 
@@ -319,8 +322,11 @@ def exp_gained(start: dict, end: dict) -> float | None:
 
 
 def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = None) -> dict:
+    from .sessions import paused_seconds
+
     start, end = apply_fixes(start), apply_fixes(end)
-    hours = (minutes / 60) if minutes else (end["time"] - start["time"]) / 3600
+    paused = paused_seconds(start.get("pauses"), start["time"], end["time"])
+    hours = (minutes / 60) if minutes else (end["time"] - start["time"] - paused) / 3600
     per_hr = (lambda v: round(v / hours, 1)) if hours > 0 else (lambda v: None)
     ids = sorted(set(start["items"]) | set(end["items"]))
     if catalog.items:
@@ -343,6 +349,7 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
     unpriced = [r["name"] for r in rows if r["price"] is None]
     return {
         "minutes": round(hours * 60, 1),
+        "paused_minutes": round(paused / 60, 1) if not minutes else 0,
         "exp": xp, "exp_per_hr": per_hr(xp) if xp is not None else None,
         "levels": int(end["level"]) - int(start["level"]),
         "mesos": mesos, "mesos_per_hr": per_hr(mesos) if mesos is not None else None,
@@ -360,16 +367,43 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
     }
 
 
-def format_compare(r: dict) -> str:
-    def f(v):
-        return "-" if v is None else (f"{v:,.0f}" if isinstance(v, (int, float)) else str(v))
+def _f(v):
+    return "-" if v is None else (f"{v:,.0f}" if isinstance(v, (int, float)) else str(v))
 
+
+def key_figures(r: dict) -> list[str]:
+    """The headline lines of a comparison: net mesos/hr, EXP/hr, revenue/cost per hr, time."""
+    f = _f
     m = r["minutes"] or 0
-    lines = [
+    paused = r.get("paused_minutes") or 0
+    return [
         f"NET MESOS / HR  {f(r['net_per_hr'])}   (incl. items)",
         f"EXP / HR        {f(r['exp_per_hr'])}{'   +' + str(r['levels']) + ' level(s)' if r['levels'] else ''}",
         f"Revenue / hr    {f(r['revenue_per_hr'])}   Cost / hr {f(r['cost_per_hr'])}",
-        f"Time            {int(m // 60)}:{int(round(m % 60)):02d}",
+        f"Time            {int(m // 60)}:{int(round(m % 60)):02d}"
+        + (f"   (+{paused:.0f} min paused, not counted)" if paused >= 0.5 else ""),
+    ]
+
+
+def live_exp(start: dict, reading: dict, now: float) -> dict | None:
+    """EXP gained and EXP/hr so far, from the start snapshot and a status-bar reading taken now
+    (skipping paused time). None unless the reading's EXP was confirmed by the EXP table."""
+    from .sessions import active_seconds
+
+    start = apply_fixes(start)
+    if not reading.get("exp_checked") or reading.get("exp") is None or reading.get("level") is None:
+        return None
+    xp = exp_gained(start, {"exp": reading["exp"], "level": reading["level"], "level_read": True})
+    secs = active_seconds(start["time"], now, start.get("pauses"))
+    if xp is None or xp < 0 or secs <= 0:
+        return None
+    return {"exp": xp, "exp_per_hr": round(xp / secs * 3600, 1), "minutes": round(secs / 60, 1),
+            "level": reading["level"]}
+
+
+def format_compare(r: dict) -> str:
+    f = _f
+    lines = key_figures(r) + [
         "",
         f"  mesos {f(r['mesos'])}, items gained {f(r['items_gained_value'])}, used {f(r['items_used_value'])}",
         "",

@@ -98,6 +98,12 @@ gui.py       tkinter always-on-top control window over SnapFlow; work runs in th
              End pressed. build_snapshot(status=...) reuses the Start readings; duplicate pages and
              unnamed items already searched (db_tried) are skipped, so a known inventory reads in ~1 s.
              wincap.grab retries 3x and never switches WGC off for good after a black frame.
+             Pause/Resume while a session runs: sessions.set_paused writes <start>/pauses.json
+             ([[t0, t1|null], ...]); compare() and list_sessions leave paused time out of minutes and
+             every per-hour rate (paused_minutes in the result). Every gui.live_every s (60) while running
+             and not paused, SnapFlow.live reads EXP/level off the status bar and shows "EXP/hr so far"
+             under the timer (only EXP-table-confirmed readings; logged to <start>/live.jsonl). Finishing
+             the end snapshot runs compare and shows key_figures (net mesos/hr, EXP/hr, ...) right away.
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```

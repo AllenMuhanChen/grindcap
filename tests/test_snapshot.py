@@ -535,3 +535,50 @@ def test_fourth_real_frame_excavation_site():
     maps = [{"streetName": "Victoria Road", "name": f"Excavation Site {n}"} for n in ("I", "II", "III", "IV")]
     m = read_map(frame, maps)
     assert (m["street"], m["name"]) == ("Victoria Road", "Excavation Site III")
+
+
+def test_paused_time_is_left_out_of_rates(tmp_path):
+    from grindcap.sessions import active_seconds, is_paused, list_sessions, load_pauses, set_paused
+    from grindcap.snapshot import key_figures, load_snapshot, save_snapshot
+
+    root = tmp_path / "snaps"
+    s = {"time": 1000.0, "exp": 100, "level": 20, "level_read": True, "mesos": 0, "items": {}}
+    e = {"time": 1000.0 + 3600, "exp": 1900, "level": 20, "level_read": True, "mesos": 6000, "items": {}}
+    sf = save_snapshot(s, root / "start-1")
+    save_snapshot(e, root / "end-1")
+    set_paused(sf, True, 1600)
+    assert is_paused(load_pauses(sf))
+    set_paused(sf, True, 1700)                       # already paused: no second pause
+    set_paused(sf, False, 2800)                      # 20 min paused
+    assert load_pauses(sf) == [[1600, 2800]]
+    assert active_seconds(1000, 4600, load_pauses(sf)) == 2400
+    assert active_seconds(1000, 2000, [[1600, None]]) == 600       # a running pause counts until now
+    r = compare(load_snapshot(sf), load_snapshot(root / "end-1"), Catalog(str(tmp_path / "data")))
+    assert r["minutes"] == 40 and r["paused_minutes"] == 20
+    assert r["exp_per_hr"] == 2700 and r["mesos_per_hr"] == 9000
+    assert "20 min paused" in key_figures(r)[3]
+    assert list_sessions(root)[0]["minutes"] == 40
+
+
+def test_live_exp_per_hour_so_far(tmp_path, monkeypatch):
+    from grindcap import app
+    from grindcap.app import SnapFlow
+    from grindcap.sessions import set_paused
+    from grindcap.snapshot import live_exp, save_snapshot
+
+    start = {"time": 0.0, "exp": 20000, "level": 20, "level_read": True, "pauses": [[600, 1200]]}
+    r = live_exp(start, {"exp": 500, "level": 21, "exp_checked": True}, 1800)
+    assert r["exp"] == 716 and r["minutes"] == 20 and r["exp_per_hr"] == 2148
+    assert live_exp(start, {"exp": 500, "level": 21, "exp_checked": False}, 1800) is None   # unconfirmed read
+
+    sf = save_snapshot({"time": 1000.0, "exp": 100, "level": 20, "level_read": True, "items": {}},
+                       tmp_path / "start-1")
+    set_paused(sf, True, 1100)
+    set_paused(sf, False, 1200)
+    monkeypatch.setattr(app, "read_status", lambda cfg, frame, prior=None: {"exp": 400, "level": prior,
+                                                                             "exp_checked": True})
+    monkeypatch.setattr(app.time, "time", lambda: 1000.0 + 700)
+    flow = SnapFlow(cfg(), lambda: np.zeros((50, 50, 3), np.uint8))
+    r = flow.live(sf)
+    assert r["exp"] == 300 and r["exp_per_hr"] == 1800            # 300 EXP in 10 active minutes
+    assert '"exp_per_hr": 1800' in (sf / "live.jsonl").read_text()
