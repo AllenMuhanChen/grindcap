@@ -104,7 +104,7 @@ gui.py       tkinter always-on-top control window over SnapFlow; work runs in th
              and not paused, SnapFlow.live reads EXP/level off the status bar and shows "EXP/hr: N  x%/hr"
              under the timer (only EXP-table-confirmed readings; logged to <start>/live.jsonl), plus a
              tk Canvas graph from snapshot.live_series: per-reading EXP/hr (dots), 5-min EMA (dt-weighted,
-             solid), session-so-far (dashed); x = active minutes. The review page shows the same graph
+             solid, current value boxed at its end), session-so-far (dashed); x = active minutes. The review page shows the same graph
              (review_data["live"], live rows up to the end + the end snapshot; [] for older sessions). Finishing
              the end snapshot runs compare and shows key_figures (net mesos/hr, EXP/hr, ...) right away.
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).

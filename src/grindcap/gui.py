@@ -114,6 +114,15 @@ def main(config_path: str = "config.yaml"):
             xy = [c for p in pts for c in (X(p["t"]), Y(p[key]))]
             if len(pts) > 1:
                 graph.create_line(*xy, fill=color, width=2, dash=dash)
+        # current EXP/hr (the 5-min average now) in a box at the end of its line
+        last = pts[-1]
+        tag = f"{k(last['ema'])}/hr"
+        w, h = 6 * len(tag) + 8, 14
+        ey = Y(last["ema"])
+        by = ey - h - 4 if ey - h - 4 >= y1 else ey + 4        # above the line's end, below if no room
+        graph.create_rectangle(x1 - w, by, x1, by + h, fill="#fcfcfb", outline="#2a78d6")
+        graph.create_text(x1 - w / 2, by + h / 2, text=tag, anchor="center", fill="#0b0b0b",
+                          font=("Segoe UI", 8, "bold"))
         ly = GH - 7
         graph.create_oval(x0 - 2, ly - 2, x0 + 2, ly + 2, fill="#9ec5f4", outline="")
         graph.create_text(x0 + 6, ly, text="per min", anchor="w", fill="#52514e", font=("Segoe UI", 7))
