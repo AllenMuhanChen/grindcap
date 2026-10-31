@@ -103,7 +103,8 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
     <div class="xph" id="xph"></div>
     <p class="hint">Read off the status bar about once a minute while the session ran; paused time is left out.
       Dots: EXP/hr since the previous reading. Solid: those smoothed (exponential moving average, 5 min).
-      Dashed: EXP/hr since the start.</p>
+      Dashed: EXP/hr since the start.
+      The y-axis doesn't start at 0: it fits the two lines, and dots beyond it sit on the edge.</p>
   </section>
   <section>
     <h2>Status read from the screen</h2>
@@ -213,12 +214,15 @@ function renderXph(pts) {
   sec.hidden = !pts || !pts.length;
   if (sec.hidden) { box.innerHTML = ""; return; }
   const W = Math.max(box.clientWidth - 20, 300), H = 220, L = 46, R = 8, T = 8, B = 22;
-  const top = Math.max(...pts.map(p => Math.max(p.ema, p.cum))) * 1.4 || 1, t1 = Math.max(pts[pts.length - 1].t, 1);
-  const X = t => L + (W - L - R) * t / t1, Y = v => H - B - (H - B - T) * Math.min(v, top) / top;
-  const k = v => v >= 10000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  // y-axis fits the two lines (+25% of their range each side), not from 0; dots outside are pinned to the edge
+  const vals = pts.flatMap(p => [p.ema, p.cum]), lo0 = Math.min(...vals), hi0 = Math.max(...vals);
+  const pad = Math.max((hi0 - lo0) * 0.25, hi0 * 0.05, 1), lo = Math.max(0, lo0 - pad), hi = hi0 + pad;
+  const t1 = Math.max(pts[pts.length - 1].t, 1);
+  const X = t => L + (W - L - R) * t / t1, Y = v => H - B - (H - B - T) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
+  const k = v => v >= 100000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
   const path = key => pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join("");
-  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${Y(top * f)}" y2="${Y(top * f)}" stroke="var(--grid)"/>
-    <text x="${L - 6}" y="${Y(top * f) + 4}" text-anchor="end">${k(top * f)}</text>`).join("");
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${Y(lo + (hi - lo) * f)}" y2="${Y(lo + (hi - lo) * f)}" stroke="var(--grid)"/>
+    <text x="${L - 6}" y="${Y(lo + (hi - lo) * f) + 4}" text-anchor="end">${k(lo + (hi - lo) * f)}</text>`).join("");
   const ticks = [0, .25, .5, .75, 1].map(f => `<text x="${X(t1 * f)}" y="${H - 6}" text-anchor="middle">${Math.round(t1 * f)} min</text>`).join("");
   box.innerHTML = `<div class="legend"><span><i style="border-color:var(--raw);border-top-style:dotted;border-top-width:4px"></i>per reading</span>
       <span><i style="border-color:var(--ema)"></i>5-min average</span><span><i style="border-color:var(--cum);border-top-style:dashed"></i>session so far</span></div>

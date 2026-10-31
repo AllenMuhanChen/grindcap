@@ -604,3 +604,10 @@ def test_live_series_smooths_skips_misreads_and_pauses():
     # level %/hr counts a level-up as 100%
     r = live_exp({"time": 0.0, "exp": 20000, "level": 20}, {"exp": 500, "level": 21, "exp_checked": True}, 3600)
     assert r["pct_per_hr"] == round((1 + 500 / 24402 - 20000 / 20216) * 100, 2)
+
+
+def test_exp_graph_y_axis_fits_the_lines_not_zero():
+    from grindcap.snapshot import y_range
+
+    assert y_range([{"ema": 40000, "cum": 48000}, {"ema": 60000, "cum": 52000}]) == (35000, 65000)  # 20k + 5k each side
+    assert y_range([{"ema": 50000, "cum": 50000}]) == (47500, 52500)   # flat: at least 5% of the top

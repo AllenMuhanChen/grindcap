@@ -446,6 +446,15 @@ def live_series(start: dict, rows: list[dict], tau_min: float = 5.0) -> list[dic
     return out
 
 
+def y_range(points: list[dict]) -> tuple[float, float]:
+    """Y-axis limits for an EXP/hr graph: the range of the smoothed and session lines plus 25% of it on
+    each side (at least 5% of the top), not from 0, so a change of a few % is visible."""
+    vals = [p[k] for p in points for k in ("ema", "cum")]
+    lo, hi = min(vals), max(vals)
+    pad = max((hi - lo) * 0.25, hi * 0.05, 1.0)
+    return max(0.0, lo - pad), hi + pad
+
+
 def load_live(start_folder) -> list[dict]:
     """Rows of <start>/live.jsonl ([] for sessions from before live readings were logged)."""
     p = Path(start_folder) / "live.jsonl"

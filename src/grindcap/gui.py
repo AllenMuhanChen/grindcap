@@ -36,7 +36,7 @@ def main(config_path: str = "config.yaml"):
 
     from .app import SnapFlow
     from .sessions import active_seconds, is_paused, set_paused
-    from .snapshot import key_figures
+    from .snapshot import key_figures, y_range
 
     flow = SnapFlow(cfg, source.grab_one)
     jobs: queue.Queue = queue.Queue()     # results from worker threads -> UI thread
@@ -90,22 +90,22 @@ def main(config_path: str = "config.yaml"):
 
     def draw_graph():
         """EXP/hr over the session: per-reading EXP/hr (faint dots), 5-min EMA (solid), session so far
-        (dashed). Per-reading spikes above the top (e.g. a big kill right before a reading) are pinned there."""
+        (dashed). The y-axis fits the two lines (not from 0, so changes show); per-reading dots outside it
+        are pinned to the edge."""
         graph.delete("all")
         pts = live["series"]
         if not pts:
             return
-        top = max(max(p["ema"] for p in pts), max(p["cum"] for p in pts)) * 1.4 or 1.0
+        lo, hi = y_range(pts)
         t1 = max(pts[-1]["t"], 1.0)
         x0, x1, y0, y1 = 34, GW - 6, GH - PAD - 14, 6      # plot box; legend row under the axis labels
         X = lambda t: x0 + (x1 - x0) * t / t1
-        Y = lambda v: y0 - (y0 - y1) * min(v, top) / top
-        for frac in (0.5, 1.0):
-            graph.create_line(x0, Y(top * frac), x1, Y(top * frac), fill="#ecebe6")
-        graph.create_line(x0, y0, x1, y0, fill="#c9c6bd")
-        k = lambda v: f"{v / 1000:.0f}k" if v >= 10000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
-        graph.create_text(x0 - 3, Y(top), text=k(top), anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
-        graph.create_text(x0 - 3, y0, text="0", anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
+        Y = lambda v: y0 - (y0 - y1) * (min(max(v, lo), hi) - lo) / (hi - lo)
+        k = lambda v: f"{v / 1000:.0f}k" if v >= 100000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+        for frac in (0.0, 0.5, 1.0):
+            v = lo + (hi - lo) * frac
+            graph.create_line(x0, Y(v), x1, Y(v), fill="#c9c6bd" if frac == 0 else "#ecebe6")
+            graph.create_text(x0 - 3, Y(v), text=k(v), anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
         graph.create_text(x1, y0 + 2, text=f"{t1:.0f} min", anchor="ne", fill="#6d6a63", font=("Segoe UI", 7))
         for p in pts:
             x, y = X(p["t"]), Y(p["raw"])
