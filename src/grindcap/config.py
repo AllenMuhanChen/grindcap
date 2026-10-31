@@ -99,6 +99,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # (0 = off).
         "live_every": 60,
     },
+    "quickslot": {
+        # Read the potions on the quick slots at Start and with every live EXP reading, and show the
+        # mesos spent on HP and MP potions (at NPC shop price). The GUI has a checkbox for it too.
+        "enabled": True,
+        # Which item is on which key, if the item database can't tell: {"Del": "Orange Potion"}.
+        "slots": {},
+        # Kind and NPC shop price for potions missing from quickslot.POTIONS: {"Pizza": ["hp", 1000]}.
+        "prices": {},
+    },
     "session": {
         "monster": "Unknown",
         # EXP per kill of the monster you are farming. Used to split kills that land in the same frame.

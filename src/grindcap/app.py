@@ -28,6 +28,9 @@ class SnapFlow:
         self.pressed_at: float | None = None      # when Start/End snapshot was pressed
         self.tabs_seen: set[str] = set()
         self.last_page_at: float | None = None
+        self.track_potions = bool((cfg.data.get("quickslot") or {}).get("enabled", True))
+        self._digits = None
+        self._qs_cache: dict = {}        # quick slot key -> (icon signature, item name)
 
     @property
     def needed_tabs(self) -> list[str]:
@@ -86,6 +89,8 @@ class SnapFlow:
         from .snapshot import read_map_safe
 
         self.status["map"] = read_map_safe(self.cfg, self.status_frame)
+        if which == "start" and self.track_potions:
+            self.status["potions"] = self.read_potions(self.status_frame)
         self.watcher = PageWatcher(self.cfg)
         return self.status
 
@@ -133,15 +138,16 @@ class SnapFlow:
         folder = save_snapshot(snap, Path(self.cfg["inventory"]["snapshot_dir"]) / f"{self.which}-{stamp}",
                                self.status_frame, {"Inventory": self.pages})
         which, self.which, self.watcher = self.which, None, None
+        if which == "start" and self.status.get("potions") is not None:
+            self._log_live(folder, {"time": when, "potions": self.status["potions"]})   # potions at the start
         return {"which": which, "folder": str(folder), "pages": len(self.pages), "level": snap["level"],
                 "exp": snap["exp"], "mesos": snap["mesos"], "kinds": len(snap["items"]),
                 "count": sum(snap["items"].values()), "map": (snap.get("map") or {}).get("name")}
 
     def live(self, start_folder) -> dict | None:
         """Read EXP/level off the status bar now and work out EXP/hr since the start snapshot (paused
-        time left out). Each reading is appended to <start>/live.jsonl. None if the EXP wasn't read."""
-        import json
-
+        time left out). Each reading (with the quick slot potions, if tracked) is appended to
+        <start>/live.jsonl. None if the EXP wasn't read."""
         from .anchors import shifted
         from .snapshot import apply_fixes, live_exp
 
@@ -155,11 +161,37 @@ class SnapFlow:
         lv = apply_fixes(start).get("level")
         reading = read_status(fc, frame, prior=int(lv) if lv else None)
         r = live_exp(start, reading, now)
-        with open(Path(start_folder) / "live.jsonl", "a") as fh:
-            fh.write(json.dumps({"time": now, "exp": reading.get("exp"), "level": reading.get("level"),
-                                 "checked": bool(reading.get("exp_checked")),
-                                 "exp_per_hr": r["exp_per_hr"] if r else None}) + "\n")
+        row = {"time": now, "exp": reading.get("exp"), "level": reading.get("level"),
+               "checked": bool(reading.get("exp_checked")), "exp_per_hr": r["exp_per_hr"] if r else None}
+        if self.track_potions:
+            row["potions"] = self.read_potions(frame)
+        self._log_live(start_folder, row)
         return r
+
+    @staticmethod
+    def _log_live(start_folder, row: dict):
+        import json
+
+        with open(Path(start_folder) / "live.jsonl", "a") as fh:
+            fh.write(json.dumps(row) + "\n")
+
+    def read_potions(self, frame) -> list[dict] | None:
+        """What's on the quick slots ([{"key", "count", "name"}]); None if the panel wasn't found or
+        reading failed (a missed reading is skipped, it doesn't count as zero)."""
+        from .digits import StackDigits
+        from .quickslot import read_quickslot
+
+        try:
+            if self._digits is None:
+                self._digits = StackDigits(Path(self.cfg["inventory"]["catalog_dir"]) / "digits.npz")
+            q = self.cfg.data.get("quickslot") or {}
+            out = read_quickslot(frame, self._digits, self._itemdb(), q.get("slots"), self._qs_cache)
+            return out or None
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+            return None
 
     def cancel(self):
         self.which, self.watcher, self.pages = None, None, []

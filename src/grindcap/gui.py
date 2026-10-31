@@ -11,7 +11,9 @@ directly, so you don't have to switch windows at the right moment.
 
 While a session runs, EXP is read off the status bar every gui.live_every seconds; EXP/hr and level %/hr
 so far are shown under the timer, with a graph: EXP/hr per reading (faint dots), its 5-minute exponential
-moving average (solid) and the session's EXP/hr so far (dashed). Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
+moving average (solid) and the session's EXP/hr so far (dashed). With "Track potions" on, the quick slot
+potions are read at Start and with each EXP reading, and a second graph shows the mesos spent on HP and MP
+potions so far (at NPC shop price). Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
 """
 from __future__ import annotations
 
@@ -72,7 +74,11 @@ def main(config_path: str = "config.yaml"):
                           justify="left")   # wraps long map names instead of widening the window
     session = {"run": None}   # the start snapshot waiting for its end, if any
     processing = {"on": False}  # a finished snapshot is being read in the background
-    live = {"line": "", "next": 0.0, "series": []}  # latest EXP/hr so far, when to read it next, graph points
+    # latest EXP/hr so far, when to read it next, graph points, potion graph points
+    live = {"line": "", "next": 0.0, "series": [], "potions": []}
+    track = tk.BooleanVar(value=flow.track_potions)
+    chk_pot = ttk.Checkbutton(frm, text="Track potions (quick slots)", variable=track,
+                              command=lambda: setattr(flow, "track_potions", track.get()))
     live_every = (cfg.data.get("gui") or {}).get("live_every", 60)
 
     def refresh_running():
@@ -83,7 +89,7 @@ def main(config_path: str = "config.yaml"):
         except Exception:
             session["run"] = None
         if not session["run"]:
-            live["line"], live["series"] = "", []
+            live["line"], live["series"], live["potions"] = "", [], []
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
     GW, GH, PAD = 300, 120, 18      # graph size; PAD = room for labels
     graph = tk.Canvas(frm, width=GW, height=GH, bg="#fcfcfb", highlightthickness=0)
@@ -131,9 +137,44 @@ def main(config_path: str = "config.yaml"):
         graph.create_line(x0 + 146, ly, x0 + 162, ly, fill="#eb6834", width=2, dash=(4, 3))
         graph.create_text(x0 + 166, ly, text="session", anchor="w", fill="#52514e", font=("Segoe UI", 7))
 
+    PH = 96
+    pgraph = tk.Canvas(frm, width=GW, height=PH, bg="#fcfcfb", highlightthickness=0)
+
+    def draw_potions():
+        """Mesos spent on potions so far (NPC shop price): HP (orange) and MP (blue), y from 0."""
+        pgraph.delete("all")
+        pts = live["potions"]
+        if not pts:
+            return
+        last = pts[-1]
+        top = max(max(p["hp"] for p in pts), max(p["mp"] for p in pts), 100) * 1.15
+        t1 = max(last["t"], 1.0)
+        x0, x1, y0, y1 = 34, GW - 6, PH - 18, 6
+        X = lambda t: x0 + (x1 - x0) * t / t1
+        Y = lambda v: y0 - (y0 - y1) * v / top
+        k = lambda v: f"{v / 1000:.0f}k" if v >= 100000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+        for frac in (0.0, 0.5, 1.0):
+            pgraph.create_line(x0, Y(top * frac), x1, Y(top * frac), fill="#c9c6bd" if frac == 0 else "#ecebe6")
+            pgraph.create_text(x0 - 3, Y(top * frac), text=k(top * frac), anchor="e", fill="#6d6a63",
+                               font=("Segoe UI", 7))
+        pgraph.create_text(x1, y1, text="mesos spent on potions", anchor="ne", fill="#6d6a63",
+                           font=("Segoe UI", 7))
+        if len(pts) > 1:
+            for key, color in (("hp", "#eb6834"), ("mp", "#2a78d6")):
+                pgraph.create_line(*[c for p in pts for c in (X(p["t"]), Y(p[key]))], fill=color, width=2)
+        hrs = last["t"] / 60
+        ly = PH - 7
+        x = x0
+        for key, color, name in (("hp", "#eb6834", "HP"), ("mp", "#2a78d6", "MP")):
+            rate = f" ({k(last[key] / hrs)}/hr)" if hrs > 0 else ""
+            pgraph.create_line(x, ly, x + 16, ly, fill=color, width=2)
+            text = f"{name} {k(last[key])}{rate}"
+            pgraph.create_text(x + 20, ly, text=text, anchor="w", fill="#52514e", font=("Segoe UI", 7))
+            x += 26 + 5 * len(text)
+
     def layout(collecting: bool):
         for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard,
-                  b_pause, graph):
+                  b_pause, graph, pgraph, chk_pot):
             w.grid_remove()
         if processing["on"]:
             # reading the pages: nothing to press; the session timer already runs for a start snapshot
@@ -165,6 +206,10 @@ def main(config_path: str = "config.yaml"):
                 if live["series"]:
                     graph.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
                     draw_graph()
+                if live["potions"]:
+                    pgraph.grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                    draw_potions()
+            chk_pot.grid(row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
             update_timer()
 
     def update_timer():
@@ -251,8 +296,12 @@ def main(config_path: str = "config.yaml"):
     def do_live(folder):
         from .snapshot import live_series, load_live, load_snapshot
 
+        from .quickslot import potion_series, prices
+
         r = flow.live(folder)
-        return ("live", r, live_series(load_snapshot(folder), load_live(folder)))
+        start, rows = load_snapshot(folder), load_live(folder)
+        pots = potion_series(start, rows, prices((cfg.data.get("quickslot") or {}).get("prices")))
+        return ("live", r, live_series(start, rows), pots)
 
     def finish_now():
         """Stop collecting pages and read them in the background. For a start snapshot the session
@@ -330,24 +379,25 @@ def main(config_path: str = "config.yaml"):
                        f"{info['count']} items in total).")
             readout.set(f"EXP {info['exp']}   Level {info['level']}   Mesos {info['mesos']}")
             if info["which"] == "end":
-                live["line"], live["series"] = "", []
+                live["line"], live["series"], live["potions"] = "", [], []
                 if info.get("result"):
                     readout.set("\n".join(key_figures(info["result"])))
                 status.set(status.get() + " Compare shows every item; Review / fix to check what changed.")
             else:
                 live["next"] = time.time() + live_every
         elif kind == "live":
-            _, r, series = result
+            _, r, series, pots = result
             if session["run"]:
                 if r:
                     pct = f"   {r['pct_per_hr']:.1f}%/hr" if r.get("pct_per_hr") is not None else ""
                     live["line"] = f"EXP/hr: {r['exp_per_hr']:,.0f}{pct}"
-                had = bool(live["series"])
-                live["series"] = series
-                if series and not had:
-                    layout(flow.collecting)       # shows the graph
+                had = (bool(live["series"]), bool(live["potions"]))
+                live["series"], live["potions"] = series, pots
+                if (bool(series), bool(pots)) != had:
+                    layout(flow.collecting)       # shows or hides the graphs
                 else:
                     draw_graph()
+                    draw_potions()
             update_timer()
         elif kind == "compared":
             _, text, report = result

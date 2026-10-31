@@ -107,6 +107,17 @@ gui.py       tkinter always-on-top control window over SnapFlow; work runs in th
              solid, current value boxed at its end), session-so-far (dashed); x = active minutes. The review page shows the same graph
              (review_data["live"], live rows up to the end + the end snapshot; [] for older sessions). Finishing
              the end snapshot runs compare and shows key_figures (net mesos/hr, EXP/hr, ...) right away.
+quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quickslot_panel.png (frame + gaps
+             only; scripts/build_quickslot_template.py) in the bottom third, scaled by frame height. 2x4 slots
+             (KEYS Shift..PgDn), counts via StackDigits (same font; a lone "0" only if cost < 0.2: "ATTACK"
+             on Ctrl reads as 0 at 0.39). Verified on all 5 fixtures. Item: config quickslot.slots
+             {key: name}, else itemdb.identify with key-label rows + digits ignored (NOT verified on real
+             icons: no network to maplestory.io in the dev container), cached per key by 8x8 signature.
+             POTIONS = NPC shop price + hp/mp (from memory: Red 50, Orange 160, White 320, Blue 200, Mana
+             Elixir 620; config quickslot.prices overrides). Read at Start (first live.jsonl row, time = the
+             start snapshot's) and with each live reading (row["potions"]). potion_series: drops between
+             readings = used, rises ignored, a reading outside its agreeing neighbours dropped; GUI draws
+             HP/MP mesos spent so far under the EXP graph ("Track potions" checkbox = SnapFlow.track_potions).
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```
