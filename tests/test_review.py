@@ -173,3 +173,14 @@ def test_meso_field_picture(tmp_path):
     data["mesos_field"] = {"page": "Equip_01", "box": [1, 2, 3, 4]}       # saved by build_snapshot
     (folder / "snapshot.json").write_text(json.dumps(data))
     assert meso_field(load_snapshot(folder))["box"] == [1, 2, 3, 4]
+
+
+def test_review_has_the_exp_per_hour_graph_only_with_live_readings(tmp_path):
+    cat, root, s, e = setup(tmp_path)
+    assert review_data(s, e, cat)["live"] == []            # an older session: no graph
+    rows = [{"time": 1800, "exp": 2000, "level": 20, "checked": True},
+            {"time": 4000, "exp": 3500, "level": 20, "checked": True}]   # after the end snapshot: left out
+    (s / "live.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    pts = review_data(s, e, cat)["live"]
+    assert [p["t"] for p in pts] == [30, 60]               # the end snapshot is the last point
+    assert pts[-1]["cum"] == 2000                           # = the session's EXP/hr

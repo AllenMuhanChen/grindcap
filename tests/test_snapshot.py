@@ -582,3 +582,25 @@ def test_live_exp_per_hour_so_far(tmp_path, monkeypatch):
     r = flow.live(sf)
     assert r["exp"] == 300 and r["exp_per_hr"] == 1800            # 300 EXP in 10 active minutes
     assert '"exp_per_hr": 1800' in (sf / "live.jsonl").read_text()
+
+
+def test_live_series_smooths_skips_misreads_and_pauses():
+    from math import exp
+
+    from grindcap.snapshot import live_exp, live_series
+
+    start = {"time": 0.0, "exp": 1000, "level": 20, "pauses": [[600, 1200]]}
+    rows = [{"time": 300, "exp": 1500, "level": 20, "checked": True},
+            {"time": 500, "exp": 9999, "level": 20, "checked": False},     # not confirmed by the EXP table
+            {"time": 600, "exp": 1400, "level": 20, "checked": True},      # EXP went down: misread
+            {"time": 1200, "exp": 2500, "level": 20, "checked": True}]     # resumed just now: 300 active s since the last
+    a, b = live_series(start, rows)
+    assert (a["t"], a["exp"], a["raw"], a["ema"], a["cum"]) == (5, 500, 6000, 6000, 6000)
+    assert (b["t"], b["exp"], b["raw"], b["cum"]) == (10, 1500, 12000, 9000)
+    assert b["ema"] == round(6000 + (1 - exp(-1)) * 6000, 1)                # 5 min gap, 5 min time constant
+    assert b["pct"] == round(1500 / 20216 * 100 * 6, 2)                    # % of level 20 per hour
+    assert live_series(start, []) == []
+
+    # level %/hr counts a level-up as 100%
+    r = live_exp({"time": 0.0, "exp": 20000, "level": 20}, {"exp": 500, "level": 21, "exp_checked": True}, 3600)
+    assert r["pct_per_hr"] == round((1 + 500 / 24402 - 20000 / 20216) * 100, 2)

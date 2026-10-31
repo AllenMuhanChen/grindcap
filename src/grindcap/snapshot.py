@@ -397,8 +397,66 @@ def live_exp(start: dict, reading: dict, now: float) -> dict | None:
     secs = active_seconds(start["time"], now, start.get("pauses"))
     if xp is None or xp < 0 or secs <= 0:
         return None
+    pct = _level_pct(start, reading)
     return {"exp": xp, "exp_per_hr": round(xp / secs * 3600, 1), "minutes": round(secs / 60, 1),
-            "level": reading["level"]}
+            "level": reading["level"], "pct_per_hr": round(pct / secs * 3600, 2) if pct is not None else None}
+
+
+def _level_pct(start: dict, reading: dict) -> float | None:
+    """Level progress between start and reading, in % of a level (a level-up counts 100%)."""
+    def frac(s):
+        need = exp_to_next(int(s["level"]))
+        return int(s["level"]) + s["exp"] / need if need else None
+    a, b = frac(start), frac(reading)
+    return None if a is None or b is None else (b - a) * 100
+
+
+def live_series(start: dict, rows: list[dict], tau_min: float = 5.0) -> list[dict]:
+    """EXP/hr over a session from its live readings (<start>/live.jsonl rows: time, exp, level, checked).
+
+    Per point: t = active minutes since start (paused time left out), exp = EXP gained so far,
+    raw = EXP/hr since the previous point, ema = raw smoothed by an exponential moving average with
+    time constant tau_min (weight 1 - exp(-dt/tau), so uneven gaps and pauses are handled),
+    cum = EXP/hr since start, pct = level %/hr since start. Unconfirmed readings, and readings whose
+    EXP went down (a misread), are skipped."""
+    from math import exp as _exp
+
+    from .sessions import active_seconds
+
+    start = apply_fixes(start)
+    if start.get("exp") is None or start.get("level") is None:
+        return []
+    out, prev_s, prev_x, ema = [], 0.0, 0.0, None
+    for row in sorted(rows, key=lambda r: r.get("time", 0)):
+        if not row.get("checked") or row.get("exp") is None or row.get("level") is None:
+            continue
+        reading = {"exp": row["exp"], "level": row["level"], "level_read": True}
+        xp = exp_gained(start, reading)
+        secs = active_seconds(start["time"], row["time"], start.get("pauses"))
+        if xp is None or xp < prev_x or secs <= prev_s:
+            continue
+        dt = secs - prev_s
+        raw = (xp - prev_x) / dt * 3600
+        ema = raw if ema is None else ema + (1 - _exp(-dt / (tau_min * 60))) * (raw - ema)
+        pct = _level_pct(start, reading)
+        out.append({"t": round(secs / 60, 2), "exp": xp, "raw": round(raw, 1), "ema": round(ema, 1),
+                    "cum": round(xp / secs * 3600, 1),
+                    "pct": round(pct / secs * 3600, 2) if pct is not None else None})
+        prev_s, prev_x = secs, xp
+    return out
+
+
+def load_live(start_folder) -> list[dict]:
+    """Rows of <start>/live.jsonl ([] for sessions from before live readings were logged)."""
+    p = Path(start_folder) / "live.jsonl"
+    rows = []
+    if p.exists():
+        for line in p.read_text().splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                pass
+    return rows
 
 
 def format_compare(r: dict) -> str:

@@ -72,6 +72,15 @@ button.star.on { color: var(--warn); border-color: var(--warn); }
 button.danger:hover { border-color: var(--bad); color: var(--bad); }
 .empty { padding: 40px 0; color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.xph { --raw: #9ec5f4; --ema: #2a78d6; --cum: #eb6834; --grid: #ecebe6; position: relative;
+       background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; }
+@media (prefers-color-scheme: dark) { .xph { --raw: #1c5cab; --ema: #3987e5; --cum: #d95926; --grid: #2a2a2e; } }
+.xph svg { display: block; width: 100%; height: 220px; overflow: visible; }
+.xph text { fill: var(--muted); font-size: 11px; }
+.xph .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+.xph .legend i { display: inline-block; width: 16px; height: 0; border-top: 2px solid; vertical-align: middle; margin-right: 5px; }
+.xph .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12px;
+            padding: 4px 8px; border-radius: 6px; white-space: nowrap; opacity: .92; }
 </style>
 </head>
 <body>
@@ -89,6 +98,13 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
 <main>
   <p class="empty" id="empty" hidden></p>
   <div id="content">
+  <section id="xphSec" hidden>
+    <h2>EXP / hr over the session</h2>
+    <div class="xph" id="xph"></div>
+    <p class="hint">Read off the status bar about once a minute while the session ran; paused time is left out.
+      Dots: EXP/hr since the previous reading. Solid: those smoothed (exponential moving average, 5 min).
+      Dashed: EXP/hr since the start.</p>
+  </section>
   <section>
     <h2>Status read from the screen</h2>
     <table class="status" id="status"></table>
@@ -192,8 +208,44 @@ function renderSession() {
   };
 }
 
+function renderXph(pts) {
+  const sec = $("#xphSec"), box = $("#xph");
+  sec.hidden = !pts || !pts.length;
+  if (sec.hidden) { box.innerHTML = ""; return; }
+  const W = Math.max(box.clientWidth - 20, 300), H = 220, L = 46, R = 8, T = 8, B = 22;
+  const top = Math.max(...pts.map(p => Math.max(p.ema, p.cum))) * 1.4 || 1, t1 = Math.max(pts[pts.length - 1].t, 1);
+  const X = t => L + (W - L - R) * t / t1, Y = v => H - B - (H - B - T) * Math.min(v, top) / top;
+  const k = v => v >= 10000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  const path = key => pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join("");
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${Y(top * f)}" y2="${Y(top * f)}" stroke="var(--grid)"/>
+    <text x="${L - 6}" y="${Y(top * f) + 4}" text-anchor="end">${k(top * f)}</text>`).join("");
+  const ticks = [0, .25, .5, .75, 1].map(f => `<text x="${X(t1 * f)}" y="${H - 6}" text-anchor="middle">${Math.round(t1 * f)} min</text>`).join("");
+  box.innerHTML = `<div class="legend"><span><i style="border-color:var(--raw);border-top-style:dotted;border-top-width:4px"></i>per reading</span>
+      <span><i style="border-color:var(--ema)"></i>5-min average</span><span><i style="border-color:var(--cum);border-top-style:dashed"></i>session so far</span></div>
+    <svg viewBox="0 0 ${W} ${H}">${grid}${ticks}
+      ${pts.map(p => `<circle cx="${X(p.t)}" cy="${Y(p.raw)}" r="3" fill="var(--raw)"/>`).join("")}
+      <path d="${path("cum")}" fill="none" stroke="var(--cum)" stroke-width="2" stroke-dasharray="6 4"/>
+      <path d="${path("ema")}" fill="none" stroke="var(--ema)" stroke-width="2"/>
+      <line id="xhair" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/>
+      <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent" id="xhit"/></svg>
+    <div class="tip" hidden></div>`;
+  const hit = $("#xhit", box), hair = $("#xhair", box), tip = $(".tip", box), svg = $("svg", box);
+  hit.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width;
+    const p = pts.reduce((a, b) => Math.abs(X(b.t) - x) < Math.abs(X(a.t) - x) ? b : a);
+    hair.setAttribute("x1", X(p.t)); hair.setAttribute("x2", X(p.t)); hair.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    tip.innerHTML = `<b>${p.t.toFixed(0)} min</b> · +${fmt(p.exp)} EXP<br>per reading ${fmt(p.raw)}/hr<br>5-min average ${fmt(p.ema)}/hr<br>
+      session ${fmt(p.cum)}/hr${p.pct != null ? ` (${p.pct.toFixed(1)}%/hr)` : ""}`;
+    const px = X(p.t) * r.width / W + 10;
+    tip.style.left = `${Math.min(px + 10, box.clientWidth - tip.offsetWidth - 4)}px`; tip.style.top = "30px";
+  });
+  hit.addEventListener("mouseleave", () => { hair.setAttribute("visibility", "hidden"); tip.hidden = true; });
+}
+
 function render() {
   const s = D.summary;
+  renderXph(D.live);
   const hm = m => m == null ? "–" : `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
   $("#stats").innerHTML =
     `<div class="stat big"><b>${fmt(s.net_per_hr)}</b><span>Net mesos / hr incl. items</span></div>

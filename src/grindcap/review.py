@@ -98,8 +98,23 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
                                  "items_gained_value", "items_used_value", "net_mesos_incl_items",
                                  "net_per_hr", "revenue", "cost", "revenue_per_hr", "cost_per_hr")}
     return {"summary": summary, "status": status, "items": items, "covered": covered,
+            "live": _live(start_dir, s, ee),
             "catalog": sorted(([iid, it.get("name") or iid] for iid, it in catalog.items.items()),
                               key=lambda x: x[1].lower())}
+
+
+def _live(start_dir, start: dict, end: dict) -> list[dict]:
+    """EXP/hr series for the review graph: the live readings up to the end snapshot, plus the end
+    snapshot itself. [] for sessions without live readings."""
+    from .snapshot import live_series, load_live
+
+    rows = [r for r in load_live(start_dir) if r.get("time", 0) <= end["time"]]
+    if not rows:
+        return []
+    fixed = (end.get("fixes") or {}).get("status") or {}
+    rows.append({"time": end["time"], "exp": end.get("exp"), "level": end.get("level"),
+                 "checked": end.get("exp_checked") is not False or fixed.get("exp") is not None})
+    return live_series(start, rows)
 
 
 def summary_data(root, catalog: Catalog, saved_only: bool = True) -> dict:

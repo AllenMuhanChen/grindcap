@@ -9,8 +9,9 @@ directly, so you don't have to switch windows at the right moment.
   Compare                          EXP/hr, mesos/hr and items, plus the full report
   Pause / Resume                   paused time doesn't count towards the session's per-hour rates
 
-While a session runs, EXP is read off the status bar every gui.live_every seconds and EXP/hr so far is
-shown under the timer. Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
+While a session runs, EXP is read off the status bar every gui.live_every seconds; EXP/hr and level %/hr
+so far are shown under the timer, with a graph: EXP/hr per reading (faint dots), its 5-minute exponential
+moving average (solid) and the session's EXP/hr so far (dashed). Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
 """
 from __future__ import annotations
 
@@ -71,7 +72,7 @@ def main(config_path: str = "config.yaml"):
                           justify="left")   # wraps long map names instead of widening the window
     session = {"run": None}   # the start snapshot waiting for its end, if any
     processing = {"on": False}  # a finished snapshot is being read in the background
-    live = {"line": "", "next": 0.0}  # latest EXP/hr so far, and when to read it next
+    live = {"line": "", "next": 0.0, "series": []}  # latest EXP/hr so far, when to read it next, graph points
     live_every = (cfg.data.get("gui") or {}).get("live_every", 60)
 
     def refresh_running():
@@ -82,12 +83,48 @@ def main(config_path: str = "config.yaml"):
         except Exception:
             session["run"] = None
         if not session["run"]:
-            live["line"] = ""
+            live["line"], live["series"] = "", []
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
+    GW, GH, PAD = 300, 120, 18      # graph size; PAD = room for labels
+    graph = tk.Canvas(frm, width=GW, height=GH, bg="#fcfcfb", highlightthickness=0)
+
+    def draw_graph():
+        """EXP/hr over the session: per-reading EXP/hr (faint dots), 5-min EMA (solid), session so far
+        (dashed). Per-reading spikes above the top (e.g. a big kill right before a reading) are pinned there."""
+        graph.delete("all")
+        pts = live["series"]
+        if not pts:
+            return
+        top = max(max(p["ema"] for p in pts), max(p["cum"] for p in pts)) * 1.4 or 1.0
+        t1 = max(pts[-1]["t"], 1.0)
+        x0, x1, y0, y1 = 34, GW - 6, GH - PAD - 14, 6      # plot box; legend row under the axis labels
+        X = lambda t: x0 + (x1 - x0) * t / t1
+        Y = lambda v: y0 - (y0 - y1) * min(v, top) / top
+        for frac in (0.5, 1.0):
+            graph.create_line(x0, Y(top * frac), x1, Y(top * frac), fill="#ecebe6")
+        graph.create_line(x0, y0, x1, y0, fill="#c9c6bd")
+        k = lambda v: f"{v / 1000:.0f}k" if v >= 10000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+        graph.create_text(x0 - 3, Y(top), text=k(top), anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
+        graph.create_text(x0 - 3, y0, text="0", anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
+        graph.create_text(x1, y0 + 2, text=f"{t1:.0f} min", anchor="ne", fill="#6d6a63", font=("Segoe UI", 7))
+        for p in pts:
+            x, y = X(p["t"]), Y(p["raw"])
+            graph.create_oval(x - 2, y - 2, x + 2, y + 2, fill="#9ec5f4", outline="")
+        for key, color, dash in (("cum", "#eb6834", (4, 3)), ("ema", "#2a78d6", ())):
+            xy = [c for p in pts for c in (X(p["t"]), Y(p[key]))]
+            if len(pts) > 1:
+                graph.create_line(*xy, fill=color, width=2, dash=dash)
+        ly = GH - 7
+        graph.create_oval(x0 - 2, ly - 2, x0 + 2, ly + 2, fill="#9ec5f4", outline="")
+        graph.create_text(x0 + 6, ly, text="per min", anchor="w", fill="#52514e", font=("Segoe UI", 7))
+        graph.create_line(x0 + 62, ly, x0 + 78, ly, fill="#2a78d6", width=2)
+        graph.create_text(x0 + 82, ly, text="5-min avg", anchor="w", fill="#52514e", font=("Segoe UI", 7))
+        graph.create_line(x0 + 146, ly, x0 + 162, ly, fill="#eb6834", width=2, dash=(4, 3))
+        graph.create_text(x0 + 166, ly, text="session", anchor="w", fill="#52514e", font=("Segoe UI", 7))
 
     def layout(collecting: bool):
         for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard,
-                  b_pause):
+                  b_pause, graph):
             w.grid_remove()
         if processing["on"]:
             # reading the pages: nothing to press; the session timer already runs for a start snapshot
@@ -116,6 +153,9 @@ def main(config_path: str = "config.yaml"):
                 b_pause.grid(row=5, column=0, sticky="ew", padx=2, pady=(4, 0))
                 b_discard.grid(row=5, column=2, sticky="e", pady=(4, 0))
                 b_pause.configure(text="Resume" if is_paused(run.get("pauses")) else "Pause")
+                if live["series"]:
+                    graph.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+                    draw_graph()
             update_timer()
 
     def update_timer():
@@ -200,7 +240,10 @@ def main(config_path: str = "config.yaml"):
         return ("finished", info)
 
     def do_live(folder):
-        return ("live", flow.live(folder))
+        from .snapshot import live_series, load_live, load_snapshot
+
+        r = flow.live(folder)
+        return ("live", r, live_series(load_snapshot(folder), load_live(folder)))
 
     def finish_now():
         """Stop collecting pages and read them in the background. For a start snapshot the session
@@ -278,16 +321,24 @@ def main(config_path: str = "config.yaml"):
                        f"{info['count']} items in total).")
             readout.set(f"EXP {info['exp']}   Level {info['level']}   Mesos {info['mesos']}")
             if info["which"] == "end":
-                live["line"] = ""
+                live["line"], live["series"] = "", []
                 if info.get("result"):
                     readout.set("\n".join(key_figures(info["result"])))
                 status.set(status.get() + " Compare shows every item; Review / fix to check what changed.")
             else:
                 live["next"] = time.time() + live_every
         elif kind == "live":
-            r = result[1]
-            if r and session["run"]:
-                live["line"] = f"EXP/hr so far {r['exp_per_hr']:,.0f}   (+{r['exp']:,.0f} EXP in {r['minutes']:.0f} min)"
+            _, r, series = result
+            if session["run"]:
+                if r:
+                    pct = f"   {r['pct_per_hr']:.1f}%/hr" if r.get("pct_per_hr") is not None else ""
+                    live["line"] = f"EXP/hr: {r['exp_per_hr']:,.0f}{pct}"
+                had = bool(live["series"])
+                live["series"] = series
+                if series and not had:
+                    layout(flow.collecting)       # shows the graph
+                else:
+                    draw_graph()
             update_timer()
         elif kind == "compared":
             _, text, report = result

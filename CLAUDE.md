@@ -101,8 +101,11 @@ gui.py       tkinter always-on-top control window over SnapFlow; work runs in th
              Pause/Resume while a session runs: sessions.set_paused writes <start>/pauses.json
              ([[t0, t1|null], ...]); compare() and list_sessions leave paused time out of minutes and
              every per-hour rate (paused_minutes in the result). Every gui.live_every s (60) while running
-             and not paused, SnapFlow.live reads EXP/level off the status bar and shows "EXP/hr so far"
-             under the timer (only EXP-table-confirmed readings; logged to <start>/live.jsonl). Finishing
+             and not paused, SnapFlow.live reads EXP/level off the status bar and shows "EXP/hr: N  x%/hr"
+             under the timer (only EXP-table-confirmed readings; logged to <start>/live.jsonl), plus a
+             tk Canvas graph from snapshot.live_series: per-reading EXP/hr (dots), 5-min EMA (dt-weighted,
+             solid), session-so-far (dashed); x = active minutes. The review page shows the same graph
+             (review_data["live"], live rows up to the end + the end snapshot; [] for older sessions). Finishing
              the end snapshot runs compare and shows key_figures (net mesos/hr, EXP/hr, ...) right away.
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
