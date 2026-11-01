@@ -188,7 +188,7 @@ web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's sta
 web/app.js            Page = big control section (Share, Start/End/Pause/Discard, character, timer, tab chips, live EXP/hr,
                       "Your data": Back up all data = one grindcap-backup JSON {sessions (full records), kv}; Restore merges
                       (new ids added, newer `saved` replaces, corrections/characters unioned, running session only if none here))
-                      + tabs "Session review" (the viewed session) | "Summary" (table of saved sessions, character filter;
+                      + tabs "Session review" (the viewed session) | "Summary" (table of saved sessions: character + map filters, Level start→end, click a header to sort, kv "sumSort"; light index has map/level from record.meta = fixed values, store.reindex backfills;
                       Allen will add more there). Session review = the viewed session (‹ › paging, rename, delete, results, EXP/hr graph, review). S.cur = running
                       session (same object as its saved record once ended), S.view = shown one. Pop-out opens on
                       Share/Start (Document PiP needs a click), "Re-open pop-out" when closed. UI, one session like gui.py: Start (status + pages) -> live EXP every N s while running ->
