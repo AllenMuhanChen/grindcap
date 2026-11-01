@@ -112,7 +112,7 @@ async function onTick() {
   S.busy = true;
   try {
     const every = +$('every').value * 1000, live = C().live;
-    if (S.collect) await pageTick(now);
+    if (S.collect) await pageTick(now).catch((e) => warn(`Page read failed: ${e.message}`));
     else if (liveActive() && now - (live.rows.at(-1)?.t || 0) >= every && now - (live.lastTry || 0) >= every) await liveRead(now);
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
   } finally { S.busy = false; }
@@ -180,22 +180,27 @@ $('discardSnap').onclick = () => discard();
 
 async function beginCollect(kind) {
   const t = Date.now(), cur = C();
-  S.collect = { kind, t, status: {}, pages: {}, mesos: [], pictures: [], mesoPics: [], expPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0, reading: true };
+  const c = S.collect = { kind, t, status: {}, pages: {}, mesos: [], pictures: [], mesoPics: [], expPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0, reading: true };
+  if (kind === 'end' && cur.start?.map) c.map = cur.start.map;      // same map as at Start: not read again
   render();
-  const frame = await S.cap.grab();
-  const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
-  S.collect.status = st;
-  if (frame) await tryMap(frame, Date.now());
-  S.collect.reading = false;
-  if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
-    const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
-    S.collect.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
-  }
-  snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
-  if (kind === 'end' && isPaused(cur.pauses)) { cur.pauses.at(-1)[1] = t; store.set('pauses', cur.pauses); }   // End ends the pause
-  if (st.checked) {
-    if (kind === 'start') cur.live.rows = [];
-    cur.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
+  try {
+    const frame = await S.cap.grab();
+    const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
+    c.status = st;
+    if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
+      const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
+      c.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
+    }
+    snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
+    if (kind === 'end' && isPaused(cur.pauses)) { cur.pauses.at(-1)[1] = t; store.set('pauses', cur.pauses); }   // End ends the pause
+    if (st.checked) {
+      if (kind === 'start') cur.live.rows = [];
+      cur.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
+    }
+  } catch (e) {
+    warn(`Reading the status bar failed (${e.message}); the inventory scan goes on.`);
+  } finally {
+    c.reading = false;                   // never leave the scan waiting, whatever failed above
   }
   render();
 }
@@ -203,9 +208,10 @@ async function beginCollect(kind) {
 /** The map name from the minimap; asks for the minimap when it isn't on screen. */
 async function tryMap(frame, now) {
   const c = S.collect;
-  if (!c || c.map || now - (c.lastMapTry || 0) < 3000) return;
+  if (!c || c.map || now - (c.lastMapTry || 0) < 10000) return;
   c.lastMapTry = now;
-  const m = await readMap(frame, S.mapHeader, S.maps);
+  let m = null;
+  try { m = await readMap(frame, S.mapHeader, S.maps); } catch (e) { note(`map read failed: ${e.message}`); }
   if (S.collect !== c) return;
   if (m && m.name) {
     c.map = { street: m.street, name: m.name, matched: m.matched, raw: m.raw };
@@ -224,7 +230,7 @@ async function pageTick(now) {
   if (c.reading) return;
   const frame = await S.cap.grab();
   if (!frame) return;
-  await tryMap(frame, now);
+  if (!c.map && c.lastNew) await tryMap(frame, now);   // after the first page, so the map never holds up the scan
   const inv = locateInventory(frame, S.title, S.ctx);
   if (!inv) { if (now - c.lastWarn > 3000) { warn('Inventory not found: open it (I) and keep it fully on screen.'); c.lastWarn = now; } return; }
   const sig = PageWatcher.signature(frame, inv.grid);
