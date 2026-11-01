@@ -8,3 +8,5 @@ config.yaml
 captures/
 /data/
 /snapshots/
+/web/local/
+node_modules/

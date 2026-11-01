@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grindcap (browser test)</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --mute: #667085; --line: #e4e7ec; --acc: #2f6fde; --ok: #1a7f4b; --bad: #b42318; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1d2128; --ink: #e6e9ef; --mute: #98a2b3; --line: #2c323c; --acc: #6ea0ff; --ok: #4cc38a; --bad: #f97066; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  h1 { font-size: 18px; margin: 4px 0 0; } h2 { font-size: 15px; margin: 0 0 8px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .mute { color: var(--mute); } .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+  .stats div span { display: block; color: var(--mute); font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  pre { margin: 0; max-height: 180px; overflow: auto; font-size: 12px; color: var(--mute); white-space: pre-wrap; }
+  canvas { width: 100%; height: 160px; display: block; }
+  .tabs span { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); margin-right: 4px; }
+  .tabs span.done { border-color: var(--ok); color: var(--ok); }
+  select { font: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>grindcap, browser test</h1>
+    <div class="mute">Everything runs in this tab. Nothing is uploaded; nothing is sent to the game.</div>
+  </div>
+
+  <section>
+    <h2>1. Share the game window</h2>
+    <div class="row">
+      <button id="share" class="primary">Share MapleStory window</button>
+      <button id="saveFrame" disabled>Save current frame (PNG)</button>
+      <span id="data" class="mute"></span>
+    </div>
+    <div class="stats" id="capStats"></div>
+    <pre id="capLog"></pre>
+  </section>
+
+  <section>
+    <h2>2. Live EXP</h2>
+    <div class="row">
+      <button id="liveBtn" disabled>Start live EXP</button>
+      <label class="mute">read every <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s</label>
+      <span id="liveNote" class="mute"></span>
+    </div>
+    <div class="stats" id="liveStats"></div>
+    <canvas id="graph" width="940" height="160"></canvas>
+    <div class="mute" style="font-size:12px">dots: EXP/min per reading · line: 5-min average · dashed: session average</div>
+    <table id="liveTable"></table>
+  </section>
+
+  <section>
+    <h2>3. Before / after: mesos and items</h2>
+    <div class="row">
+      <button id="startSnap" disabled>Start</button>
+      <button id="endSnap" disabled>End</button>
+      <button id="finishSnap" disabled>Finish pages</button>
+      <button id="resetSnap">Reset</button>
+      <button id="download" disabled>Download session JSON</button>
+    </div>
+    <p id="snapHelp" class="mute">Press Start, then open the inventory (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still. Keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page.</p>
+    <div class="tabs" id="tabs"></div>
+    <pre id="snapLog"></pre>
+    <div id="result"></div>
+  </section>
+</main>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -163,6 +163,25 @@ grindcap export sessions/20261022-210000_Green_Mushroom.jsonl
 
 `export` prints the values to enter in Grind Ledger's monster editor: touches per kill, seconds between kills and mesos dropped per kill.
 
+## Browser test (web/)
+
+A test of whether grindcap can run in a browser tab instead of as a Python app. It shares the
+MapleStory window the way Discord does (Chrome or Edge), reads live EXP/min, and takes before/after
+snapshots of mesos and items. Nothing is uploaded and nothing is sent to the game.
+
+1. Double-click `grindcap-web.bat`. It exports your item data and taught digits for the page
+   (`scripts/export_web_data.py` -> `web/local/`), serves the repo on http://localhost:8765 and opens it.
+2. **Share MapleStory window** and pick the game window.
+3. **Live EXP**: reads level and EXP every 10-60 s and shows EXP/min.
+4. **Start**, open the inventory and click through Equip, Use, Set-up and Etc; **End** when done.
+
+No calibration: the inventory is found by its "ITEM INVENTORY" title and the EXP text by the "EXP."
+label, at any window size. The first panel shows how often frames arrive, including while the tab is
+in the background; **Save current frame** downloads what the browser sees.
+
+Tests: `node web/test/run.mjs` runs the JS readers in headless Chrome on `tests/fixtures/` and checks
+them against what the Python readers read.
+
 ## Known limits
 
 - **HP and MP bars are pixel-accurate, not point-accurate.** A 200 px bar on a 1,000 HP character resolves 5 HP. Switch HP/MP to `mode: text` to read the numbers instead.

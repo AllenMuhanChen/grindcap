@@ -138,6 +138,37 @@ gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```
 
+## web/: browser prototype (2026-11-01)
+
+Plain ES modules, no build step. Ports of the Python readers, checked to give the same results on every
+fixture (`node web/test/run.mjs`: level, EXP, mesos, tab, tooltip slots, every stack number; item names
+against a fake item DB cut from etc_excavation.png, compared with Python's read_page on the same data).
+
+```
+web/lib/img.js        mat {w,h,c,data Float32Array}, RGB. cvtColor grey, INTER_AREA/LINEAR/CUBIC resize, Otsu,
+                      warpAffine-style resample, Laplacian sharpness, TM_CCOEFF_NORMED search (findScaled:
+                      coarse on a shrunken copy, refined at full size, over candidate scales), masked TM_SQDIFF.
+web/lib/ocr.js        Tesseract.js 5.1.1 (LSTM, best_int eng), from web/vendor/tesseract/ (committed), else jsDelivr.
+web/lib/statusbar.js  statusbar.py: level tiles, EXP label (searched over scales; sets ctx.gameScale), resolve, meso field.
+web/lib/digits.js     digits.py (StackDigits, native view). Templates: data/stack_digits.json + web/local/digits.json.
+web/lib/itemdb.js     itemdb.py rank/shortlist/rescore/identify; icons from web/local/itemdb.json.
+web/lib/inventory.js  No calibration: locateInventory finds the "ITEM INVENTORY" title (web/data/inventory_title.png,
+                      cut from etc_ant_tunnel.png); first slot = title + (3, 63) px at BASE_SCALE 1920/1366,
+                      slot 44 px, pitch 36 x 34 native px (rows are closer than columns), 5 x 6 slots.
+                      Items keyed by item-data id; LookCache (24x24 colour signature, mean abs diff <= 6) replaces
+                      the catalog, re-checking named look-alikes + neighbours like _identify_slot.
+web/lib/session.js    build_snapshot / compare / exp_gained / live_series equivalents.
+web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with video-element fallback, ticker in a
+                      worker, stats (grabs while hidden, longest gap) to test background capture.
+web/app.js            UI. Start/End read status at once, then auto-capture pages (PageWatcher), auto-finish when
+                      Equip/Use/Setup/Etc seen + 4 s idle. Start snapshot + live rows kept in localStorage.
+scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -> web/local/ (gitignored).
+scripts/serve_web.py  localhost:8765 with explicit JS MIME types (Windows registry can make .js text/plain).
+```
+
+Not yet tested on the real game in a browser: covered window, background tab, windowed mode (title bar in
+the frame), other resolutions. Unrecognised items get "look-N" ids that only line up within one page load.
+
 Session logs are JSONL: first line `{"kind": "session", ...}` header, then one event per line with `t` in seconds from start.
 
 ## Conventions
