@@ -155,6 +155,28 @@ def is_covered(slot_img: np.ndarray, frac: float = 0.15) -> bool:
     return float(m.mean()) > frac
 
 
+def covered_slots(frame: np.ndarray, grid: "Grid", frac: float = 0.04) -> list[tuple[int, int]]:
+    """(row, col) of every slot a tooltip covers even a little. Tooltip-coloured pixels only count where
+    they form solid 6x6 px patches: the tooltip is one flat panel, while a purple or blue icon (an Equip
+    helmet reached 12% scattered pixels) has none. On the real screenshots clean slots are at 0 and the
+    tooltip's slots at 40-75%. A page with any is rejected while capturing: the mouse is over an item."""
+    import cv2
+
+    out = []
+    for r, row in enumerate(grid.slot_boxes()):
+        for c, (x, y, w, h) in enumerate(row):
+            img = frame[max(0, y):y + h, max(0, x):x + w]
+            if not img.size:
+                continue
+            s = img.astype(np.int16)
+            b, g, rr = s[..., 0], s[..., 1], s[..., 2]
+            blue = b - (rr + g) / 2
+            m = ((blue > 25) & (blue < 75) & (np.abs(rr - g) < 15) & (rr > 10) & (rr < 115)).astype(np.uint8)
+            if cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((6, 6), np.uint8)).mean() > frac:
+                out.append((r, c))
+    return out
+
+
 def is_empty(slot_img: np.ndarray, qty_box, std_max: float) -> bool:
     """A slot is empty when its middle is flat. The edges are left out, so a box drawn a few pixels
     off (taking in the slot border) still counts as empty."""
@@ -462,6 +484,13 @@ class PageWatcher:
         self._last = None
         self._count = 0
         self._captured: list = []
+        self._rejected: list = []   # views that were turned down (tooltip): not offered again
+
+    def reject_last(self):
+        """The view just offered wasn't kept. Offer the next different view even if it's close to this
+        one (the same page without the tooltip), but don't offer this exact view again."""
+        if self._captured:
+            self._rejected.append(self._captured.pop())
 
     def grid_signature(self, frame):
         import cv2
@@ -495,7 +524,8 @@ class PageWatcher:
             self._count += 1
         else:
             self._last, self._count = sig, 1
-        if self._count >= self.stable and not any(self._same(sig, c) for c in self._captured):
+        if (self._count >= self.stable and not any(self._same(sig, c) for c in self._captured)
+                and not any(float(np.abs(sig - r).mean()) < 1.0 for r in self._rejected)):
             self._captured.append(sig)   # never capture the same view twice (e.g. a tab visited again)
             return True
         return False

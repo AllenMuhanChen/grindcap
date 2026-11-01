@@ -28,6 +28,7 @@ class SnapFlow:
         self.pressed_at: float | None = None      # when Start/End snapshot was pressed
         self.tabs_seen: set[str] = set()
         self.last_page_at: float | None = None
+        self.rejected, self.last_covered = 0, 0      # pages rejected for a tooltip, slots it covered
         self.track_potions = bool((cfg.data.get("quickslot") or {}).get("enabled", True))
         self._digits = None
         self._qs_cache: dict = {}        # quick slot key -> (icon signature, item name)
@@ -80,6 +81,7 @@ class SnapFlow:
         self.which, self.pages, self.status_frame = which, [], frame
         self.pressed_at = time.time()
         self.tabs_seen, self.last_page_at = set(), None
+        self.rejected, self.last_covered = 0, 0
         self._cat = None                 # re-read: the last snapshot may have added items
         try:
             fc = shifted(self.cfg, self.status_frame)
@@ -94,16 +96,29 @@ class SnapFlow:
         self.watcher = PageWatcher(self.cfg)
         return self.status
 
-    def add_page(self, frame=None) -> int:
+    def add_page(self, frame=None) -> int | None:
+        """Keep a page. None (page NOT kept, self.last_covered = how many slots) if an item tooltip covers
+        any slot: the mouse was over an item, and a covered slot would be read wrong or not at all."""
         from .anchors import shifted
-        from .inventory import Grid, detect_tab, quick_tab
+        from .inventory import Grid, covered_slots, detect_tab, quick_tab
 
         frame = frame if frame is not None else self.grab()
-        self.pages.append(frame)
-        self.last_page_at = time.time()
         try:
             fc = shifted(self.cfg, frame, ("inventory",))
             grid = Grid.from_cfg(fc["inventory"])
+        except Exception:
+            fc, grid = None, None
+        if grid is not None:
+            covered = covered_slots(frame, grid)
+            if covered:
+                self.last_covered = len(covered)
+                self.rejected += 1
+                return None
+        self.pages.append(frame)
+        self.last_page_at = time.time()
+        try:
+            if grid is None:
+                raise LookupError
             # the items on the page say which tab it is; the tab buttons (which flash when a tab
             # has new items) are only the fallback
             tab = quick_tab(frame, grid, self._catalog(), self._itemdb(), fc["inventory"]["match_threshold"],
@@ -114,14 +129,17 @@ class SnapFlow:
             self.tabs_seen.add(tab)
         return len(self.pages)
 
-    def poll(self) -> bool:
-        """Grab a frame and keep it as a page if the inventory just settled on a new view."""
+    def poll(self) -> bool | str:
+        """Grab a frame and keep it as a page if the inventory just settled on a new view. True if kept,
+        "covered" if it was rejected because a tooltip covered slots, else False."""
         if not self.collecting or self.watcher is None:
             return False
         frame = self.grab()
         if self.watcher.feed(frame):
-            self.add_page(frame)
-            return True
+            if self.add_page(frame) is not None:
+                return True
+            self.watcher.reject_last()
+            return "covered"
         return False
 
     def finish(self, progress=None) -> dict:

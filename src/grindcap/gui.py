@@ -287,7 +287,8 @@ def main(config_path: str = "config.yaml"):
                                   f"Mesos {mes if mes is not None else '?'}\n{where}   (via {source.method})")
 
     def do_page():
-        return ("page", flow.add_page())
+        n = flow.add_page()
+        return ("covered", flow.last_covered) if n is None else ("page", n)
 
     def do_finish():
         info = flow.finish(progress=lambda text: jobs.put(("ok", ("progress", text))))
@@ -372,6 +373,10 @@ def main(config_path: str = "config.yaml"):
                        "bottom. Pages are captured as you go, and it finishes by itself a few seconds after "
                        "every tab has been seen (or press Finish).")
             layout(True)
+        elif kind == "covered":
+            root.bell()
+            status.set(f"PAGE REJECTED: a tooltip covers {result[1]} slot(s). Move the mouse off the items; "
+                       "the page is captured again by itself once it's clean.")
         elif kind == "page":
             status.set(f"Captured {result[1]} page(s). Keep scrolling, or press Finish.")
             readout.set(tabs_line())
@@ -454,7 +459,8 @@ def main(config_path: str = "config.yaml"):
             run_bg(do_live, run["folder"], retry=False)
         elif flow.collecting and not processing["on"] and auto.get() and not busy.locked():
             def poll():
-                return ("page", len(flow.pages)) if flow.poll() else ("idle",)
+                r = flow.poll()
+                return ("page", len(flow.pages)) if r is True else ("covered", flow.last_covered) if r else ("idle",)
             run_bg(poll, retry=False)
         root.after(400, tick)
 

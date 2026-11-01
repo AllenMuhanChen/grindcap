@@ -611,3 +611,41 @@ def test_exp_graph_y_axis_fits_the_lines_not_zero():
 
     assert y_range([{"ema": 40000, "cum": 48000}, {"ema": 60000, "cum": 52000}]) == (35000, 65000)  # 20k + 5k each side
     assert y_range([{"ema": 50000, "cum": 50000}]) == (47500, 52500)   # flat: at least 5% of the top
+
+
+def test_pages_with_a_tooltip_over_slots_are_rejected():
+    from pathlib import Path
+
+    from grindcap.inventory import Grid, covered_slots
+
+    fx = Path(__file__).parent / "fixtures"
+    clean = {"game_frame.png": Grid([1492, 137, 46, 46], [1694, 376, 46, 46], cols=5, rows=6),
+             "etc_ant_tunnel.png": Grid([1492, 140, 44, 44], [1694, 379, 44, 44], cols=5, rows=6),
+             "etc_excavation.png": Grid([1487, 139, 44, 44], [1689, 378, 44, 44], cols=5, rows=6),
+             "equip_burnt_land.png": Grid([1486, 137, 44, 44], [1688, 378, 44, 44], cols=5, rows=6)}
+    for name, g in clean.items():
+        assert covered_slots(cv2.imread(str(fx / name)), g) == [], name
+    tip = covered_slots(cv2.imread(str(fx / "use_tab_tooltip.png")),
+                        Grid([1504, 138, 44, 44], [1706, 377, 44, 44], cols=5, rows=6))
+    assert {r for r, _ in tip} == {5} and len(tip) == 5           # the tooltip over the bottom row
+
+
+def test_snapflow_rejects_a_covered_page_and_takes_the_clean_one(monkeypatch):
+    from pathlib import Path
+
+    from grindcap import app, inventory
+    from grindcap.app import SnapFlow
+
+    fx = Path(__file__).parent / "fixtures"
+    covered, clean = cv2.imread(str(fx / "use_tab_tooltip.png")), cv2.imread(str(fx / "game_frame.png"))
+    c = cfg()
+    c.data["inventory"]["first_slot"] = [1504, 138, 44, 44]
+    c.data["inventory"]["last_slot"] = [1706, 377, 44, 44]
+    frames = iter([covered] * 4 + [clean] * 3)
+    flow = SnapFlow(c, lambda: next(frames))
+    monkeypatch.setattr(app, "read_status", lambda cfg, frame, prior=None: {})
+    monkeypatch.setattr(app.SnapFlow, "read_potions", lambda self, frame: None)
+    flow.start("start")                                  # takes the first frame for the status bar
+    got = [flow.poll() for _ in range(6)]
+    assert got.count("covered") == 1 and got.count(True) == 1     # warned once, then the clean page
+    assert len(flow.pages) == 1 and flow.pages[0] is clean
