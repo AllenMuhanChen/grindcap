@@ -18,7 +18,7 @@ const CSS = `
   button { font: inherit; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
   button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
   button:disabled { opacity: .4; cursor: default; }
-  canvas { width: 100%; height: 120px; display: block; }
+  canvas { width: 100%; height: 150px; display: block; }
   .box { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 8px; background: var(--card); }
   .chips span { display: inline-block; padding: 1px 8px; margin: 2px 3px 2px 0; border-radius: 999px; border: 1px solid var(--line); }
   .chips span.done { border-color: var(--ok); color: var(--ok); }
@@ -50,7 +50,7 @@ export async function openPopout(a) {
     <canvas id="g" width="720" height="240"></canvas>
     <div class="mute" style="font-size:11px">dots: per reading · line: 5-min average · dashed: session</div>
     <div class="mute note" id="pot"></div>
-    <canvas id="pg" width="720" height="180" style="height:90px" hidden></canvas>
+    <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
     <div class="row">
       <button id="start" class="primary">Start</button><button id="end">End</button>
       <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
