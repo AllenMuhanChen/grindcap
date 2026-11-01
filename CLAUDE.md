@@ -171,6 +171,12 @@ web/lib/mapname.js    mapname.py: minimap header (web/data/minimap_header.png) -
                       snapped to web/local/maps.json (export_web_data.py) by a difflib-equal ratio(). Read at the
                       start of each scan, retried every 3 s on pages; missing -> "open the minimap (M)". Stored as
                       snapshot.map + map_picture, editable in the review (fixes.status[kind].map), leads the default name.
+web/lib/quickslot.js  quickslot.py: findPanel (coarse /4 search then refine, last position as hint), readQuickslot, matchByCount,
+                      describe, potionSeries (seconds). app.js: read at Start (status frame) and with each live EXP reading
+                      ("Track potions" checkbox, default web/local/quickslot.json enabled); names = config slots, then
+                      matchByCount on the start inventory (session.qsNames), then icon among kv "useIds" (Use ids seen in
+                      snapshots). Rows in session.potions [{time s, potions}]; graph (graph.js drawPotionGraph) in the view
+                      and the pop-out, describe line under the live stats.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

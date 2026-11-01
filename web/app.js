@@ -11,8 +11,9 @@ import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
 import { readMap } from './lib/mapname.js';
+import { readQuickslot, matchByCount, describe, potionSeries, prices } from './lib/quickslot.js';
 import { renderReview } from './review.js';
-import { drawGraph } from './graph.js';
+import { drawGraph, drawPotionGraph } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
 
 const $ = (id) => document.getElementById(id);
@@ -20,7 +21,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, lastPot: undefined });
 
 await store.openStore();
 
@@ -28,10 +29,11 @@ await store.openStore();
 // S.view = the session shown below (S.cur, or a saved one loaded from IndexedDB).
 const S = {
   cap: null, ctx: {}, title: null, digits: null, itemdb: new ItemDB(), cache: new LookCache(),
-  busy: false, lastGrab: 0, collect: null, ver: 0,
+  busy: false, lastGrab: 0, collect: null, ver: 0, qsCache: {}, qsCtx: {},
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, lastPot: undefined,
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -44,6 +46,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
+  store.set('potions', []); store.set('qsNames', {});
   S.view = S.cur;
 }
 
@@ -54,6 +57,13 @@ async function init() {
   S.title = await loadImage('./data/inventory_title.png');
   S.cursors = await (await fetch('./data/cursors.json')).json();
   S.mapHeader = await loadImage('./data/minimap_header.png');
+  S.qsPanel = await loadImage('./data/quickslot_panel.png', true);
+  let qs = {};
+  try { const r = await fetch('./local/quickslot.json'); if (r.ok) qs = await r.json(); } catch { /* defaults */ }
+  S.qs = { enabled: qs.enabled ?? true, slots: qs.slots || {}, prices: qs.prices || {} };
+  S.qsTable = prices(S.qs.prices);
+  S.trackPotions = store.get('trackPotions') ?? S.qs.enabled;
+  $('trackPot').checked = S.trackPotions;
   try { const r = await fetch('./local/maps.json'); S.maps = r.ok ? await r.json() : []; } catch { S.maps = []; }
   const builtin = await (await fetch('./data/stack_digits.json')).json();
   let taught = null;
@@ -78,6 +88,7 @@ async function init() {
 const popoutApi = {
   state: () => ({ ...S, ...C() }), start: startSession, end: endSession, finish: finishCollect, pause: togglePause, discard,
   running: () => running(), lastNote: () => S.lastNote, alert: () => alertNow(),
+  potions: () => ({ pts: potPoints(C()), line: running() && S.trackPotions && C().lastPot !== undefined ? describe(C().lastPot, S.qsTable) : '' }),
 };
 const showPopout = () => openPopout(popoutApi).then(render).catch((e) => note(`pop-out: ${e.message}`));
 
@@ -132,9 +143,24 @@ async function liveRead(now) {
     live.why = `Last read didn't fit the EXP table (read "${(st.texts || []).join(' | ')}", level ${st.level ?? '?'}${st.why ? ', ' + st.why : ''})`;
   }
   store.set('live', live);
+  if (S.trackPotions) {                 // the quick slots on the same frame; a missed reading is skipped
+    const p = readPotions(frame, C().qsNames);
+    C().lastPot = p;
+    if (p) { C().potions.push({ time: now / 1000, potions: p }); store.set('potions', C().potions); }
+  }
   renderTop();
   if (S.view === C()) renderGraph();
 }
+
+/** What's on the quick slots ([{key, count, name}]); null if the panel wasn't found or reading failed.
+ * Names: config slots, then the session's (from the start inventory), then the icon among Use items. */
+function readPotions(frame, names = {}) {
+  try {
+    const out = readQuickslot(frame, S.qsPanel, S.digits, S.itemdb, { ...names, ...S.qs.slots }, S.qsCache, store.get('useIds') || null, S.qsCtx);
+    return out.length ? out : null;
+  } catch (e) { console.warn('quick slot read failed', e); return null; }
+}
+$('trackPot').onchange = (e) => { S.trackPotions = e.target.checked; store.set('trackPotions', S.trackPotions); render(); };
 
 const running = () => !!(C().start && !C().end);
 const liveActive = () => running() && !S.collect && !isPaused(C().pauses);
@@ -187,6 +213,7 @@ async function beginCollect(kind) {
     const frame = await S.cap.grab();
     const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
     c.status = st;
+    if (kind === 'start' && S.trackPotions && frame) c.potions = readPotions(frame);
     if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
       const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
       c.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
@@ -289,6 +316,14 @@ async function finishCollect() {
   if (c.kind === 'start') {
     cur.start = snap; cur.id = snap.time; store.set('start', snap);
     cur.pauses = []; store.set('pauses', cur.pauses); store.set('live', cur.live);
+    // quick slot number = that item's inventory total: names each key for the session
+    const useIds = new Set(store.get('useIds') || []);
+    for (const id of Object.keys(snap.items)) if (!isNaN(+id) && S.itemdb.items[id]?.category === 'Use') useIds.add(+id);
+    store.set('useIds', [...useIds]);
+    cur.qsNames = c.potions ? matchByCount(c.potions, snap.items, S.itemdb) : {};
+    cur.potions = c.potions ? [{ time: snap.time / 1000, potions: c.potions.map((p) => ({ ...p, name: cur.qsNames[p.key] ?? p.name })) }] : [];
+    cur.lastPot = cur.potions[0]?.potions;
+    store.set('qsNames', cur.qsNames); store.set('potions', cur.potions);
     snapNote(`Start saved: mesos ${fmt(snap.mesos)}, ${Object.keys(snap.items).length} kinds of items in ${Object.keys(snap.tabs).join(', ') || 'no tabs'}. Go grind; press End when done.`);
     recompute(cur);
   } else {
@@ -300,7 +335,7 @@ async function finishCollect() {
   }
 }
 
-const record = (v) => ({ id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, saved: v.saved || Date.now() });
+const record = (v) => ({ id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
 
 /** Put the ended current session in the saved list. */
@@ -368,7 +403,7 @@ async function showSession(id) {
   else {
     const r = await store.getSession(+id);
     if (!r) return;
-    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || [];
+    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || []; r.potions = r.potions || []; r.qsNames = r.qsNames || {};
     S.view = r;
   }
   S.ver++;
@@ -403,7 +438,7 @@ $('deleteSess').onclick = async () => {
 $('download').onclick = () => {
   const v = S.view;
   download(`grindcap-session-${new Date(v.start?.time || Date.now()).toISOString().slice(0, 16).replace(':', '')}.json`,
-    { name: v.name, start: v.start, end: v.end, fixes: v.fixes, pauses: v.pauses, result: v.result, live: v.live.rows });
+    { name: v.name, start: v.start, end: v.end, fixes: v.fixes, pauses: v.pauses, result: v.result, live: v.live.rows, potions: v.potions || [] });
 };
 
 // ------------------------------------------------------------------ pictures
@@ -463,6 +498,7 @@ function renderTop() {
     ['Readings', `${rows.length}${live.fails ? ` (${live.fails} failed)` : ''}`],
   ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('') : '';
   $('liveNote').textContent = running() ? live.why || '' : '';
+  $('potLine').textContent = running() && S.trackPotions && C().lastPot !== undefined ? describe(C().lastPot, S.qsTable) : '';
 }
 
 function renderCapture() {
@@ -499,6 +535,18 @@ function renderGraph() {
   const v = S.view, ser = liveSeries(v.live?.rows || [], 5, v.pauses);
   $('graphWrap').hidden = !ser.length;
   if (ser.length) drawGraph($('graph'), ser, 60, 'EXP/hr');
+  const pts = potPoints(v);
+  $('potWrap').hidden = !pts.length;
+  if (pts.length) drawPotionGraph($('potGraph'), pts);
+}
+
+/** Potion mesos/hr points for a session (live readings up to its end), like review.py _potions. */
+function potPoints(v) {
+  if (!v.start || !(v.potions || []).length) return [];
+  const toS = (ms) => (ms == null ? null : ms / 1000), endS = v.end ? v.end.time / 1000 : Infinity;
+  const rows = v.potions.filter((r) => r.time <= endS + 1);
+  return potionSeries({ time: v.start.time / 1000, pauses: (v.pauses || []).map(([a, b]) => [toS(a), toS(b)]) }, rows, S.qsTable, 5, v.qsNames || {})
+    .filter((p) => p.ema_hp != null);
 }
 
 function renderView() {

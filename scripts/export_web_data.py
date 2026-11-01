@@ -5,6 +5,7 @@ Reads what the Python app already has on this PC and writes web/local/ (not in g
   web/local/itemdb.json   item names, tabs, prices and icons (from <catalog_dir>/itemdb, downloaded from
                           maplestory.io by the Python app; your own prices from catalog.json win)
   web/local/maps.json     Classic World map names (<catalog_dir>/itemdb/maps.json), to snap the minimap text to
+  web/local/quickslot.json  quickslot settings from config.yaml (enabled, slots, prices)
   web/local/digits.json   your teach-digits examples (<catalog_dir>/digits.npz), added to the built-in ones
 
 Run from the repo root:  python scripts/export_web_data.py
@@ -71,6 +72,12 @@ def main() -> int:
         maps = [{"streetName": m.get("streetName") or "", "name": m.get("name") or ""} for m in json.loads(mp.read_text())]
         (out / "maps.json").write_text(json.dumps(maps))
         print(f"Map names: {len(maps)} -> {out / 'maps.json'}")
+
+    # --- quick slot settings (which item is on which key, extra potion prices)
+    q = cfg.data.get("quickslot") or {}
+    qs = {"enabled": bool(q.get("enabled", True)), "slots": q.get("slots") or {}, "prices": q.get("prices") or {}}
+    (out / "quickslot.json").write_text(json.dumps(qs))
+    print(f"Quick slots: {qs} -> {out / 'quickslot.json'}")
 
     # --- taught digits
     taught = data / "digits.npz"

@@ -1,7 +1,7 @@
 // Always-on-top pop-out (Chrome/Edge Document Picture-in-Picture): the old control window's job.
 // Session timer, EXP/hr, Start/End/Finish, the tab checklist while scanning, the live graph and the
 // key results, so you don't have to switch back to the browser tab.
-import { drawGraph } from './graph.js';
+import { drawGraph, drawPotionGraph } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
@@ -49,6 +49,8 @@ export async function openPopout(a) {
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
     <div class="mute" style="font-size:11px">dots: per reading · line: 5-min average · dashed: session</div>
+    <div class="mute note" id="pot"></div>
+    <canvas id="pg" width="720" height="180" style="height:90px" hidden></canvas>
     <div class="row">
       <button id="start" class="primary">Start</button><button id="end">End</button>
       <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
@@ -77,6 +79,10 @@ export function updatePopout() {
   $('xph').textContent = fmt(last ? last.ema * 60 : null);
   $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr · ${fmt(last.ema)}/min · +${fmt(last.gained)} EXP` : (running ? 'waiting for two readings…' : '');
   drawGraph($('g'), ser, 60, 'EXP/hr');
+  const pot = api.potions ? api.potions() : { pts: [], line: '' };
+  $('pot').textContent = pot.line;
+  $('pg').hidden = !pot.pts.length;
+  if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
   $('start').disabled = !sharing || !!S.collect || running;
   $('end').disabled = !sharing || !!S.collect || !running;
   $('pause').disabled = !running || !!S.collect;

@@ -66,6 +66,7 @@
     <button id="pauseSnap" disabled>Pause</button>
     <button id="discardSnap" disabled>Discard</button>
     <button id="finishSnap" hidden title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
+    <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
     <button id="popout" title="Small always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Re-open pop-out</button>
     <span id="sessionLine"></span>
   </div>
@@ -73,6 +74,7 @@
   <div id="scanHelp" class="scanhelp" hidden>Open the inventory (I). Click <b>Equip, Use, Set-up and Etc</b> in turn and scroll each to the bottom. A page is taken when the view holds still. <b>Keep the mouse off the items</b>, and keep the minimap open.</div>
   <div class="stats" id="liveStats"></div>
   <div id="liveNote" class="bad small"></div>
+  <div id="potLine" class="mute small"></div>
   <div id="lastNote" class="mute small"></div>
 </header>
 <main>
@@ -90,6 +92,10 @@
     <div id="graphWrap" hidden>
       <canvas id="graph" width="940" height="170"></canvas>
       <div class="mute small">EXP/hr. dots: per reading · line: 5-min average · dashed: session average · x: active minutes</div>
+    </div>
+    <div id="potWrap" hidden>
+      <canvas id="potGraph" width="940" height="130"></canvas>
+      <div class="mute small">Mesos/hr spent on potions at NPC price: <span style="color:#eb6834">HP</span>, <span style="color:#2a78d6">MP</span>. Potions gained count negative, so it can go below 0.</div>
     </div>
     <div id="review"></div>
   </section>
