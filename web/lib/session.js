@@ -16,18 +16,22 @@ export function expBetween(l0, e0, l1, e1) {
   return total + e1;
 }
 
-/** pages: {tab: [page, ...]} -> snapshot. status = {level, exp, pct}; mesosReads = values read per page. */
-export function buildSnapshot(time, status, pages, mesosReads, extra = {}) {
+/** pages: {tab: [page, ...]} -> snapshot. status = {level, exp, pct}; mesosReads = values read per page.
+ * pick: which reading wins when the total changed during the scan (a pet looting mesos): 'first' for
+ * End (its time is when End was pressed), 'last' for Start (its time is the last page); null = most common. */
+export function buildSnapshot(time, status, pages, mesosReads, extra = {}, pick = null) {
   const tabs = {}, mergeLog = {};
   for (const [tab, list] of Object.entries(pages)) { mergeLog[tab] = []; tabs[tab] = mergePages(list, mergeLog[tab]); }
   const c = new Map();
   for (const v of mesosReads) if (v != null) c.set(v, (c.get(v) || 0) + 1);
   let mesos = null, n = 0;
   for (const [v, k] of c) if (k > n) { n = k; mesos = v; }
+  const valid = mesosReads.filter((v) => v != null);
+  if (pick && valid.length) mesos = pick === 'first' ? valid[0] : valid.at(-1);
   return {
     time, when: new Date(time).toLocaleString(),
     level: status.level, exp: status.exp, exp_pct: status.pct, exp_checked: status.checked,
-    mesos, mesos_checked: n >= 2 || mesosReads.length === 1, mesos_reads: mesosReads,
+    mesos, mesos_checked: (c.get(mesos) || 0) >= 2 || valid.length === 1, mesos_changed: c.size > 1, mesos_reads: mesosReads,
     // every slot keeps its picture, what was read and which look it was, for the review panel
     tabs: Object.fromEntries(Object.entries(tabs).map(([t, rows]) => [t, rows.map((r) => r.map((s) => ({ ...s })))])),
     items: totals(tabs), merge_log: mergeLog, ...extra,

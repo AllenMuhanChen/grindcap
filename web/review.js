@@ -27,13 +27,21 @@ export function renderReview(el, S, h) {
     const fix = S.fixes.status[kind]?.[k];
     return `<input class="st" data-kind="${kind}" data-k="${k}" value="${esc(fix ?? '')}" placeholder="${esc(snap[k] ?? 'not read')}" title="read: ${esc(snap[k])}${fix != null && fix !== '' ? ' (you fixed it)' : ''}">`;
   };
+  const mesoPics = (snap) => {
+    const list = snap.meso_pictures || (snap.meso_picture ? [{ value: snap.mesos, pages: [], img: snap.meso_picture }] : []);
+    if (!list.length) return '<span class="mute">–</span>';
+    return list.map((p) => `<div class="shot"><img class="meso" src="${p.img}" alt="meso field"><span class="small ${p.value === snap.mesos ? '' : 'mute'}">read ${p.value == null ? 'nothing' : fmt(p.value)}${p.pages.length ? ` · ${esc(p.pages.join(', '))}` : ''}${p.value === snap.mesos && list.length > 1 ? ' · used' : ''}</span></div>`).join('');
+  };
   let html = `<h3>Status read from the screen</h3>
-    <table><tr><th>Snapshot</th><th>Level</th><th>EXP</th><th>Mesos</th><th>Meso field as captured</th></tr>
+    <table><tr><th>Snapshot</th><th>Level</th><th>EXP</th><th class="l">EXP as captured</th><th>Mesos</th><th class="l">Meso field as captured</th></tr>
     ${KINDS.filter((k) => snaps[k]).map((k) => `<tr><td>${k} <span class="mute">${esc(snaps[k].when)}</span>
       ${snaps[k].exp_checked ? '' : '<span class="bad" title="EXP did not fit the EXP table">EXP unchecked</span>'}
-      ${snaps[k].mesos_checked ? '' : `<span class="bad" title="pages read: ${esc((snaps[k].mesos_reads || []).join(', '))}">mesos unchecked</span>`}</td>
-      <td>${field(k, 'level')}</td><td>${field(k, 'exp')}</td><td>${field(k, 'mesos')}</td>
-      <td>${snaps[k].meso_picture ? `<img class="meso" src="${snaps[k].meso_picture}" alt="meso field">` : '<span class="mute">–</span>'}</td></tr>`).join('')}
+      ${snaps[k].mesos_changed ? `<span class="bad" title="different totals on different pages; ${k === 'end' ? 'the first (when End was pressed)' : 'the last (when the start scan finished)'} is used">mesos changed during the scan</span>`
+        : snaps[k].mesos_checked ? '' : `<span class="bad" title="pages read: ${esc((snaps[k].mesos_reads || []).join(', '))}">mesos unchecked</span>`}</td>
+      <td>${field(k, 'level')}</td><td>${field(k, 'exp')}</td>
+      <td class="l">${snaps[k].exp_picture ? `<img class="meso" src="${snaps[k].exp_picture}" alt="EXP">` : '<span class="mute">–</span>'}</td>
+      <td>${field(k, 'mesos')}</td>
+      <td class="l">${mesoPics(snaps[k])}</td></tr>`).join('')}
     </table><p class="mute">Type a value to correct a misread; clear it to go back to what was read.</p>`;
   html += '<p class="mute small">Naming an icon here also teaches this browser: later scans name it by itself (export or clear them under "icons you named" at the bottom of the page).</p>';
 

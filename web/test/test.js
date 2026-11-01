@@ -2,7 +2,7 @@
 // read (expected.json). Open /web/test/test.html from a server at the repo root, or run run.mjs.
 import { loadImage } from '../lib/img.js';
 import { readStatus, readMesosField } from '../lib/statusbar.js';
-import { locateInventory, detectTab, coveredSlots, readPage, LookCache } from '../lib/inventory.js';
+import { locateInventory, detectTab, coveredSlots, readPage, LookCache, findCursor, Grid } from '../lib/inventory.js';
 import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
 import { mat } from '../lib/img.js';
@@ -12,6 +12,7 @@ const expected = await (await fetch('./expected.json')).json();
 const label = await loadImage('../data/exp_label.png');
 const title = await loadImage('../data/inventory_title.png');
 const digits = new StackDigits(await (await fetch('../data/stack_digits.json')).json());
+const cursors = await (await fetch('../data/cursors.json')).json();
 const results = {}, fails = [];
 for (const [name, want] of Object.entries(expected)) {
   const t0 = performance.now();
@@ -27,6 +28,10 @@ for (const [name, want] of Object.entries(expected)) {
     got.mesos = (await readMesosField(frame, inv.grid)).value;
     got.tab = detectTab(frame, inv.grid);
     got.covered = coveredSlots(frame, inv.grid);
+    const cur = findCursor(frame, inv.grid, cursors, ctx.gameScale);
+    got.cursor = cur && cur.name;
+    const wantCursor = name === 'use_tab_tooltip.png' ? 'open' : null;   // the only one with the pointer over the grid
+    if (got.cursor !== wantCursor) fails.push(`${name} cursor: got ${got.cursor} (${cur && cur.score.toFixed(3)}), want ${wantCursor}`);
     const page = await readPage(frame, inv.grid, digits, null, new LookCache());
     got.nums = page.map((row) => row.map((s) => (s.id && s.id !== '?' ? s.qty : 0)));
   }
@@ -62,6 +67,14 @@ for (const [name, want] of Object.entries(expected)) {
   const got = page.map((row) => row.map((s) => (typeof s.id === 'number' ? s.id : null)));
   if (JSON.stringify(got) !== JSON.stringify(want)) fails.push(`items: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
   log(`items: ${JSON.stringify(got)} (${ms} ms for the page, ${db.icons.size} icons)`);
+}
+// The pointing-hand pointer, on a page picture the browser version saved (screen pixels, 1920x1080 game)
+{
+  const frame = await loadImage('../../tests/fixtures/cursor_page.png');
+  const grid = new Grid([22, 48, 44, 44], [22 + 4 * 50.6, 48 + 5 * 47.8, 44, 44]);
+  const cur = findCursor(frame, grid, cursors, 1920 / 1366);
+  if (!cur || cur.name !== 'point') fails.push(`cursor_page.png: got ${JSON.stringify(cur)}, want the pointing hand`);
+  log(`cursor_page.png: ${JSON.stringify(cur)}`);
 }
 log(fails.length ? `FAIL\n${fails.join('\n')}` : 'ALL OK');
 window.__result = { results, fails };

@@ -1,0 +1,13 @@
+<!doctype html><script type="module">
+import { loadImage, gray, crop, otsu, resizeCubic, pad } from '../lib/img.js';
+import { ocr, ocrReady } from '../lib/ocr.js';
+await ocrReady();
+const img = await loadImage('./meso734.png'); const g = gray(img);
+const white = (x, y) => g.data[y * g.w + x] > 235;
+let best = [0, 0], s = -1; for (let y = 0; y < g.h; y++) { let n = 0; for (let x = 0; x < g.w; x++) n += white(x, y); const on = n / g.w > 0.5; if (on) { if (s < 0) s = y; if (y + 1 - s > best[1] - best[0]) best = [s, y + 1]; } else s = -1; }
+const [r0, r1] = best; const cols = []; for (let x = 0; x < g.w; x++) { let n = 0; for (let y = r0; y < r1; y++) n += white(x, y); if (n / (r1 - r0) > 0.5) cols.push(x); }
+const fld = crop(g, cols[0], r0, cols.at(-1) - cols[0] + 1, r1 - r0);
+const out = [`fld ${fld.w}x${fld.h}`];
+for (const k of [2, 3, 4, 5, 6]) out.push(k + ': ' + await ocr(pad(otsu(resizeCubic(fld, k)), 12, 12, 12, 12, 255), 7, '0123456789,.'));
+document.title = 'DONE'; document.body.textContent = out.join('\n');
+</script>

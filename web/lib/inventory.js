@@ -69,6 +69,55 @@ export function isCovered(img, frac = 0.15) {
 }
 
 /** (row, col) of slots a tooltip covers even a little: tooltip colour in solid 6x6 patches. */
+/** The game's mouse pointer (a white glove) over the item grid, or null. cursors = web/data/cursors.json
+ * (screen-pixel templates at scale cursors.scale). Masked normalised correlation on grey, step 2 then
+ * refined; >= 0.8 counts (test screenshots without a pointer: <= 0.64; the pointer: 1.0). */
+export function findCursor(frame, grid, cursors, gameScale = null, thresh = 0.8) {
+  if (!cursors) return null;
+  const k = (gameScale || BASE_SCALE) / cursors.scale;
+  const b = grid.slotBoxes(), [x0, y0] = b[0][0], l = b[b.length - 1][b[0].length - 1];
+  let best = null;
+  for (const c of cursors.cursors) {
+    const t = prepCursor(c, k);
+    const X0 = Math.max(0, Math.round(x0 - t.w)), Y0 = Math.max(0, Math.round(y0 - t.h));
+    const X1 = Math.min(frame.w - t.w, Math.round(l[0] + l[2])), Y1 = Math.min(frame.h - t.h, Math.round(l[1] + l[3]));
+    if (X1 <= X0 || Y1 <= Y0) continue;
+    const g = gray(crop(frame, X0, Y0, X1 - X0 + t.w, Y1 - Y0 + t.h));
+    const at = (x, y) => {
+      let si = 0, si2 = 0, sit = 0;
+      for (let i = 0; i < t.idx.length; i++) {
+        const v = g.data[(y + t.dy[i]) * g.w + x + t.dx[i]];
+        si += v; si2 += v * v; sit += v * t.tv[i];
+      }
+      const n = t.idx.length, vi = si2 - (si * si) / n;
+      return vi > 1e-6 ? sit / Math.sqrt(vi * t.tt) : 0;
+    };
+    let bs = -1, bx = 0, by = 0;
+    for (let y = 0; y <= Y1 - Y0; y += 2) for (let x = 0; x <= X1 - X0; x += 2) { const v = at(x, y); if (v > bs) { bs = v; bx = x; by = y; } }
+    for (let y = Math.max(0, by - 2); y <= Math.min(Y1 - Y0, by + 2); y++) for (let x = Math.max(0, bx - 2); x <= Math.min(X1 - X0, bx + 2); x++) {
+      const v = at(x, y); if (v > bs) { bs = v; bx = x; by = y; }
+    }
+    if (!best || bs > best.score) best = { name: c.name, score: bs, x: X0 + bx, y: Y0 + by };
+  }
+  return best && best.score >= thresh ? best : null;
+}
+const cursorCache = new Map();
+function prepCursor(c, k) {
+  const key = `${c.name}:${k.toFixed(3)}`;
+  if (cursorCache.has(key)) return cursorCache.get(key);
+  let grey = { w: c.w, h: c.h, c: 1, data: Float32Array.from(c.grey) }, mask = { w: c.w, h: c.h, c: 1, data: Float32Array.from(c.mask) };
+  if (Math.abs(k - 1) > 0.02) {
+    const w = Math.max(4, Math.round(c.w * k)), h = Math.max(4, Math.round(c.h * k));
+    grey = resizeArea(grey, w, h); mask = resizeArea(mask, w, h);
+  }
+  const idx = [], dx = [], dy = [], vals = [];
+  for (let y = 0; y < grey.h; y++) for (let x = 0; x < grey.w; x++) if (mask.data[y * grey.w + x] > 0.5) { idx.push(idx.length); dx.push(x); dy.push(y); vals.push(grey.data[y * grey.w + x]); }
+  const m = vals.reduce((a, v) => a + v, 0) / vals.length, tv = vals.map((v) => v - m);
+  const t = { w: grey.w, h: grey.h, idx, dx, dy, tv, tt: tv.reduce((a, v) => a + v * v, 0) };
+  cursorCache.set(key, t);
+  return t;
+}
+
 export function coveredSlots(frame, grid, frac = 0.04) {
   const out = [];
   grid.slotBoxes().forEach((row, r) => row.forEach(([x, y, w, h], c) => {

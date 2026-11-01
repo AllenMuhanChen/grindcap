@@ -6,7 +6,7 @@ import { ocrReady } from './lib/ocr.js';
 import { readStatus, readMesosField } from './lib/statusbar.js';
 import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
-import { locateInventory, coveredSlots, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
+import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
@@ -51,6 +51,7 @@ function resetCur() {
 async function init() {
   S.ctx.expLabel = await loadImage('./data/exp_label.png');
   S.title = await loadImage('./data/inventory_title.png');
+  S.cursors = await (await fetch('./data/cursors.json')).json();
   const builtin = await (await fetch('./data/stack_digits.json')).json();
   let taught = null;
   try { const r = await fetch('./local/digits.json'); if (r.ok) taught = await r.json(); } catch { /* none */ }
@@ -168,11 +169,15 @@ $('discardSnap').onclick = () => discard();
 
 async function beginCollect(kind) {
   const t = Date.now(), cur = C();
-  S.collect = { kind, t, status: {}, pages: {}, mesos: [], pictures: [], mesoPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0, reading: true };
+  S.collect = { kind, t, status: {}, pages: {}, mesos: [], pictures: [], mesoPics: [], expPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0, reading: true };
   render();
   const frame = await S.cap.grab();
   const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
   S.collect.status = st; S.collect.reading = false;
+  if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
+    const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
+    S.collect.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
+  }
   snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
   if (kind === 'end' && isPaused(cur.pauses)) { cur.pauses.at(-1)[1] = t; store.set('pauses', cur.pauses); }   // End ends the pause
   if (st.checked) {
@@ -196,6 +201,12 @@ async function pageTick(now) {
     snapNote('a tooltip covers some items: move the mouse off the grid');
     return;
   }
+  const pointer = findCursor(frame, inv.grid, S.cursors, S.ctx.gameScale);
+  if (pointer) {                                       // the mouse pointer hides part of a slot
+    c.watcher.rejectLast();
+    snapNote('the mouse pointer is over the items: move it off the grid (page not taken)');
+    return;
+  }
   const button = detectTab(frame, inv.grid);
   const page = await readPage(frame, inv.grid, S.digits, S.itemdb, S.cache, `${c.kind}`);
   if (S.collect !== c) return;                           // discarded meanwhile
@@ -206,11 +217,13 @@ async function pageTick(now) {
   c.pictures.push({ tab, n: c.pages[tab].length, img: pagePicture(frame, inv.grid) });
   c.seen.add(tab);
   c.lastNew = Date.now();
-  const counts = new Map(); for (const v of c.mesos) if (v != null) counts.set(v, (counts.get(v) || 0) + 1);
-  if (Math.max(0, ...counts.values()) < 3) {
-    const m = await readMesosField(frame, inv.grid);
-    c.mesos.push(m.value);
-    if (m.box && (!c.mesoPic || (m.value != null && !c.mesoPicOk))) { c.mesoPic = picture(frame, ...m.box, 'image/png'); c.mesoPicOk = m.value != null; }
+  // the meso field on every page, each with its picture: the total can change during a scan (pet loot)
+  const m = await readMesosField(frame, inv.grid);
+  c.mesos.push(m.value);
+  if (m.box) {
+    const last = c.mesoPics.at(-1);
+    if (last && last.value === m.value) last.pages.push(`${tab} ${c.pages[tab].length}`);
+    else c.mesoPics.push({ value: m.value, raw: m.raw, pages: [`${tab} ${c.pages[tab].length}`], img: picture(frame, ...m.box, 'image/png') });
   }
   const named = page.flat().filter((s) => s.id && s.id !== UNKNOWN);
   const unknown = named.filter((s) => typeof s.id !== 'number').length;
@@ -229,7 +242,9 @@ async function finishCollect() {
   const time = c.kind === 'start' ? (c.lastNew || c.t) : c.t;   // start: when the last page was taken; end: when End was pressed
   const used = new Set(Object.values(c.pages).flat(Infinity).map((sl) => sl && sl.look).filter(Boolean));
   const looks = Object.fromEntries(S.cache.looks.filter((l) => used.has(l.key)).map((l) => [l.key, { id: l.id, name: l.name, match: l.match, crop: l.crop, sig: Array.from(l.sig, Math.round) }]));
-  const snap = buildSnapshot(time, c.status, c.pages, c.mesos, { pictures: c.pictures, meso_picture: c.mesoPic, looks });
+  const snap = buildSnapshot(time, c.status, c.pages, c.mesos,
+    { pictures: c.pictures, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
+    c.kind === 'end' ? 'first' : 'last');
   S.collect = null;
   if (c.kind === 'start') {
     cur.start = snap; cur.id = snap.time; store.set('start', snap);

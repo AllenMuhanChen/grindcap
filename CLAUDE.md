@@ -160,6 +160,13 @@ web/lib/inventory.js  No calibration: locateInventory finds the "ITEM INVENTORY"
 web/lib/session.js    build_snapshot / compare / exp_gained / live_series equivalents.
 web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with video-element fallback, ticker in a
                       worker, stats (grabs while hidden, longest gap) to test background capture.
+web/data/cursors.json Mouse-pointer templates (pointing + open glove, screen px at 1920/1366) from
+                      scripts/build_cursor_templates.py (tests/fixtures/cursor_page.png, use_tab_tooltip.png).
+                      inventory.findCursor: masked grey NCC over the grid, >= 0.8 rejects the page (no pointer
+                      <= 0.64). Python app has no pointer check yet.
+                      Meso field read on every page with its picture (snapshot.meso_pictures); when the total
+                      changes during a scan (pet loot) End uses the first read, Start the last (mesos_changed).
+                      snapshot.exp_picture = the EXP text as captured. Both shown in the review status table.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.
