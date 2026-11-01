@@ -112,7 +112,7 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
     <h2>Potion mesos / hr over the session</h2>
     <div class="xph pots" id="pots"></div>
     <p class="hint">Quick slot potion counts read about once a minute; each drop is potions used, at NPC shop price
-      (restocks are ignored). Dots: mesos/hr since the previous reading. Solid: 5-minute moving average. Dashed: since
+      (potions gained, from drops or buying, count as negative). Dots: mesos/hr since the previous reading. Solid: 5-minute moving average. Dashed: since
       the start. Paused time is left out; the y-axis fits the lines.</p>
   </section>
   <section>
@@ -262,13 +262,15 @@ function renderPotions(pts) {
   if (sec.hidden) { box.innerHTML = ""; return; }
   const W = Math.max(box.clientWidth - 20, 300), H = 200, L = 46, R = 8, T = 8, B = 22;
   const vals = pts.flatMap(p => [p.ema_hp, p.ema_mp, p.cum_hp, p.cum_mp]), lo0 = Math.min(...vals), hi0 = Math.max(...vals);
-  const pad = Math.max((hi0 - lo0) * 0.25, hi0 * 0.05, 1), lo = Math.max(0, lo0 - pad), hi = hi0 + pad;
+  // net spending: gaining potions counts as negative, so the axis may go below 0
+  const pad = Math.max((hi0 - lo0) * 0.25, Math.max(Math.abs(hi0), Math.abs(lo0)) * 0.05, 1), lo = lo0 - pad, hi = hi0 + pad;
   const t1 = Math.max(pts[pts.length - 1].t, 1);
   const X = t => L + (W - L - R) * t / t1, Y = v => H - B - (H - B - T) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
-  const k = v => v >= 100000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  const k = v => v < 0 ? "-" + k(-v) : v >= 100000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
   const path = key => pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join("");
   const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${Y(lo + (hi - lo) * f)}" y2="${Y(lo + (hi - lo) * f)}" stroke="var(--grid)"/>
-    <text x="${L - 6}" y="${Y(lo + (hi - lo) * f) + 4}" text-anchor="end">${k(lo + (hi - lo) * f)}</text>`).join("");
+    <text x="${L - 6}" y="${Y(lo + (hi - lo) * f) + 4}" text-anchor="end">${k(lo + (hi - lo) * f)}</text>`).join("")
+    + (lo < 0 && hi > 0 ? `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-width="1"/>` : "");
   const ticks = [0, .25, .5, .75, 1].map(f => `<text x="${X(t1 * f)}" y="${H - 6}" text-anchor="middle">${Math.round(t1 * f)} min</text>`).join("");
   const last = pts[pts.length - 1];
   box.innerHTML = `<div class="legend"><span><i style="border-color:var(--hp)"></i>HP (now ${k(last.ema_hp)}/hr)</span>

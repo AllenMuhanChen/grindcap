@@ -446,13 +446,14 @@ def live_series(start: dict, rows: list[dict], tau_min: float = 5.0) -> list[dic
     return out
 
 
-def y_range(points: list[dict], keys=("ema", "cum")) -> tuple[float, float]:
+def y_range(points: list[dict], keys=("ema", "cum"), floor: float | None = 0.0) -> tuple[float, float]:
     """Y-axis limits for a per-hour graph: the range of the smoothed and session lines plus 25% of it on
-    each side (at least 5% of the top), not from 0, so a change of a few % is visible."""
+    each side (at least 5% of the top), not from 0, so a change of a few % is visible. Not below `floor`
+    (None: may go negative)."""
     vals = [p[k] for p in points for k in keys if p.get(k) is not None] or [0.0]
     lo, hi = min(vals), max(vals)
-    pad = max((hi - lo) * 0.25, hi * 0.05, 1.0)
-    return max(0.0, lo - pad), hi + pad
+    pad = max((hi - lo) * 0.25, max(abs(hi), abs(lo)) * 0.05, 1.0)
+    return (lo - pad if floor is None else max(floor, lo - pad)), hi + pad
 
 
 def load_live(start_folder) -> list[dict]:

@@ -142,23 +142,27 @@ def main(config_path: str = "config.yaml"):
 
     def draw_potions():
         """Mesos/hr spent on HP (orange) and MP (blue) potions at NPC shop price, like the EXP graph:
-        per-reading rate (faint dots), 5-min EMA (solid, current value in the legend), session so far
-        (dashed). The y-axis fits the lines; dots outside it are pinned to the edge."""
+        per-reading rate (faint dots), 5-min EMA (solid, current value boxed at its end), session so far
+        (dashed). Net: potions gained count as negative spending, so it can dip below 0. The y-axis fits
+        the lines; dots outside it are pinned to the edge."""
         pgraph.delete("all")
         pts = [p for p in live["potions"] if p.get("ema_hp") is not None]
         if not pts:
             return
-        lo, hi = y_range(pts, ("ema_hp", "ema_mp", "cum_hp", "cum_mp"))
+        lo, hi = y_range(pts, ("ema_hp", "ema_mp", "cum_hp", "cum_mp"), floor=None)
         t1 = max(pts[-1]["t"], 1.0)
         x0, x1, y0, y1 = 34, GW - 6, PH - 18, 6
         X = lambda t: x0 + (x1 - x0) * t / t1
         Y = lambda v: y0 - (y0 - y1) * (min(max(v, lo), hi) - lo) / (hi - lo)
-        k = lambda v: f"{v / 1000:.0f}k" if v >= 100000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
+        k = lambda v: "-" + k(-v) if v < 0 else (f"{v / 1000:.0f}k" if v >= 100000 else
+                                                 f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}")
         for frac in (0.0, 0.5, 1.0):
             v = lo + (hi - lo) * frac
-            pgraph.create_line(x0, Y(v), x1, Y(v), fill="#c9c6bd" if frac == 0 else "#ecebe6")
+            pgraph.create_line(x0, Y(v), x1, Y(v), fill="#ecebe6")
             pgraph.create_text(x0 - 3, Y(v), text=k(v), anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
-        pgraph.create_text(x1, y1, text="potion mesos/hr", anchor="ne", fill="#6d6a63", font=("Segoe UI", 7))
+        if lo < 0 < hi:
+            pgraph.create_line(x0, Y(0), x1, Y(0), fill="#c9c6bd")        # 0: below it you gained potions
+        pgraph.create_text(x0 + 2, y1, text="potion mesos/hr", anchor="nw", fill="#6d6a63", font=("Segoe UI", 7))
         kinds = (("hp", "#eb6834", "#f5b49a", "HP"), ("mp", "#2a78d6", "#9ec5f4", "MP"))
         for kind, _, faint, _ in kinds:
             for p in pts:
@@ -169,12 +173,27 @@ def main(config_path: str = "config.yaml"):
                 for key, dash in ((f"cum_{kind}", (4, 3)), (f"ema_{kind}", ())):
                     pgraph.create_line(*[c for p in pts for c in (X(p["t"]), Y(p[key]))], fill=color,
                                        width=2, dash=dash)
+        # current 5-min value of each line in a box at its end; the lower line's box goes below it
+        h = 14
+        ends = sorted(((Y(pts[-1][f"ema_{kind}"]), kind, color, name) for kind, color, _, name in kinds))
+        for i, (ey, kind, color, name) in enumerate(ends):
+            tag = f"{name} {k(pts[-1][f'ema_{kind}'])}/hr"
+            w = 6 * len(tag) + 8
+            by = ey - h - 3 if i == 0 else ey + 3
+            by = min(max(by, y1), y0 - h)
+            if i == 1 and by < prev_by + h + 1:                  # keep the two boxes from overlapping
+                by = min(prev_by + h + 1, y0 - h)
+                if by < prev_by + h + 1:
+                    by = prev_by - h - 1
+            pgraph.create_rectangle(x1 - w, by, x1, by + h, fill="#fcfcfb", outline=color)
+            pgraph.create_text(x1 - w / 2, by + h / 2, text=tag, anchor="center", fill="#0b0b0b",
+                               font=("Segoe UI", 8, "bold"))
+            prev_by = by
         ly, x = PH - 7, x0
         for kind, color, _, name in kinds:
-            text = f"{name} {k(pts[-1][f'ema_{kind}'])}/hr"
             pgraph.create_line(x, ly, x + 16, ly, fill=color, width=2)
-            pgraph.create_text(x + 20, ly, text=text, anchor="w", fill="#52514e", font=("Segoe UI", 7))
-            x += 30 + 5 * len(text)
+            pgraph.create_text(x + 20, ly, text=f"{name} 5-min avg", anchor="w", fill="#52514e", font=("Segoe UI", 7))
+            x += 100
         pgraph.create_line(x, ly, x + 16, ly, fill="#6d6a63", width=2, dash=(4, 3))
         pgraph.create_text(x + 20, ly, text="session", anchor="w", fill="#52514e", font=("Segoe UI", 7))
 

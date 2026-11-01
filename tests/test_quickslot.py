@@ -44,8 +44,8 @@ def test_potion_series_counts_drops_at_shop_price():
             {"time": 1020, "potions": pot(195, 45)}]
     pts = Q.potion_series(start, rows, Q.prices({"Blue Potion": ["mp", 190]}))
     assert [p["t"] for p in pts] == [0, 2, 3, 4, 6, 7]                    # 10 min paused left out
-    assert [p["used"]["Orange Potion"] for p in pts] == [0, 10, 10, 15, 15, 20]
-    assert pts[-1]["hp"] == 20 * 160 and pts[-1]["mp"] == 5 * 190
+    assert [p["used"]["Orange Potion"] for p in pts] == [0, 10, 10, 15, -100, -95]   # bought 115: net gain
+    assert pts[-1]["hp"] == -95 * 160 and pts[-1]["mp"] == 5 * 190
     assert "Pet Food" not in pts[-1]["used"]                               # no price: not counted
 
 
@@ -120,3 +120,9 @@ def test_session_names_override_what_was_logged():
     t = Q.prices({"Lemon": ["hp", 20]})
     assert Q.potion_series({"time": 0.0}, rows, t)[-1]["hp"] == 0                         # "Orange": no price
     assert Q.potion_series({"time": 0.0}, rows, t, key_names={"Del": "Lemon"})[-1]["hp"] == 200
+
+
+def test_potion_gains_make_spending_negative():
+    rows = [{"time": t, "potions": [{"key": "End", "count": n, "name": "Lemon"}]} for t, n in ((0, 100), (60, 103))]
+    p = Q.potion_series({"time": 0.0}, rows, Q.prices())[-1]
+    assert p["mp"] == -3 * 150 and p["raw_mp"] == -3 * 150 * 60          # picked up 3 Lemons in a minute

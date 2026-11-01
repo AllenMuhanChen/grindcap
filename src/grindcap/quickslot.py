@@ -9,8 +9,8 @@ Which item a slot holds: quickslot.slots in config.yaml ({"Del": "Orange Potion"
 database (itemdb.identify) with the key label and the number left out of the comparison. Whether it is
 an HP or MP potion and what an NPC shop charges for it: POTIONS below, or quickslot.prices in config.
 
-Potions used = the drops in each item's count between readings (rises are restocks or pickups and are
-ignored). A single misread (a reading outside its neighbours' range while they agree) is skipped.
+Potions used = the net drop in each item's count between readings: potions gained (pickups, buying)
+count as negative use. A single misread (a reading outside its neighbours' range while they agree) is skipped.
 """
 from __future__ import annotations
 
@@ -244,8 +244,8 @@ def potion_series(start: dict, rows: list[dict], price_table: dict, tau_min: flo
         sm = _drop_misreads(filled)
         total, run = 0, []
         for i, x in enumerate(sm):
-            if i and x is not None and sm[i - 1] is not None and x < sm[i - 1]:
-                total += sm[i - 1] - x
+            if i and x is not None and sm[i - 1] is not None:
+                total += sm[i - 1] - x          # net: potions gained (drops, buying) count as negative
             run.append(total)
         used_so_far[n] = run
     out = []

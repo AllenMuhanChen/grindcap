@@ -649,3 +649,11 @@ def test_snapflow_rejects_a_covered_page_and_takes_the_clean_one(monkeypatch):
     got = [flow.poll() for _ in range(6)]
     assert got.count("covered") == 1 and got.count(True) == 1     # warned once, then the clean page
     assert len(flow.pages) == 1 and flow.pages[0] is clean
+
+
+def test_potion_graph_axis_may_go_negative():
+    from grindcap.snapshot import y_range
+
+    lo, hi = y_range([{"a": -2000, "b": 2000}], ("a", "b"), floor=None)
+    assert lo == -3000 and hi == 3000
+    assert y_range([{"a": -2000, "b": 2000}], ("a", "b"))[0] == 0      # EXP graph: never below 0
