@@ -135,10 +135,15 @@ def _drop_misreads(xs: list) -> list:
     return out
 
 
-def potion_series(start: dict, rows: list[dict], price_table: dict) -> list[dict]:
+def potion_series(start: dict, rows: list[dict], price_table: dict, tau_min: float = 5.0) -> list[dict]:
     """Mesos spent on HP and MP potions over a session, from live readings that carry "potions"
     ([{"key", "count", "name"}]). Per point: t (active minutes), hp, mp (mesos used so far, at NPC
-    shop price), used ({name: count}). Items without a known kind/price are left out."""
+    shop price), used ({name: count}), and per kind (hp, mp) the spending rate in mesos/hr like the EXP
+    graph: raw_* since the previous reading, ema_* (exponential moving average, time constant tau_min),
+    cum_* since the start (rates are None on the first reading). Items without a known kind/price are
+    left out."""
+    from math import exp as _exp
+
     from .sessions import active_seconds
 
     rows = sorted((r for r in rows if r.get("potions") is not None), key=lambda r: r["time"])
@@ -173,5 +178,19 @@ def potion_series(start: dict, rows: list[dict], price_table: dict) -> list[dict
             kind, price = price_table[n]
             if kind in cost:
                 cost[kind] += k * price
-        out.append({"t": round(secs / 60, 2), "hp": cost["hp"], "mp": cost["mp"], "used": used})
+        p = {"t": round(secs / 60, 2), "hp": cost["hp"], "mp": cost["mp"], "used": used}
+        prev = out[-1] if out else None
+        dt = secs - prev["t"] * 60 if prev else 0
+        for kind in ("hp", "mp"):
+            raw = ema = cum = None
+            if prev and dt > 0:
+                raw = (p[kind] - prev[kind]) / dt * 3600
+                pe = prev[f"ema_{kind}"]
+                ema = raw if pe is None else pe + (1 - _exp(-dt / (tau_min * 60))) * (raw - pe)
+                cum = p[kind] / secs * 3600
+            elif prev:                              # no active time since the last reading: carry on
+                raw, ema, cum = (prev[f"{x}_{kind}"] for x in ("raw", "ema", "cum"))
+            p[f"raw_{kind}"], p[f"ema_{kind}"], p[f"cum_{kind}"] = (
+                round(v, 1) if v is not None else None for v in (raw, ema, cum))
+        out.append(p)
     return out

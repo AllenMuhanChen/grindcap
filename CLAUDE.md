@@ -116,8 +116,9 @@ quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quick
              POTIONS = NPC shop price + hp/mp (from memory: Red 50, Orange 160, White 320, Blue 200, Mana
              Elixir 620; config quickslot.prices overrides). Read at Start (first live.jsonl row, time = the
              start snapshot's) and with each live reading (row["potions"]). potion_series: drops between
-             readings = used, rises ignored, a reading outside its agreeing neighbours dropped; GUI draws
-             HP/MP mesos spent so far under the EXP graph ("Track potions" checkbox = SnapFlow.track_potions).
+             readings = used, rises ignored, a reading outside its agreeing neighbours dropped; rates per
+             kind like the EXP graph (raw_/ema_/cum_ hp|mp, mesos/hr). GUI draws HP/MP mesos/hr (dots, 5-min
+             EMA solid, session dashed; y fits the lines) under the EXP graph ("Track potions" checkbox = SnapFlow.track_potions).
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```

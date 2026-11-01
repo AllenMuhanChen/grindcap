@@ -13,7 +13,7 @@ While a session runs, EXP is read off the status bar every gui.live_every second
 so far are shown under the timer, with a graph: EXP/hr per reading (faint dots), its 5-minute exponential
 moving average (solid) and the session's EXP/hr so far (dashed). With "Track potions" on, the quick slot
 potions are read at Start and with each EXP reading, and a second graph shows the mesos spent on HP and MP
-potions so far (at NPC shop price). Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
+potions per hour (at NPC shop price), with the same per-reading / 5-minute / session lines. Net mesos/hr and EXP/hr show as soon as the end snapshot is saved.
 """
 from __future__ import annotations
 
@@ -137,40 +137,46 @@ def main(config_path: str = "config.yaml"):
         graph.create_line(x0 + 146, ly, x0 + 162, ly, fill="#eb6834", width=2, dash=(4, 3))
         graph.create_text(x0 + 166, ly, text="session", anchor="w", fill="#52514e", font=("Segoe UI", 7))
 
-    PH = 96
+    PH = 110
     pgraph = tk.Canvas(frm, width=GW, height=PH, bg="#fcfcfb", highlightthickness=0)
 
     def draw_potions():
-        """Mesos spent on potions so far (NPC shop price): HP (orange) and MP (blue), y from 0."""
+        """Mesos/hr spent on HP (orange) and MP (blue) potions at NPC shop price, like the EXP graph:
+        per-reading rate (faint dots), 5-min EMA (solid, current value in the legend), session so far
+        (dashed). The y-axis fits the lines; dots outside it are pinned to the edge."""
         pgraph.delete("all")
-        pts = live["potions"]
+        pts = [p for p in live["potions"] if p.get("ema_hp") is not None]
         if not pts:
             return
-        last = pts[-1]
-        top = max(max(p["hp"] for p in pts), max(p["mp"] for p in pts), 100) * 1.15
-        t1 = max(last["t"], 1.0)
+        lo, hi = y_range(pts, ("ema_hp", "ema_mp", "cum_hp", "cum_mp"))
+        t1 = max(pts[-1]["t"], 1.0)
         x0, x1, y0, y1 = 34, GW - 6, PH - 18, 6
         X = lambda t: x0 + (x1 - x0) * t / t1
-        Y = lambda v: y0 - (y0 - y1) * v / top
+        Y = lambda v: y0 - (y0 - y1) * (min(max(v, lo), hi) - lo) / (hi - lo)
         k = lambda v: f"{v / 1000:.0f}k" if v >= 100000 else f"{v / 1000:.1f}k" if v >= 1000 else f"{v:.0f}"
         for frac in (0.0, 0.5, 1.0):
-            pgraph.create_line(x0, Y(top * frac), x1, Y(top * frac), fill="#c9c6bd" if frac == 0 else "#ecebe6")
-            pgraph.create_text(x0 - 3, Y(top * frac), text=k(top * frac), anchor="e", fill="#6d6a63",
-                               font=("Segoe UI", 7))
-        pgraph.create_text(x1, y1, text="mesos spent on potions", anchor="ne", fill="#6d6a63",
-                           font=("Segoe UI", 7))
+            v = lo + (hi - lo) * frac
+            pgraph.create_line(x0, Y(v), x1, Y(v), fill="#c9c6bd" if frac == 0 else "#ecebe6")
+            pgraph.create_text(x0 - 3, Y(v), text=k(v), anchor="e", fill="#6d6a63", font=("Segoe UI", 7))
+        pgraph.create_text(x1, y1, text="potion mesos/hr", anchor="ne", fill="#6d6a63", font=("Segoe UI", 7))
+        kinds = (("hp", "#eb6834", "#f5b49a", "HP"), ("mp", "#2a78d6", "#9ec5f4", "MP"))
+        for kind, _, faint, _ in kinds:
+            for p in pts:
+                x, y = X(p["t"]), Y(p[f"raw_{kind}"])
+                pgraph.create_oval(x - 2, y - 2, x + 2, y + 2, fill=faint, outline="")
         if len(pts) > 1:
-            for key, color in (("hp", "#eb6834"), ("mp", "#2a78d6")):
-                pgraph.create_line(*[c for p in pts for c in (X(p["t"]), Y(p[key]))], fill=color, width=2)
-        hrs = last["t"] / 60
-        ly = PH - 7
-        x = x0
-        for key, color, name in (("hp", "#eb6834", "HP"), ("mp", "#2a78d6", "MP")):
-            rate = f" ({k(last[key] / hrs)}/hr)" if hrs > 0 else ""
+            for kind, color, _, _ in kinds:
+                for key, dash in ((f"cum_{kind}", (4, 3)), (f"ema_{kind}", ())):
+                    pgraph.create_line(*[c for p in pts for c in (X(p["t"]), Y(p[key]))], fill=color,
+                                       width=2, dash=dash)
+        ly, x = PH - 7, x0
+        for kind, color, _, name in kinds:
+            text = f"{name} {k(pts[-1][f'ema_{kind}'])}/hr"
             pgraph.create_line(x, ly, x + 16, ly, fill=color, width=2)
-            text = f"{name} {k(last[key])}{rate}"
             pgraph.create_text(x + 20, ly, text=text, anchor="w", fill="#52514e", font=("Segoe UI", 7))
-            x += 26 + 5 * len(text)
+            x += 30 + 5 * len(text)
+        pgraph.create_line(x, ly, x + 16, ly, fill="#6d6a63", width=2, dash=(4, 3))
+        pgraph.create_text(x + 20, ly, text="session", anchor="w", fill="#52514e", font=("Segoe UI", 7))
 
     def layout(collecting: bool):
         for w in (b_start, b_end, b_cmp, b_page, b_fin, b_cancel, chk, b_review, b_summary, timer_lbl, b_discard,

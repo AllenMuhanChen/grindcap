@@ -47,3 +47,16 @@ def test_potion_series_counts_drops_at_shop_price():
     assert [p["used"]["Orange Potion"] for p in pts] == [0, 10, 10, 15, 15, 20]
     assert pts[-1]["hp"] == 20 * 160 and pts[-1]["mp"] == 5 * 190
     assert "Pet Food" not in pts[-1]["used"]                               # no price: not counted
+
+
+def test_potion_series_rates_per_hour():
+    from math import exp
+
+    rows = [{"time": t, "potions": [{"key": "Del", "count": n, "name": "Red Potion"}]}
+            for t, n in ((0, 100), (60, 90), (120, 70))]
+    a, b, c = Q.potion_series({"time": 0.0}, rows, Q.prices())
+    assert a["raw_hp"] is None and a["ema_hp"] is None                     # nothing to compare yet
+    assert (b["raw_hp"], b["ema_hp"], b["cum_hp"]) == (10 * 50 * 60, 30000, 30000)   # 10 pots/min
+    assert c["raw_hp"] == 60000 and c["cum_hp"] == 45000
+    assert c["ema_hp"] == round(30000 + (1 - exp(-1 / 5)) * 30000, 1)
+    assert c["raw_mp"] == 0
