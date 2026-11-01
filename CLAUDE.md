@@ -115,7 +115,10 @@ quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quick
              only; scripts/build_quickslot_template.py) in the bottom third, scaled by frame height. 2x4 slots
              (KEYS Shift..PgDn), counts via StackDigits (same font; a lone "0" only if cost < 0.2: "ATTACK"
              on Ctrl reads as 0 at 0.39). Verified on all 5 fixtures. Item: config quickslot.slots
-             {key: name}, else itemdb.rescore (key-label rows + digits ignored) among use_candidates = the
+             {key: name}, then <start>/quickslot.json from match_by_count (quick slot number = that item's
+             inventory total in the start snapshot; exact count, ties broken by icon, else closest within 5;
+             made at start finish, or from the first logged reading for older sessions; potion_series and
+             the review apply it to logged rows by key), else itemdb.rescore (key-label rows + digits ignored) among use_candidates = the
              catalog's Use items (else all Use icons); a different name within 1.1x = unknown. The general
              identify() read Orange Potions as Brick and Lemons wrong on the real game (2026-11-01). Cached
              per key by 8x8 signature.

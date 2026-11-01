@@ -157,6 +157,7 @@ class SnapFlow:
                                self.status_frame, {"Inventory": self.pages})
         which, self.which, self.watcher = self.which, None, None
         if which == "start" and self.status.get("potions") is not None:
+            self._name_quickslots(folder, snap, cat)
             self._log_live(folder, {"time": when, "potions": self.status["potions"]})   # potions at the start
         return {"which": which, "folder": str(folder), "pages": len(self.pages), "level": snap["level"],
                 "exp": snap["exp"], "mesos": snap["mesos"], "kinds": len(snap["items"]),
@@ -182,7 +183,7 @@ class SnapFlow:
         row = {"time": now, "exp": reading.get("exp"), "level": reading.get("level"),
                "checked": bool(reading.get("exp_checked")), "exp_per_hr": r["exp_per_hr"] if r else None}
         if self.track_potions:
-            row["potions"] = self.read_potions(frame)
+            row["potions"] = self.read_potions(frame, start_folder)
         self._log_live(start_folder, row)
         return r
 
@@ -193,11 +194,49 @@ class SnapFlow:
         with open(Path(start_folder) / "live.jsonl", "a") as fh:
             fh.write(json.dumps(row) + "\n")
 
-    def read_potions(self, frame) -> list[dict] | None:
+    def _name_quickslots(self, folder, snap, cat):
+        """Which item is on which quick slot, from the start inventory's counts (quickslot.match_by_count).
+        Saved as <start>/quickslot.json and used for the rest of the session."""
+        import json
+
+        from .quickslot import match_by_count
+
+        try:
+            names = match_by_count(self.status["potions"], snap["items"], cat, self._itemdb())
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+            return
+        for p in self.status["potions"]:
+            if p["key"] in names:
+                p["name"] = names[p["key"]]
+        (Path(folder) / "quickslot.json").write_text(json.dumps(names))
+
+    def _name_from_log(self, start_folder) -> dict:
+        """Sessions started before quick slots were named from the inventory: do it now from the start
+        snapshot and the first quick slot reading (saved, so it happens once)."""
+        import json
+
+        from .quickslot import match_by_count
+        from .snapshot import load_live
+
+        first = next((r for r in load_live(start_folder) if r.get("potions")), None)
+        if not first:
+            return {}
+        names = match_by_count(first["potions"], load_snapshot(start_folder)["items"], self._catalog(),
+                               self._itemdb())
+        (Path(start_folder) / "quickslot.json").write_text(json.dumps(names))
+        return dict(names)
+
+    def read_potions(self, frame, start_folder=None) -> list[dict] | None:
         """What's on the quick slots ([{"key", "count", "name"}]); None if the panel wasn't found or
-        reading failed (a missed reading is skipped, it doesn't count as zero)."""
+        reading failed (a missed reading is skipped, it doesn't count as zero). Names come from config
+        quickslot.slots, then the session's <start>/quickslot.json (set from the start inventory), then
+        the icon."""
+
         from .digits import StackDigits
-        from .quickslot import read_quickslot, use_candidates
+        from .quickslot import load_names, read_quickslot, use_candidates
 
         try:
             if self._digits is None:
@@ -205,7 +244,11 @@ class SnapFlow:
             q = self.cfg.data.get("quickslot") or {}
             db = self._itemdb()
             cands = use_candidates(self._catalog(), db) if db is not None else None
-            out = read_quickslot(frame, self._digits, db, q.get("slots"), self._qs_cache, cands)
+            names = {}
+            if start_folder:
+                names = load_names(start_folder) or self._name_from_log(start_folder)
+            names.update(q.get("slots") or {})
+            out = read_quickslot(frame, self._digits, db, names, self._qs_cache, cands)
             return out or None
         except Exception:
             import traceback

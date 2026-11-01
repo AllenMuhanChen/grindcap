@@ -121,11 +121,12 @@ def _live(start_dir, start: dict, end: dict) -> list[dict]:
 def _potions(start_dir, start: dict, end: dict, cfg_prices) -> list[dict]:
     """HP/MP potion mesos/hr series for the review graph (live readings up to the end snapshot; []
     for sessions without quick slot readings)."""
-    from .quickslot import potion_series, prices
+    from .quickslot import load_names, potion_series, prices
     from .snapshot import load_live
 
     rows = [r for r in load_live(start_dir) if r.get("time", 0) <= end["time"]]
-    return [p for p in potion_series(start, rows, prices(cfg_prices)) if p.get("ema_hp") is not None]
+    pts = potion_series(start, rows, prices(cfg_prices), key_names=load_names(start_dir))
+    return [p for p in pts if p.get("ema_hp") is not None]
 
 
 def summary_data(root, catalog: Catalog, saved_only: bool = True) -> dict:

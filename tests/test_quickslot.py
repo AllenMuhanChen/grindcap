@@ -98,3 +98,25 @@ def test_quick_slot_items_are_matched_among_your_use_items_only():
     assert Q._identify(patch, ignore, db, "Del", {}) == "Orange Potion"     # no catalog: all Use items
     db.scores[2000000] = 310.0                                            # Red fits about as well: unsure
     assert Q._identify(patch, ignore, db, "End", {}, cands) is None
+
+
+def test_quick_slots_are_named_from_the_start_inventory_counts():
+    class Cat:
+        items = {"item-001": {"name": "Orange Potion"}, "item-002": {"name": "Lemon"},
+                 "item-003": {"name": "Blue Potion"}, "item-004": {"name": "Orange"},
+                 "item-005": {"name": "Snail Shell"}}
+
+    items = {"item-001": 155, "item-002": 248, "item-003": 20, "item-004": 20, "item-005": 158}
+    pots = [{"key": "Del", "count": 155, "name": "Orange"},          # the icon guess was wrong: count wins
+            {"key": "End", "count": 246, "name": "Orange Potion"},   # 2 used while paging: closest count
+            {"key": "Ins", "count": 20, "name": "Blue Potion"},      # two items have 20: icon picks one
+            {"key": "Hm", "count": 20, "name": None}]                # ... or nobody
+    assert Q.match_by_count(pots, items, Cat()) == {"Del": "Orange Potion", "End": "Lemon",
+                                                     "Ins": "Blue Potion"}
+
+
+def test_session_names_override_what_was_logged():
+    rows = [{"time": t, "potions": [{"key": "Del", "count": n, "name": "Orange"}]} for t, n in ((0, 50), (60, 40))]
+    t = Q.prices({"Lemon": ["hp", 20]})
+    assert Q.potion_series({"time": 0.0}, rows, t)[-1]["hp"] == 0                         # "Orange": no price
+    assert Q.potion_series({"time": 0.0}, rows, t, key_names={"Del": "Lemon"})[-1]["hp"] == 200

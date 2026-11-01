@@ -304,12 +304,12 @@ def main(config_path: str = "config.yaml"):
     def do_live(folder):
         from .snapshot import live_series, load_live, load_snapshot
 
-        from .quickslot import describe, potion_series, prices
+        from .quickslot import describe, load_names, potion_series, prices
 
         r = flow.live(folder)
         start, rows = load_snapshot(folder), load_live(folder)
         table = prices((cfg.data.get("quickslot") or {}).get("prices"))
-        pots = potion_series(start, rows, table)
+        pots = potion_series(start, rows, table, key_names=load_names(folder))
         last = rows[-1] if rows else {}
         pot_line = describe(last.get("potions"), table) if flow.track_potions and "potions" in last else ""
         return ("live", r, live_series(start, rows), pots, pot_line)

@@ -105,6 +105,34 @@ def read_quickslot(frame, digits, itemdb=None, names: dict | None = None, cache:
     return out
 
 
+def match_by_count(potions: list[dict], items: dict[str, int], catalog, itemdb=None, near: int = 5) -> dict:
+    """Name each quick slot from the start snapshot's inventory: a quick slot's number is that item's
+    total in the inventory, so the item with the same count is the one (the inventory read names items
+    reliably; a quick slot icon has its key label drawn over it). Only Use items count if the item
+    database is there. Several items with that count: the icon match decides if it names one of them,
+    else unknown. No exact count (a potion used while paging through the inventory): the closest
+    count within `near`, if only one item is that close. Returns {key: name}."""
+    def is_use(cid):
+        db = (catalog.items.get(cid, {}).get("db") or {}).get("id")
+        return itemdb is None or (db is not None and (itemdb.items.get(int(db)) or {}).get("category") == "Use")
+
+    pool = [(cid, n, catalog.items[cid].get("name")) for cid, n in items.items()
+            if cid in catalog.items and catalog.items[cid].get("name") and is_use(cid)]
+    out = {}
+    for p in potions or []:
+        same = [name for _, n, name in pool if n == p["count"]]
+        if len(same) == 1:
+            out[p["key"]] = same[0]
+        elif len(same) > 1:
+            if p.get("name") in same:
+                out[p["key"]] = p["name"]
+        else:
+            close = sorted((abs(n - p["count"]), name) for _, n, name in pool if abs(n - p["count"]) <= near)
+            if close and (len(close) == 1 or close[1][0] > close[0][0]):
+                out[p["key"]] = close[0][1]
+    return out
+
+
 def use_candidates(catalog, itemdb) -> list[int]:
     """Database ids of the Use items in your catalog: what you've ever had in the Use tab. Only things
     you own can be on a quick slot with a count, so a quick slot is matched against these only."""
@@ -171,18 +199,32 @@ def _drop_misreads(xs: list) -> list:
     return out
 
 
-def potion_series(start: dict, rows: list[dict], price_table: dict, tau_min: float = 5.0) -> list[dict]:
+def load_names(start_folder) -> dict:
+    """{key: item name} for a session's quick slots (<start>/quickslot.json), {} if not set."""
+    import json
+
+    p = Path(start_folder) / "quickslot.json"
+    try:
+        return json.loads(p.read_text()) if p.exists() else {}
+    except ValueError:
+        return {}
+
+
+def potion_series(start: dict, rows: list[dict], price_table: dict, tau_min: float = 5.0,
+                  key_names: dict | None = None) -> list[dict]:
     """Mesos spent on HP and MP potions over a session, from live readings that carry "potions"
     ([{"key", "count", "name"}]). Per point: t (active minutes), hp, mp (mesos used so far, at NPC
     shop price), used ({name: count}), and per kind (hp, mp) the spending rate in mesos/hr like the EXP
     graph: raw_* since the previous reading, ema_* (exponential moving average, time constant tau_min),
     cum_* since the start (rates are None on the first reading). Items without a known kind/price are
-    left out."""
+    left out. `key_names` ({key: name}, see load_names) overrides the names logged with each reading."""
     from math import exp as _exp
 
     from .sessions import active_seconds
 
-    rows = sorted((r for r in rows if r.get("potions") is not None), key=lambda r: r["time"])
+    key_names = key_names or {}
+    rows = sorted(({**r, "potions": [{**p, "name": key_names.get(p["key"], p.get("name"))} for p in r["potions"]]}
+                   for r in rows if r.get("potions") is not None), key=lambda r: r["time"])
     if not rows:
         return []
     names = sorted({p["name"] for r in rows for p in r["potions"] if p.get("name") in price_table})
