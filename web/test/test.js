@@ -1,7 +1,7 @@
 // Runs the JS readers on the screenshots in tests/fixtures and compares with what the Python readers
 // read (expected.json). Open /web/test/test.html from a server at the repo root, or run run.mjs.
 import { loadImage } from '../lib/img.js';
-import { readStatus, readMesosField } from '../lib/statusbar.js';
+import { readStatus, readMesosField, readCharacter } from '../lib/statusbar.js';
 import { locateInventory, detectTab, coveredSlots, readPage, LookCache, findCursor, Grid } from '../lib/inventory.js';
 import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
@@ -45,6 +45,14 @@ for (const [name, want] of Object.entries(expected)) {
   }
   log(`${name}: ${JSON.stringify(got)}`);
 }
+// Class and character name from the status bar
+for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', 'Swordsman']]) {
+  const ch = await readCharacter(await loadImage(`../../tests/fixtures/${f}`));
+  log(`${f} character: ${JSON.stringify(ch && { job: ch.job, name: ch.name, raw: ch.raw })}`);
+  if (!ch || ch.job !== job || ch.name !== 'ImmovableObj') fails.push(`${f} character: got ${JSON.stringify(ch)}`);
+}
+{ const ch = await readCharacter(await loadImage('../../tests/fixtures/etc_ant_tunnel.png'), ['ImmovableObj']);
+  if (ch.name !== 'ImmovableObj') fails.push('character snap to a known name'); }
 // Item names: a small item database whose icons were cut from the first 10 slots of etc_excavation.png,
 // plus 300 random icons. Must name every slot as the Python reader does with the same data.
 {

@@ -6,6 +6,7 @@
 // Mesos: the white field under the inventory grid -> OCR, needs groups of 3 digits and 2 sizes agreeing.
 import { crop, gray, resizeCubic, otsu, mean, invert, pad, findScaled, mat } from './img.js';
 import { ocr } from './ocr.js';
+import { ratio } from './mapname.js';
 import { EXP_TO_NEXT } from './gamedata.js';
 
 export const pyRound = (x) => {            // Python's round(): halves go to the even neighbour
@@ -101,6 +102,75 @@ async function readTiles(reg) {
   let v = null, best = 0;
   for (const [k, n] of votes) if (n > best) { best = n; v = k; }
   return v !== null && v >= 1 && v <= 200 ? v : null;
+}
+
+/** Where the orange LV tiles are: {x0, x1, y0, y1} in frame pixels, or null. */
+export function tilesBox(frame) {
+  const H = frame.h, W = frame.w, top = Math.floor(H * 0.93);
+  const reg = crop(frame, 0, top, Math.floor(W * 0.4), H - top);
+  const spans = levelTiles(reg).filter((s) => isTile(reg, s));
+  if (!spans.length) return null;
+  const group = [spans[0]];
+  for (const sp of spans.slice(1)) { if (sp[0] - group.at(-1)[1] <= 6) group.push(sp); else break; }
+  const a = group[0][0], b = group.at(-1)[1];
+  let y0 = null, y1 = null;
+  for (let y = 0; y < reg.h; y++) {
+    let n = 0;
+    for (let x = a; x < b; x++) { const i = (y * reg.w + x) * 3; if (isOrange(reg.data[i], reg.data[i + 1], reg.data[i + 2])) n++; }
+    if (n > 2) { if (y0 == null) y0 = y; y1 = y; }
+  }
+  return y0 == null ? null : { x0: a, x1: b, y0: y0 + top, y1: y1 + top };
+}
+
+/** Class (job) and character name: the two white lines right of the LV tiles ("Spearman" over the name).
+ * Returns {job, name, raw: [line1, line2], box} or null. Several OCR sizes; the job is snapped to the
+ * known job names, the name is the reading most sizes agree on. */
+export const JOBS = ['Beginner', 'Swordsman', 'Fighter', 'Crusader', 'Hero', 'Page', 'White Knight', 'Paladin', 'Spearman',
+  'Dragon Knight', 'Dark Knight', 'Magician', 'Wizard', 'Mage', 'Arch Mage', 'Cleric', 'Priest', 'Bishop',
+  'Fire/Poison Wizard', 'Ice/Lightning Wizard', 'Fire/Poison Mage', 'Ice/Lightning Mage', 'Fire/Poison Arch Mage', 'Ice/Lightning Arch Mage',
+  'Archer', 'Hunter', 'Ranger', 'Bowmaster', 'Crossbowman', 'Sniper', 'Marksman', 'Rogue', 'Assassin', 'Hermit', 'Night Lord',
+  'Bandit', 'Chief Bandit', 'Shadower', 'Pirate', 'Brawler', 'Marauder', 'Buccaneer', 'Gunslinger', 'Outlaw', 'Corsair'];
+export async function readCharacter(frame, known = []) {
+  const t = tilesBox(frame);
+  if (!t) return null;
+  const th = t.y1 - t.y0 + 1, s = th / 17;                       // tiles are ~17 px tall at 1920x1080
+  const x = t.x1 + Math.round(14 * s), w = Math.min(frame.w - x, Math.round(176 * s));
+  const mid = Math.round((t.y0 + t.y1) / 2), lh = Math.round(19 * s);
+  const lines = [[mid - lh - Math.round(1 * s), lh + Math.round(2 * s)], [mid - Math.round(1 * s), lh + Math.round(3 * s)]];
+  const raw = [];
+  for (const [y, h] of lines) {
+    const c = crop(frame, x, Math.max(0, y), w, Math.min(h, frame.h - y));
+    // the text is thin white strokes on a dark gradient: the grey picture, and a soft threshold
+    const g = gray(c), votes = new Map();
+    const thr = mat(g.w, g.h, 1, g.data.map((v) => (v > 110 ? 255 : 0)));
+    for (const [img, k] of [[g, 3], [g, 4], [g, 5], [g, 6], [thr, 3], [thr, 4], [thr, 5]]) {
+      const u = resizeCubic(img, k);
+      for (let i = 0; i < u.data.length; i++) u.data[i] = Math.max(0, Math.min(255, u.data[i]));
+      const txt = (await ocr(pad(invert(u), 20, 20, 20, 20, 255), 7, '')).trim().replace(/\s+/g, ' ');
+      if (txt) votes.set(txt, (votes.get(txt) || 0) + 1);
+    }
+    raw.push(votes);
+  }
+  // job: the reading closest to a job name; name: letters and digits only, the most common length,
+  // then a majority per letter (each size misreads a different letter)
+  let job = null, jr = 0;
+  for (const t of raw[0].keys()) for (const j of JOBS) { const r = ratio(t.replace(/[^A-Za-z/ ]/g, '').trim().toLowerCase(), j.toLowerCase()); if (r > jr) { jr = r; job = j; } }
+  if (jr < 0.75) job = null;
+  const names = [];
+  for (const [t, n] of raw[1]) for (let i = 0; i < n; i++) names.push(t.replace(/[^A-Za-z0-9]/g, ''));
+  const lens = new Map();
+  for (const t of names) if (t.length >= 2) lens.set(t.length, (lens.get(t.length) || 0) + 1);
+  const L = [...lens.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0];
+  let name = null;
+  if (L) {
+    const same = names.filter((t) => t.length === L);
+    name = [...Array(L).keys()].map((i) => {
+      const c = new Map(); for (const t of same) c.set(t[i], (c.get(t[i]) || 0) + 1);
+      return [...c.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    }).join('');
+    for (const k of known) if (ratio(name.toLowerCase(), k.toLowerCase()) >= 0.8) { name = k; break; }   // a character seen before
+  }
+  return { job, name, raw: raw.map((v) => [...v.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || ''), box: [t.x0, mid - lh - 2, x + w - t.x0, 2 * lh + 6] };
 }
 
 /** Level from the orange tiles in the bottom-left of the window. */

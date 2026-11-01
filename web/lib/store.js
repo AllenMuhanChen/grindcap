@@ -38,7 +38,7 @@ export function set(k, v) {
   if (db) tx('kv', 'readwrite').put(v, k).onerror = (e) => console.warn('save failed', k, e.target.error);
 }
 
-const light = (r) => ({ id: r.id, name: r.name, start_time: r.start?.time, end_time: r.end?.time,
+const light = (r) => ({ id: r.id, name: r.name, character: r.character || null, map: r.start?.map?.name || null, start_time: r.start?.time, end_time: r.end?.time,
   result: r.result && { minutes: r.result.minutes, exp_per_hr: r.result.exp_per_hr, net_per_hr: r.result.net_per_hr, mesos_per_hr: r.result.mesos_per_hr } });
 
 /** Saves a finished session and keeps the light index (kv "sessions") in step. */
@@ -46,6 +46,8 @@ export async function putSession(rec) {
   set('sessions', [light(rec), ...(get('sessions') || []).filter((x) => x.id !== rec.id)].sort((a, b) => b.id - a.id));
   if (db) await req(tx('sessions', 'readwrite').put(rec));
 }
+/** Every saved session, in full (for the backup file). */
+export async function allSessions() { return db ? req(tx('sessions').getAll()) : []; }
 export async function getSession(id) { return db ? req(tx('sessions').get(id)) : null; }
 export async function deleteSession(id) {
   set('sessions', (get('sessions') || []).filter((x) => x.id !== id));

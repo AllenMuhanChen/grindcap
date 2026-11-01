@@ -9,7 +9,8 @@
   @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1d2128; --ink: #e6e9ef; --mute: #98a2b3; --line: #2c323c; --acc: #6ea0ff; --ok: #4cc38a; --bad: #f97066; } }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, sans-serif; }
-  main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  #review, #summary { overflow-x: auto; }
   h1 { font-size: 18px; margin: 4px 0 0; } h2 { font-size: 15px; margin: 0 0 8px; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
   button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; }
@@ -45,8 +46,17 @@
   .pages img { height: 180px; border: 1px solid var(--line); border-radius: 4px; } figure { margin: 0; } figcaption { font-size: 12px; color: var(--mute); }
   input.st { width: 110px; }
   .shot { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-  header#bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px; }
-  header#bar .stats { margin: 6px 0 0; } header#bar .stats:empty { display: none; }
+  #control { border: 2px solid var(--acc); padding: 16px 18px; }
+  #control h1 { font-size: 22px; margin: 0; }
+  #control .row { margin-top: 10px; }
+  .bigrow button { font-size: 16px; padding: 10px 18px; }
+  .sessline { margin-top: 10px; font-size: 16px; }
+  #control .stats { margin: 10px 0 0; } #control .stats:empty { display: none; }
+  #control .stats div { font-size: 18px; } #control .stats div > span:first-child { font-size: 12px; }
+  .datarow { border-top: 1px solid var(--line); padding-top: 10px; }
+  .tabbar { display: flex; gap: 4px; border-bottom: 2px solid var(--line); }
+  .tabbar button { border: 0; border-radius: 8px 8px 0 0; padding: 8px 16px; font-size: 15px; background: transparent; color: var(--mute); }
+  .tabbar button.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: inset 0 -3px 0 var(--acc); }
   .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); margin-left: 4px; }
   .chip.done { border-color: var(--ok); color: var(--ok); }
   #sessSel { max-width: 520px; padding: 5px; } #sessName { font: inherit; padding: 5px; width: 220px; }
@@ -57,35 +67,57 @@
 </style>
 </head>
 <body>
-<header id="bar">
-  <div class="row">
-    <b>grindcap</b>
-    <button id="share" class="primary">Share MapleStory window</button>
-    <button id="startSnap" class="primary" disabled>Start</button>
-    <button id="endSnap" disabled>End</button>
-    <button id="pauseSnap" disabled>Pause</button>
-    <button id="discardSnap" disabled>Discard</button>
-    <button id="finishSnap" hidden title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
-    <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
-    <button id="popout" title="Small always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Re-open pop-out</button>
-    <span id="sessionLine"></span>
-  </div>
-  <div id="alert" class="alert" hidden></div>
-  <div id="scanHelp" class="scanhelp" hidden>Open the inventory (I). Click <b>Equip, Use, Set-up and Etc</b> in turn and scroll each to the bottom. A page is taken when the view holds still. <b>Keep the mouse off the items</b>, and keep the minimap open.</div>
-  <div class="stats" id="liveStats"></div>
-  <div id="liveNote" class="bad small"></div>
-  <div id="potLine" class="mute small"></div>
-  <div id="lastNote" class="mute small"></div>
-</header>
 <main>
+  <section id="control">
+    <div class="row" style="justify-content:space-between">
+      <h1>grindcap</h1>
+      <span id="capState" class="mute"></span>
+    </div>
+    <div class="row bigrow">
+      <button id="share" class="primary">Share MapleStory window</button>
+      <button id="startSnap" class="primary" disabled>Start</button>
+      <button id="endSnap" disabled>End</button>
+      <button id="pauseSnap" disabled>Pause</button>
+      <button id="discardSnap" disabled>Discard</button>
+      <button id="finishSnap" hidden title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
+      <button id="popout" title="Small always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Re-open pop-out</button>
+    </div>
+    <div class="row">
+      <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
+      <span class="small mute">Character (read from the status bar at Start):</span>
+      <input id="charName" class="st" placeholder="name" title="Character name: read at Start; type to correct it">
+      <select id="charJob" title="Class"></select>
+    </div>
+    <div id="sessionLine" class="sessline"></div>
+    <div id="alert" class="alert" hidden></div>
+    <div id="scanHelp" class="scanhelp" hidden>Open the inventory (I). Click <b>Equip, Use, Set-up and Etc</b> in turn and scroll each to the bottom. A page is taken when the view holds still. <b>Keep the mouse off the items</b>, and keep the minimap open.</div>
+    <div class="stats" id="liveStats"></div>
+    <div id="liveNote" class="bad small"></div>
+    <div id="potLine" class="mute small"></div>
+    <div id="lastNote" class="mute small"></div>
+    <div class="row datarow">
+      <b class="small">Your data</b>
+      <button id="backup" title="Every session, the running one, your named icons and settings in one file">Back up all data</button>
+      <button id="restoreBtn" title="Load a backup file: its sessions are added to the ones here">Restore from backup</button>
+      <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+      <span id="storage" class="mute small"></span>
+    </div>
+  </section>
+
+  <nav class="tabbar">
+    <button id="tabReview" class="on">Session review</button>
+    <button id="tabSummary">Summary</button>
+  </nav>
+
   <section id="viewSec">
     <div class="row">
       <button id="prevSess" title="Older session">‹</button>
       <select id="sessSel"></select>
       <button id="nextSess" title="Newer session">›</button>
       <input id="sessName" placeholder="session name" title="Rename this session">
+      <input id="sessChar" class="st" placeholder="character" title="Character this session was played on">
+      <select id="sessJob" title="Class"></select>
       <button id="deleteSess">Delete</button>
-      <button id="download">Download JSON</button>
       <span id="sessCount" class="mute small"></span>
     </div>
     <div id="result"></div>
@@ -100,6 +132,12 @@
     <div id="review"></div>
   </section>
 
+  <section id="summarySec" hidden>
+    <div class="row"><b>All sessions</b>
+      <label class="small">Character <select id="sumChar"></select></label></div>
+    <div id="summary"></div>
+  </section>
+
   <details>
     <summary>How scanning works, icons you named, capture details</summary>
     <p class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP is read every
@@ -108,7 +146,7 @@
     <div class="row"><span id="corrCount" class="mute"></span>
       <button id="corrDownload" disabled title="The icons you named, with their pictures: send this file to Allen">Download my corrections</button>
       <button id="corrClear" disabled>Forget them</button>
-      <span id="storage" class="mute small"></span></div>
+    </div>
     <div class="row" style="margin-top:8px"><button id="saveFrame" disabled>Save current frame (PNG)</button><span id="data" class="mute"></span></div>
     <div class="stats" id="capStats"></div>
     <pre id="capLog"></pre>

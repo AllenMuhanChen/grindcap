@@ -3,7 +3,7 @@
 // IndexedDB and can be paged through below; the review is the main part of the page.
 import { loadImage, crop as cropMat, toImageData } from './lib/img.js';
 import { ocrReady } from './lib/ocr.js';
-import { readStatus, readMesosField } from './lib/statusbar.js';
+import { readStatus, readMesosField, readCharacter, JOBS } from './lib/statusbar.js';
 import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
@@ -21,7 +21,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, lastPot: undefined });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, lastPot: undefined, character: null });
 
 await store.openStore();
 
@@ -33,10 +33,12 @@ const S = {
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
-    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, lastPot: undefined,
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, lastPot: undefined, character: store.get('character'),
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
+  chars: store.get('characters') || [],          // characters seen: [{name, job}]
+  char: store.get('char'),                       // the character you're playing now {name, job}
 };
 S.view = S.cur;
 for (const c of S.corrections) S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop);
@@ -46,7 +48,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
-  store.set('potions', []); store.set('qsNames', {});
+  store.set('potions', []); store.set('qsNames', {}); store.set('character', null);
   S.view = S.cur;
 }
 
@@ -79,6 +81,7 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
+  showTab(tab);
   recompute(C());
   // an ended session from the older single-session version goes into the list
   if (C().end && !store.listSessions().some((x) => x.id === C().id)) await archive();
@@ -214,6 +217,7 @@ async function beginCollect(kind) {
     const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
     c.status = st;
     if (kind === 'start' && S.trackPotions && frame) c.potions = readPotions(frame);
+    if (kind === 'start' && frame) await readChar(frame, c);
     if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
       const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
       c.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
@@ -231,6 +235,41 @@ async function beginCollect(kind) {
   }
   render();
 }
+
+/** Class and name from the status bar at Start. A name close to one seen before is taken as that one;
+ * nothing read keeps the character you had. */
+async function readChar(frame, c) {
+  let ch = null;
+  try { ch = await readCharacter(frame, S.chars.map((x) => x.name)); } catch (e) { note(`character read failed: ${e.message}`); }
+  if (ch && ch.name) {
+    c.character = { name: ch.name, job: ch.job || (S.char?.name === ch.name ? S.char.job : null), read: ch.raw, picture: picture(frame, ...ch.box, 'image/png') };
+    setChar({ name: c.character.name, job: c.character.job });
+    snapNote(`Character: ${ch.name}${ch.job ? ` (${ch.job})` : ''}`);
+  } else snapNote(`Character not read from the status bar${S.char ? `; using ${S.char.name}` : ': type it in'}`);
+}
+function setChar(ch, replacing = null) {
+  S.char = ch.name ? ch : null; store.set('char', S.char);
+  if (!ch.name) return;
+  S.chars = S.chars.filter((x) => x.name !== ch.name && (replacing == null || x.name !== replacing));
+  S.chars.unshift({ name: ch.name, job: ch.job || null });
+  store.set('characters', S.chars);
+}
+$('charJob').innerHTML = $('sessJob').innerHTML = '<option value="">class?</option>' + JOBS.map((j) => `<option>${j}</option>`).join('');
+$('charName').onchange = $('charJob').onchange = () => {
+  const old = S.char?.name, ch = { name: $('charName').value.trim(), job: $('charJob').value || null };
+  setChar(ch, old);
+  if (running() && ch.name) { C().character = { ...(C().character || {}), ...ch }; store.set('character', C().character); }
+  render();
+};
+$('sessChar').onchange = $('sessJob').onchange = () => {
+  const v = S.view, ch = { name: $('sessChar').value.trim(), job: $('sessJob').value || null };
+  if (!v.start) return;
+  const old = v.character?.name;
+  v.character = ch.name ? { ...(v.character || {}), ...ch } : null;
+  if (ch.name) setChar(ch, old);
+  if (v === S.cur) store.set('character', v.character);
+  recompute(v);
+};
 
 /** The map name from the minimap; asks for the minimap when it isn't on screen. */
 async function tryMap(frame, now) {
@@ -323,6 +362,9 @@ async function finishCollect() {
     cur.qsNames = c.potions ? matchByCount(c.potions, snap.items, S.itemdb) : {};
     cur.potions = c.potions ? [{ time: snap.time / 1000, potions: c.potions.map((p) => ({ ...p, name: cur.qsNames[p.key] ?? p.name })) }] : [];
     cur.lastPot = cur.potions[0]?.potions;
+    cur.character = c.character ? { name: c.character.name, job: c.character.job } : S.char ? { ...S.char } : null;
+    snap.character = c.character || null;
+    store.set('character', cur.character); store.set('start', snap);
     store.set('qsNames', cur.qsNames); store.set('potions', cur.potions);
     snapNote(`Start saved: mesos ${fmt(snap.mesos)}, ${Object.keys(snap.items).length} kinds of items in ${Object.keys(snap.tabs).join(', ') || 'no tabs'}. Go grind; press End when done.`);
     recompute(cur);
@@ -335,7 +377,7 @@ async function finishCollect() {
   }
 }
 
-const record = (v) => ({ id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, saved: v.saved || Date.now() });
+const record = (v) => ({ id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
 
 /** Put the ended current session in the saved list. */
@@ -360,7 +402,7 @@ function recompute(v = S.view) {
   const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
   v.result = a && b ? compare(a, b, priceOf, v.pauses) : null;
   if (v === S.cur) store.set('fixes', v.fixes);
-  if (isSaved(v)) store.putSession(record(v)).then(renderNav);
+  if (isSaved(v)) store.putSession(record(v)).then(() => { renderNav(); if (tab === 'summary') renderSummary(); });
   S.ver++;
   render();
 }
@@ -435,11 +477,75 @@ $('deleteSess').onclick = async () => {
   if (next) await showSession(next); else { S.view = S.cur; S.ver++; render(); }
   renderStorage();
 };
-$('download').onclick = () => {
-  const v = S.view;
-  download(`grindcap-session-${new Date(v.start?.time || Date.now()).toISOString().slice(0, 16).replace(':', '')}.json`,
-    { name: v.name, start: v.start, end: v.end, fixes: v.fixes, pauses: v.pauses, result: v.result, live: v.live.rows, potions: v.potions || [] });
+
+// ------------------------------------------------------------------ backup: everything in one file
+
+const BACKUP_KEYS = ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
+$('backup').onclick = async () => {
+  const sessions = await store.allSessions();
+  const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
+  download(`grindcap-backup-${new Date().toISOString().slice(0, 10)}.json`,
+    { kind: 'grindcap-backup', version: 1, made: new Date().toISOString(), sessions, kv });
+  snapNote(`Backed up ${sessions.length} session${sessions.length === 1 ? '' : 's'}${C().start && !C().end ? ' and the running one' : ''}, ${S.corrections.length} named icons.`);
 };
+$('restoreBtn').onclick = () => $('restoreFile').click();
+$('restoreFile').onchange = async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let b;
+  try { b = JSON.parse(await f.text()); } catch { alert('That file is not a grindcap backup.'); return; }
+  if (b.kind !== 'grindcap-backup' || !Array.isArray(b.sessions)) { alert('That file is not a grindcap backup.'); return; }
+  const have = new Map((await store.allSessions()).map((r) => [r.id, r]));
+  const add = b.sessions.filter((r) => !have.has(r.id)), newer = b.sessions.filter((r) => have.has(r.id) && (r.saved || 0) > (have.get(r.id).saved || 0));
+  const kv = b.kv || {}, runHere = !!(C().start && !C().end) || !!S.collect, runThere = !!(kv.start && !kv.end);
+  if (!confirm(`Restore from ${f.name}?\n\n${add.length} new session(s) added, ${newer.length} replaced by a newer copy, ${b.sessions.length - add.length - newer.length} already here.\n`
+    + `Named icons and characters are merged.${runThere ? (runHere ? '\nThe backup has a running session, but one is running here: it is left out.' : '\nThe running session in the backup becomes the running session here.') : ''}`)) return;
+  for (const r of [...add, ...newer]) await store.putSession(r);
+  // named icons: the backup's are added (a look named here wins)
+  const keys = new Set(S.corrections.map((c) => c.key));
+  for (const c of kv.corrections || []) if (!keys.has(c.key)) { S.corrections.push(c); S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop); }
+  store.set('corrections', S.corrections);
+  for (const ch of (kv.characters || []).slice().reverse()) if (!S.chars.some((x) => x.name === ch.name)) S.chars.push(ch);
+  store.set('characters', S.chars);
+  if (!S.char && kv.char) { S.char = kv.char; store.set('char', S.char); }
+  store.set('useIds', [...new Set([...(store.get('useIds') || []), ...(kv.useIds || [])])]);
+  if (runThere && !runHere) {
+    for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character']) store.set(k, kv[k] ?? null);
+    Object.assign(S.cur, { id: kv.start.time, name: kv.name, start: kv.start, end: null, live: kv.live || { rows: [], fails: 0 }, pauses: kv.pauses || [],
+      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, result: null });
+  }
+  snapNote(`Restored: ${add.length} session(s) added, ${newer.length} updated.`);
+  recompute(S.view); renderStorage(); renderSummary();
+};
+
+// ------------------------------------------------------------------ tabs + summary
+
+let tab = store.get('tab') || 'review';
+function showTab(t) {
+  tab = t; store.set('tab', t);
+  $('tabReview').classList.toggle('on', t === 'review'); $('tabSummary').classList.toggle('on', t === 'summary');
+  $('viewSec').hidden = t !== 'review'; $('summarySec').hidden = t !== 'summary';
+  if (t === 'summary') renderSummary();
+}
+$('tabReview').onclick = () => showTab('review');
+$('tabSummary').onclick = () => showTab('summary');
+$('sumChar').onchange = () => renderSummary();
+
+/** One row per saved session, newest first; click a row to open it in the review. */
+function renderSummary() {
+  const list = store.listSessions(), sel = $('sumChar'), pick = sel.value;
+  const names = [...new Set(list.map((x) => x.character?.name).filter(Boolean))];
+  sel.innerHTML = '<option value="">all</option>' + names.map((n) => `<option ${n === pick ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const rows = list.filter((x) => !pick || x.character?.name === pick);
+  $('summary').innerHTML = rows.length ? `<table><tr><th class="l">Session</th><th class="l">Character</th><th>Minutes</th><th>Net mesos/hr</th><th>EXP/hr</th><th>Mesos/hr</th></tr>
+    ${rows.map((x) => `<tr class="itemrow" data-id="${x.id}"><td class="l">${esc(x.name || new Date(x.id).toLocaleString())}</td>
+      <td class="l">${esc(x.character ? `${x.character.name}${x.character.job ? ` (${x.character.job})` : ''}` : '–')}</td>
+      <td>${fmt(x.result?.minutes, 1)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b></td><td>${fmt(x.result?.mesos_per_hr)}</td></tr>`).join('')}</table>
+    <p class="mute small">Click a session to open it. More summary views (charts) come here later.</p>`
+    : '<p class="mute">No saved sessions yet.</p>';
+  for (const tr of $('summary').querySelectorAll('tr[data-id]')) tr.onclick = () => { showSession(tr.dataset.id); showTab('review'); };
+}
 
 // ------------------------------------------------------------------ pictures
 
@@ -472,6 +578,9 @@ function render() {
   $('pauseSnap').textContent = paused ? 'Resume' : 'Pause';
   $('discardSnap').disabled = !run && !S.collect;
   $('finishSnap').hidden = !S.collect;
+  $('capState').innerHTML = sharing ? '<span class="ok">● Sharing the game window</span>' : '<span class="bad">● Not sharing: press "Share MapleStory window" and pick the game</span>';
+  if (document.activeElement !== $('charName')) $('charName').value = S.char?.name || '';
+  $('charJob').value = S.char?.job || '';
   renderCapture(); renderSession(); renderTop(); renderNav(); renderView();
   updatePopout();
 }
@@ -519,14 +628,17 @@ function renderNav() {
   const list = store.listSessions(), key = viewKey(), ids = navIds();
   const opts = [];
   if (ids[0] === 'cur') opts.push(['cur', `Current session (${S.collect ? 'scanning' : 'running'})`]);
-  for (const x of list) opts.push([String(x.id), `${x.name || new Date(x.id).toLocaleString()}  ·  ${fmt(x.result?.exp_per_hr)} EXP/hr  ·  ${fmt(x.result?.net_per_hr)} net/hr`]);
+  for (const x of list) opts.push([String(x.id), `${x.name || new Date(x.id).toLocaleString()}${x.character ? `  ·  ${x.character.name}` : ''}  ·  ${fmt(x.result?.exp_per_hr)} EXP/hr  ·  ${fmt(x.result?.net_per_hr)} net/hr`]);
   if (!opts.length) opts.push(['cur', 'No sessions yet']);
   $('sessSel').innerHTML = opts.map(([v, t]) => `<option value="${v}" ${v === key ? 'selected' : ''}>${esc(t)}</option>`).join('');
   const i = ids.indexOf(key);
   $('prevSess').disabled = i < 0 || i >= ids.length - 1;   // older
   $('nextSess').disabled = i <= 0;                          // newer
   const v = S.view;
-  $('sessName').disabled = !v.end; $('deleteSess').disabled = !v.end; $('download').disabled = !v.start;
+  $('sessName').disabled = !v.end; $('deleteSess').disabled = !v.end;
+  $('sessChar').disabled = $('sessJob').disabled = !v.start;
+  if (document.activeElement !== $('sessChar')) $('sessChar').value = v.character?.name || '';
+  $('sessJob').value = v.character?.job || '';
   if (document.activeElement !== $('sessName')) $('sessName').value = v.end ? v.name || '' : '';
   $('sessCount').textContent = `${list.length} saved`;
 }

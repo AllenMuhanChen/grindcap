@@ -150,6 +150,10 @@ web/lib/img.js        mat {w,h,c,data Float32Array}, RGB. cvtColor grey, INTER_A
                       coarse on a shrunken copy, refined at full size, over candidate scales), masked TM_SQDIFF.
 web/lib/ocr.js        Tesseract.js 5.1.1 (LSTM, best_int eng), from web/vendor/tesseract/ (committed), else jsDelivr.
 web/lib/statusbar.js  statusbar.py: level tiles, EXP label (searched over scales; sets ctx.gameScale), resolve, meso field.
+                      readCharacter (web only): class + name, the two white lines right of the LV tiles (tilesBox); grey OCR
+                      at 4 sizes + soft threshold at 3; job snapped to JOBS, name = modal length + per-letter majority, then
+                      snapped to a known character (ratio >= 0.8). Read at Start: session.character {name, job}, editable on
+                      the control section (kv "char", "characters") and per session. Fixtures: Spearman/Swordsman, ImmovableObj.
 web/lib/digits.js     digits.py (StackDigits, native view). Templates: data/stack_digits.json + web/local/digits.json.
 web/lib/itemdb.js     itemdb.py rank/shortlist/rescore/identify; icons from web/local/itemdb.json.
 web/lib/inventory.js  No calibration: locateInventory finds the "ITEM INVENTORY" title (web/data/inventory_title.png,
@@ -181,8 +185,11 @@ web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's sta
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.
                       Moves old localStorage keys over once; asks navigator.storage.persist().
-web/app.js            Page = sticky top bar (Share, Start/End/Pause/Discard, timer, tab chips, live EXP/hr) + the
-                      viewed session (‹ › paging, rename, delete, results, EXP/hr graph, review). S.cur = running
+web/app.js            Page = big control section (Share, Start/End/Pause/Discard, character, timer, tab chips, live EXP/hr,
+                      "Your data": Back up all data = one grindcap-backup JSON {sessions (full records), kv}; Restore merges
+                      (new ids added, newer `saved` replaces, corrections/characters unioned, running session only if none here))
+                      + tabs "Session review" (the viewed session) | "Summary" (table of saved sessions, character filter;
+                      Allen will add more there). Session review = the viewed session (‹ › paging, rename, delete, results, EXP/hr graph, review). S.cur = running
                       session (same object as its saved record once ended), S.view = shown one. Pop-out opens on
                       Share/Start (Document PiP needs a click), "Re-open pop-out" when closed. UI, one session like gui.py: Start (status + pages) -> live EXP every N s while running ->
                       End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
