@@ -60,3 +60,11 @@ def test_potion_series_rates_per_hour():
     assert c["raw_hp"] == 60000 and c["cum_hp"] == 45000
     assert c["ema_hp"] == round(30000 + (1 - exp(-1 / 5)) * 30000, 1)
     assert c["raw_mp"] == 0
+
+
+def test_describe_says_what_the_scan_found():
+    t = Q.prices()
+    assert Q.describe(None, t) == "Potions: quick slots not found"
+    assert Q.describe([{"key": "Del", "count": 155, "name": "Orange Potion"},
+                       {"key": "PgUp", "count": 12, "name": None}], t) == \
+        "Potions: Del Orange Potion 155 · PgUp unknown item 12 (not counted)"

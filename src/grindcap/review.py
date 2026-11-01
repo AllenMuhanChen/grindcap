@@ -42,7 +42,7 @@ def _snap_slots(snap, iid):
     return out
 
 
-def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
+def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None, potion_prices: dict | None = None) -> dict:
     s, e = load_snapshot(start_dir), load_snapshot(end_dir)
     r = compare(s, e, catalog)
     ids = [it["id"] for it in r["items"]]
@@ -99,6 +99,7 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None) -> dict:
                                  "net_per_hr", "revenue", "cost", "revenue_per_hr", "cost_per_hr")}
     return {"summary": summary, "status": status, "items": items, "covered": covered,
             "live": _live(start_dir, s, ee),
+            "potions": _potions(start_dir, s, ee, potion_prices),
             "catalog": sorted(([iid, it.get("name") or iid] for iid, it in catalog.items.items()),
                               key=lambda x: x[1].lower())}
 
@@ -115,6 +116,16 @@ def _live(start_dir, start: dict, end: dict) -> list[dict]:
     rows.append({"time": end["time"], "exp": end.get("exp"), "level": end.get("level"),
                  "checked": end.get("exp_checked") is not False or fixed.get("exp") is not None})
     return live_series(start, rows)
+
+
+def _potions(start_dir, start: dict, end: dict, cfg_prices) -> list[dict]:
+    """HP/MP potion mesos/hr series for the review graph (live readings up to the end snapshot; []
+    for sessions without quick slot readings)."""
+    from .quickslot import potion_series, prices
+    from .snapshot import load_live
+
+    rows = [r for r in load_live(start_dir) if r.get("time", 0) <= end["time"]]
+    return [p for p in potion_series(start, rows, prices(cfg_prices)) if p.get("ema_hp") is not None]
 
 
 def summary_data(root, catalog: Catalog, saved_only: bool = True) -> dict:
@@ -362,7 +373,8 @@ def serve(cfg, session_id: str | None = None, open_browser: bool = True, port: i
                         return self._json({"empty": True})
                     s = session(q.get("session"))
                     with lock:
-                        d = review_data(s["start"], s["end"], Catalog(cat_dir), itemdb)
+                        d = review_data(s["start"], s["end"], Catalog(cat_dir), itemdb,
+                                        (cfg.data.get("quickslot") or {}).get("prices"))
                     d["session"] = s
                     d["has_itemdb"] = itemdb is not None
                     return self._json(d)

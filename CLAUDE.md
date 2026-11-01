@@ -42,6 +42,10 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              first: tab_from_items (db category of named items, 2+ and 70%) after reading, quick_tab
              (catalog signatures only) while capturing; build_snapshot groups pages by tab, skips
              inventory.skip_tabs (Cash, Deco).
+             Capturing: SnapFlow.add_page rejects (returns None, GUI beeps + warns) a page where covered_slots
+             finds tooltip colour in solid 6x6 patches over >4% of any slot (clean fixtures 0, tooltip 40-75%;
+             a purple Equip helmet had 12% scattered pixels, so plain is_covered fractions can't be used);
+             PageWatcher.reject_last lets the same view without the tooltip be captured next.
              merge rows agree only on same item AND count (repeated stacks of one item otherwise collapse).
 review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
              items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
@@ -118,7 +122,9 @@ quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quick
              start snapshot's) and with each live reading (row["potions"]). potion_series: drops between
              readings = used, rises ignored, a reading outside its agreeing neighbours dropped; rates per
              kind like the EXP graph (raw_/ema_/cum_ hp|mp, mesos/hr). GUI draws HP/MP mesos/hr (dots, 5-min
-             EMA solid, session dashed; y fits the lines) under the EXP graph ("Track potions" checkbox = SnapFlow.track_potions).
+             EMA solid, session dashed; y fits the lines) under the EXP graph, and quickslot.describe of the
+             last reading under the timer ("Potions: Del Orange Potion 155 · ..."). Review page: same graph
+             (review_data["potions"], prices from config quickslot.prices) ("Track potions" checkbox = SnapFlow.track_potions).
 gamedata.py  EXP-to-next-level table (pre-Big-Bang values, levels 1-69).
 config.py    Defaults + YAML merge. All reader boxes are [x, y, w, h] relative to capture.region.
 ```

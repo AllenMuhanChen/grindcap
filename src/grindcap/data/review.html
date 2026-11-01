@@ -75,6 +75,8 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
 .xph { --raw: #9ec5f4; --ema: #2a78d6; --cum: #eb6834; --grid: #ecebe6; position: relative;
        background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 4px; }
 @media (prefers-color-scheme: dark) { .xph { --raw: #1c5cab; --ema: #3987e5; --cum: #d95926; --grid: #2a2a2e; } }
+.pots { --hp: #eb6834; --hp-raw: #f5b49a; --mp: #2a78d6; --mp-raw: #9ec5f4; }
+@media (prefers-color-scheme: dark) { .pots { --hp: #d95926; --hp-raw: #8a3d1f; --mp: #3987e5; --mp-raw: #1c5cab; } }
 .xph svg { display: block; width: 100%; height: 220px; overflow: visible; }
 .xph text { fill: var(--muted); font-size: 11px; }
 .xph .legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); margin: 0 0 4px; }
@@ -105,6 +107,13 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
       Dots: EXP/hr since the previous reading. Solid: those smoothed (exponential moving average, 5 min).
       Dashed: EXP/hr since the start.
       The y-axis doesn't start at 0: it fits the two lines, and dots beyond it sit on the edge.</p>
+  </section>
+  <section id="potSec" hidden>
+    <h2>Potion mesos / hr over the session</h2>
+    <div class="xph pots" id="pots"></div>
+    <p class="hint">Quick slot potion counts read about once a minute; each drop is potions used, at NPC shop price
+      (restocks are ignored). Dots: mesos/hr since the previous reading. Solid: 5-minute moving average. Dashed: since
+      the start. Paused time is left out; the y-axis fits the lines.</p>
   </section>
   <section>
     <h2>Status read from the screen</h2>
@@ -247,9 +256,51 @@ function renderXph(pts) {
   hit.addEventListener("mouseleave", () => { hair.setAttribute("visibility", "hidden"); tip.hidden = true; });
 }
 
+function renderPotions(pts) {
+  const sec = $("#potSec"), box = $("#pots");
+  sec.hidden = !pts || !pts.length;
+  if (sec.hidden) { box.innerHTML = ""; return; }
+  const W = Math.max(box.clientWidth - 20, 300), H = 200, L = 46, R = 8, T = 8, B = 22;
+  const vals = pts.flatMap(p => [p.ema_hp, p.ema_mp, p.cum_hp, p.cum_mp]), lo0 = Math.min(...vals), hi0 = Math.max(...vals);
+  const pad = Math.max((hi0 - lo0) * 0.25, hi0 * 0.05, 1), lo = Math.max(0, lo0 - pad), hi = hi0 + pad;
+  const t1 = Math.max(pts[pts.length - 1].t, 1);
+  const X = t => L + (W - L - R) * t / t1, Y = v => H - B - (H - B - T) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
+  const k = v => v >= 100000 ? `${Math.round(v / 1000)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)}`;
+  const path = key => pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join("");
+  const grid = [0, .25, .5, .75, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${Y(lo + (hi - lo) * f)}" y2="${Y(lo + (hi - lo) * f)}" stroke="var(--grid)"/>
+    <text x="${L - 6}" y="${Y(lo + (hi - lo) * f) + 4}" text-anchor="end">${k(lo + (hi - lo) * f)}</text>`).join("");
+  const ticks = [0, .25, .5, .75, 1].map(f => `<text x="${X(t1 * f)}" y="${H - 6}" text-anchor="middle">${Math.round(t1 * f)} min</text>`).join("");
+  const last = pts[pts.length - 1];
+  box.innerHTML = `<div class="legend"><span><i style="border-color:var(--hp)"></i>HP (now ${k(last.ema_hp)}/hr)</span>
+      <span><i style="border-color:var(--mp)"></i>MP (now ${k(last.ema_mp)}/hr)</span>
+      <span><i style="border-color:var(--muted);border-top-style:dashed"></i>session so far</span></div>
+    <svg viewBox="0 0 ${W} ${H}" style="height:${H}px">${grid}${ticks}
+      ${["hp", "mp"].map(kd => pts.map(p => `<circle cx="${X(p.t)}" cy="${Y(p["raw_" + kd])}" r="3" fill="var(--${kd}-raw)"/>`).join("")).join("")}
+      ${["hp", "mp"].map(kd => `<path d="${path("cum_" + kd)}" fill="none" stroke="var(--${kd})" stroke-width="2" stroke-dasharray="6 4"/>
+        <path d="${path("ema_" + kd)}" fill="none" stroke="var(--${kd})" stroke-width="2"/>`).join("")}
+      <line class="hair" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" visibility="hidden"/>
+      <rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent" class="hit"/></svg>
+    <div class="tip" hidden></div>`;
+  const hit = $(".hit", box), hair = $(".hair", box), tip = $(".tip", box), svg = $("svg", box);
+  hit.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * W / r.width;
+    const p = pts.reduce((a, b) => Math.abs(X(b.t) - x) < Math.abs(X(a.t) - x) ? b : a);
+    hair.setAttribute("x1", X(p.t)); hair.setAttribute("x2", X(p.t)); hair.setAttribute("visibility", "visible");
+    tip.hidden = false;
+    const used = Object.entries(p.used || {}).filter(([, n]) => n).map(([n, c]) => `${esc(n)} ×${c}`).join(", ") || "none yet";
+    tip.innerHTML = `<b>${p.t.toFixed(0)} min</b> · used so far: ${used}<br>
+      HP ${fmt(p.ema_hp)}/hr (5-min) · ${fmt(p.cum_hp)}/hr session · ${fmt(p.hp)} total<br>
+      MP ${fmt(p.ema_mp)}/hr (5-min) · ${fmt(p.cum_mp)}/hr session · ${fmt(p.mp)} total`;
+    const px = X(p.t) * r.width / W + 10;
+    tip.style.left = `${Math.min(px + 10, box.clientWidth - tip.offsetWidth - 4)}px`; tip.style.top = "30px";
+  });
+  hit.addEventListener("mouseleave", () => { hair.setAttribute("visibility", "hidden"); tip.hidden = true; });
+}
+
 function render() {
   const s = D.summary;
   renderXph(D.live);
+  renderPotions(D.potions);
   const hm = m => m == null ? "–" : `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, "0")}`;
   $("#stats").innerHTML =
     `<div class="stat big"><b>${fmt(s.net_per_hr)}</b><span>Net mesos / hr incl. items</span></div>

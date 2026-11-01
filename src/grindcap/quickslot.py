@@ -115,6 +115,18 @@ def _identify(patch, ignore, itemdb, key, cache) -> str | None:
     return cache[key][1]
 
 
+def describe(potions: list[dict] | None, price_table: dict) -> str:
+    """One line saying what the last quick slot reading found, so you can see the scan worked."""
+    if potions is None:
+        return "Potions: quick slots not found"
+    parts = []
+    for p in potions:
+        name = p.get("name") or "unknown item"
+        note = "" if p.get("name") in price_table else " (not counted)"
+        parts.append(f"{p['key']} {name} {p['count']}{note}")
+    return "Potions: " + (" · ".join(parts) if parts else "none on the quick slots")
+
+
 def prices(cfg_prices: dict | None = None) -> dict[str, tuple[str, int]]:
     out = dict(POTIONS)
     for name, v in (cfg_prices or {}).items():

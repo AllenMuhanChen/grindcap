@@ -184,3 +184,13 @@ def test_review_has_the_exp_per_hour_graph_only_with_live_readings(tmp_path):
     pts = review_data(s, e, cat)["live"]
     assert [p["t"] for p in pts] == [30, 60]               # the end snapshot is the last point
     assert pts[-1]["cum"] == 2000                           # = the session's EXP/hr
+
+
+def test_review_has_the_potion_graph_only_with_quick_slot_readings(tmp_path):
+    cat, root, s, e = setup(tmp_path)
+    assert review_data(s, e, cat)["potions"] == []
+    pot = lambda n: [{"key": "Del", "count": n, "name": "Red Potion"}]
+    rows = [{"time": 0, "potions": pot(100)}, {"time": 1800, "potions": pot(80)}]
+    (s / "live.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    pts = review_data(s, e, cat, potion_prices={"Red Potion": ["hp", 40]})["potions"]
+    assert [(p["t"], p["hp"], p["cum_hp"]) for p in pts] == [(30, 800, 1600)]

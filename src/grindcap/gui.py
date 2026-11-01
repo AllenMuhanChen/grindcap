@@ -89,7 +89,7 @@ def main(config_path: str = "config.yaml"):
         except Exception:
             session["run"] = None
         if not session["run"]:
-            live["line"], live["series"], live["potions"] = "", [], []
+            live["line"], live["series"], live["potions"], live["pot_line"] = "", [], [], ""
     chk = ttk.Checkbutton(frm, text="Capture pages automatically as I scroll", variable=auto)
     GW, GH, PAD = 300, 120, 18      # graph size; PAD = room for labels
     graph = tk.Canvas(frm, width=GW, height=GH, bg="#fcfcfb", highlightthickness=0)
@@ -229,7 +229,8 @@ def main(config_path: str = "config.yaml"):
         head = f"PAUSED at {clock}" if is_paused(pauses) else f"Session running {clock}"
         where = f"\n{run['map']}" if run.get("map") else ""
         line = f"\n{live['line']}" if live["line"] else ""
-        timer.set(f"{head}{where}{line}")
+        pots = f"\n{live['pot_line']}" if live.get("pot_line") else ""
+        timer.set(f"{head}{where}{line}{pots}")
 
     def toggle_pause():
         run = session["run"]
@@ -303,12 +304,15 @@ def main(config_path: str = "config.yaml"):
     def do_live(folder):
         from .snapshot import live_series, load_live, load_snapshot
 
-        from .quickslot import potion_series, prices
+        from .quickslot import describe, potion_series, prices
 
         r = flow.live(folder)
         start, rows = load_snapshot(folder), load_live(folder)
-        pots = potion_series(start, rows, prices((cfg.data.get("quickslot") or {}).get("prices")))
-        return ("live", r, live_series(start, rows), pots)
+        table = prices((cfg.data.get("quickslot") or {}).get("prices"))
+        pots = potion_series(start, rows, table)
+        last = rows[-1] if rows else {}
+        pot_line = describe(last.get("potions"), table) if flow.track_potions and "potions" in last else ""
+        return ("live", r, live_series(start, rows), pots, pot_line)
 
     def finish_now():
         """Stop collecting pages and read them in the background. For a start snapshot the session
@@ -390,14 +394,15 @@ def main(config_path: str = "config.yaml"):
                        f"{info['count']} items in total).")
             readout.set(f"EXP {info['exp']}   Level {info['level']}   Mesos {info['mesos']}")
             if info["which"] == "end":
-                live["line"], live["series"], live["potions"] = "", [], []
+                live["line"], live["series"], live["potions"], live["pot_line"] = "", [], [], ""
                 if info.get("result"):
                     readout.set("\n".join(key_figures(info["result"])))
                 status.set(status.get() + " Compare shows every item; Review / fix to check what changed.")
             else:
                 live["next"] = time.time() + live_every
         elif kind == "live":
-            _, r, series, pots = result
+            _, r, series, pots, pot_line = result
+            live["pot_line"] = pot_line
             if session["run"]:
                 if r:
                     pct = f"   {r['pct_per_hr']:.1f}%/hr" if r.get("pct_per_hr") is not None else ""
