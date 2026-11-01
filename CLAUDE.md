@@ -163,7 +163,7 @@ web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with vide
 web/app.js            UI, one session like gui.py: Start (status + pages) -> live EXP every N s while running ->
                       End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
                       minutes and liveSeries x/rates), Discard. Pages auto-captured (PageWatcher), auto-finish when
-                      Equip/Use/Setup/Etc seen + 4 s idle. Start/end snapshots, live rows, pauses in localStorage.
+                      Equip/Use/Setup/Etc seen + 4 s idle. Page tab = inventory.pageTab: items decide, but a Cash/Deco button wins unless 70% of filled slots agree (cash items are not in the item data and false-match). Start/end snapshots, live rows, pauses in localStorage.
 web/review.js         Review panel: status inputs + meso field crop, "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.

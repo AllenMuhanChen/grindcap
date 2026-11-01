@@ -151,6 +151,21 @@ export function tabFromItems(page, itemdb) {
   return tab && n >= 2 && n >= 0.7 * tot ? tab : null;
 }
 
+/** Which tab a page is. Items decide (a flashing tab can fool the button colour), except when the
+ * button says Cash or Deco: cash items aren't in the item data, so a few of them look like Equip or
+ * Etc items by accident. Then the items only win if 70% of all filled slots agree on one tab. */
+export function pageTab(page, itemdb, button) {
+  const fromItems = tabFromItems(page, itemdb);
+  if (!button || !['Cash', 'Deco'].includes(button) || !fromItems) return fromItems || button;
+  let filled = 0, agree = 0;
+  for (const row of page) for (const s of row) {
+    if (s.id == null && !s.ignored) continue;
+    filled++;
+    if (s.id !== UNKNOWN && itemdb.items[s.id] && itemdb.items[s.id].category === fromItems) agree++;
+  }
+  return agree >= 0.7 * filled ? fromItems : button;
+}
+
 /** Small colour picture of a slot's icon (stack-number area blanked), to recognise it again quickly. */
 function signature(img) {
   const m = qtyMask(img.h, img.w), c = { ...img, data: Float32Array.from(img.data) };

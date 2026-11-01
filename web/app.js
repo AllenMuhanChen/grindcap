@@ -4,7 +4,7 @@ import { ocrReady } from './lib/ocr.js';
 import { readStatus, readMesosField } from './lib/statusbar.js';
 import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
-import { locateInventory, coveredSlots, detectTab, tabFromItems, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
+import { locateInventory, coveredSlots, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import { renderReview } from './review.js';
@@ -141,7 +141,7 @@ async function pageTick(now) {
   }
   const button = detectTab(frame, inv.grid);
   const page = await readPage(frame, inv.grid, S.digits, S.itemdb, S.cache, `${c.kind}`);
-  const tab = tabFromItems(page, S.itemdb) || button;
+  const tab = pageTab(page, S.itemdb, button);
   if (!tab) { snapNote('page skipped: could not tell which tab is open'); return; }
   if (SKIP_TABS.includes(tab)) { snapNote(`${tab} page skipped (not counted)`); return; }
   (c.pages[tab] = c.pages[tab] || []).push(page);
