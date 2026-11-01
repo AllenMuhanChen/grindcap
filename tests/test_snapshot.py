@@ -657,3 +657,21 @@ def test_potion_graph_axis_may_go_negative():
     lo, hi = y_range([{"a": -2000, "b": 2000}], ("a", "b"), floor=None)
     assert lo == -3000 and hi == 3000
     assert y_range([{"a": -2000, "b": 2000}], ("a", "b"))[0] == 0      # EXP graph: never below 0
+
+
+def test_tabs_read_in_only_one_snapshot_are_not_compared(tmp_path):
+    from grindcap.snapshot import key_figures
+
+    cat = Catalog(str(tmp_path / "data"))
+    for iid, name in (("item-001", "Orange Potion"), ("item-002", "Snail Shell"), ("item-003", "Cash Hat")):
+        cat.items[iid] = {"name": name, "price": 10}
+    slot = lambda ref, iid, n, tab: {"ref": ref, "item": iid, "qty": n, "box": None, "tab": tab}
+    s = {"time": 0.0, "exp": 0, "level": 20, "mesos": 0, "items": {}, "tabs": {"Use": [], "Etc": []},
+         "slots": [slot("u1", "item-001", 100, "Use"), slot("e1", "item-002", 5, "Etc")]}
+    e = {"time": 3600.0, "exp": 0, "level": 20, "mesos": 0, "items": {}, "tabs": {"Use": [], "Etc": [], "Setup": []},
+         "slots": [slot("u1", "item-001", 90, "Use"), slot("e1", "item-002", 25, "Etc"),
+                   slot("s1", "item-003", 1, "Setup")]}          # a Cash page read as the Setup tab
+    r = compare(s, e, cat)
+    assert {it["id"]: it["change"] for it in r["items"]} == {"item-001": -10, "item-002": 20}
+    assert r["tabs_left_out"] == ["Setup"] and r["items_left_out"] == ["Cash Hat"]
+    assert "Setup tab" in key_figures(r)[-1]

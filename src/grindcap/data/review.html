@@ -310,7 +310,9 @@ function render() {
      <div class="stat"><b class="pos">${fmt(s.revenue_per_hr)}</b><span>Revenue / hr</span></div>
      <div class="stat"><b class="neg">${fmt(s.cost_per_hr)}</b><span>Cost / hr</span></div>
      <div class="stat"><b>${hm(s.minutes)}</b><span>Time (h:mm)</span></div>
-     <div class="stat small"><b>${fmt(s.mesos)}</b><span>Raw mesos gained (${fmt(s.mesos_per_hr)}/hr)</span></div>`;
+     <div class="stat small"><b>${fmt(s.mesos)}</b><span>Raw mesos gained (${fmt(s.mesos_per_hr)}/hr)</span></div>` +
+    (s.tabs_left_out && s.tabs_left_out.length ? `<div class="stat small" title="${esc((s.items_left_out || []).join(", "))}">
+       <b class="neg">${esc(s.tabs_left_out.join(", "))} tab not compared</b><span>read in only one snapshot${s.items_left_out && s.items_left_out.length ? ` (${s.items_left_out.length} items left out, hover)` : ""}</span></div>` : "");
 
   const st = D.status;
   const field = (snap, f) => {

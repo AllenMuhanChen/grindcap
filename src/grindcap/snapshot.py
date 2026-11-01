@@ -301,6 +301,17 @@ def apply_fixes(snap: dict) -> dict:
     return out
 
 
+def item_tabs(snap: dict) -> dict[str, str]:
+    """Which inventory tab each item was read in (slot fixes applied)."""
+    sf = (snap.get("fixes") or {}).get("slots") or {}
+    out = {}
+    for sl in snap.get("slots") or []:
+        iid = sf.get(sl["ref"], {}).get("item", sl["item"])
+        if iid and iid != "?" and sl.get("tab"):
+            out[iid] = sl["tab"]
+    return out
+
+
 def latest_snapshot(root: Path, label: str) -> Path | None:
     found = sorted(root.glob(f"{label}-*/snapshot.json"))
     return found[-1].parent if found else None
@@ -331,6 +342,15 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
     ids = sorted(set(start["items"]) | set(end["items"]))
     if catalog.items:
         ids = [i for i in ids if i in catalog.items]   # items purged from the catalog don't count
+    # Only tabs read in BOTH snapshots are compared: an item from a tab only one of them saw (a Cash
+    # page passed off as another tab, a tab you didn't open) isn't a real gain or loss.
+    tabs_s, tabs_e = set(start.get("tabs") or {}), set(end.get("tabs") or {})
+    left_out_tabs, left_out = sorted(tabs_s ^ tabs_e), []
+    if tabs_s and tabs_e:
+        where = {**item_tabs(start), **item_tabs(end)}
+        keep = tabs_s & tabs_e
+        left_out = [i for i in ids if where.get(i) and where[i] not in keep]
+        ids = [i for i in ids if i not in left_out]
     rows = []
     for iid in ids:
         a, b = start["items"].get(iid, 0), end["items"].get(iid, 0)
@@ -364,6 +384,8 @@ def compare(start: dict, end: dict, catalog: Catalog, minutes: float | None = No
         "net_per_hr": per_hr((mesos or 0) + gained_value - used_value),
         "unpriced": unpriced,
         "items": rows,
+        "tabs_left_out": left_out_tabs,      # tabs only one snapshot has: their items aren't compared
+        "items_left_out": [catalog.items.get(i, {}).get("name") or i for i in left_out],
     }
 
 
@@ -382,7 +404,8 @@ def key_figures(r: dict) -> list[str]:
         f"Revenue / hr    {f(r['revenue_per_hr'])}   Cost / hr {f(r['cost_per_hr'])}",
         f"Time            {int(m // 60)}:{int(round(m % 60)):02d}"
         + (f"   (+{paused:.0f} min paused, not counted)" if paused >= 0.5 else ""),
-    ]
+    ] + ([f"Not compared    {', '.join(r['tabs_left_out'])} tab (read in only one snapshot)"]
+         if r.get("tabs_left_out") else [])
 
 
 def live_exp(start: dict, reading: dict, now: float) -> dict | None:

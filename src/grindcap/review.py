@@ -96,7 +96,8 @@ def review_data(start_dir, end_dir, catalog: Catalog, itemdb=None, potion_prices
         status[name]["raw"] = snap.get("status_raw") or {}
     summary = {k: r[k] for k in ("minutes", "exp", "exp_per_hr", "levels", "mesos", "mesos_per_hr",
                                  "items_gained_value", "items_used_value", "net_mesos_incl_items",
-                                 "net_per_hr", "revenue", "cost", "revenue_per_hr", "cost_per_hr")}
+                                 "net_per_hr", "revenue", "cost", "revenue_per_hr", "cost_per_hr",
+                                 "tabs_left_out", "items_left_out")}
     return {"summary": summary, "status": status, "items": items, "covered": covered,
             "live": _live(start_dir, s, ee),
             "potions": _potions(start_dir, s, ee, potion_prices),

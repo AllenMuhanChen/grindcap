@@ -80,7 +80,9 @@ statusbar.py read_level (orange LV tiles, kept only if square-ish, >=50% orange,
              it cropped in the field's border, read as a leading "1"). The page + box used is saved as
              snapshot["mesos_field"]; the review page shows that crop next to the mesos inputs (/mesocrop;
              older snapshots derive the box from two slot boxes). Fixture equip_burnt_land.png: 492,177.
-snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr,
+snapshot.py  Before/after mode: build_snapshot, compare (EXP across level-ups, mesos, item deltas/hr;
+             only items from tabs read in BOTH snapshots: tabs_left_out/items_left_out, shown in key_figures
+             and the review stats;
              value from catalog prices), text + HTML report, PageCollector (F8/F9/F10 via pynput).
 cli.py       calibrate | snapshot | watch | run | replay | summarize | export |
              snap start/end | compare | items | label | teach-digits
