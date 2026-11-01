@@ -167,6 +167,10 @@ web/data/cursors.json Mouse-pointer templates (pointing + open glove, screen px 
                       Meso field read on every page with its picture (snapshot.meso_pictures); when the total
                       changes during a scan (pet loot) End uses the first read, Start the last (mesos_changed).
                       snapshot.exp_picture = the EXP text as captured. Both shown in the review status table.
+web/lib/mapname.js    mapname.py: minimap header (web/data/minimap_header.png) -> street/map lines, OCR variants,
+                      snapped to web/local/maps.json (export_web_data.py) by a difflib-equal ratio(). Read at the
+                      start of each scan, retried every 3 s on pages; missing -> "open the minimap (M)". Stored as
+                      snapshot.map + map_picture, editable in the review (fixes.status[kind].map), leads the default name.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

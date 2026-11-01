@@ -54,7 +54,8 @@ export function withFixes(snap, kind, fixes, nameOf) {
     }));
   }
   const pick = (k) => (st[k] != null && st[k] !== '' ? Number(st[k]) : snap[k]);
-  return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos') };
+  const map = st.map ? { ...(snap.map || {}), name: st.map, fixed: true } : snap.map;
+  return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos'), map };
 }
 
 /** Milliseconds between a and b that weren't paused. pauses: [[t0, t1|null], ...] (null = still paused). */

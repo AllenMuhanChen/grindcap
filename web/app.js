@@ -10,6 +10,7 @@ import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
+import { readMap } from './lib/mapname.js';
 import { renderReview } from './review.js';
 import { drawGraph } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
@@ -52,6 +53,8 @@ async function init() {
   S.ctx.expLabel = await loadImage('./data/exp_label.png');
   S.title = await loadImage('./data/inventory_title.png');
   S.cursors = await (await fetch('./data/cursors.json')).json();
+  S.mapHeader = await loadImage('./data/minimap_header.png');
+  try { const r = await fetch('./local/maps.json'); S.maps = r.ok ? await r.json() : []; } catch { S.maps = []; }
   const builtin = await (await fetch('./data/stack_digits.json')).json();
   let taught = null;
   try { const r = await fetch('./local/digits.json'); if (r.ok) taught = await r.json(); } catch { /* none */ }
@@ -173,7 +176,9 @@ async function beginCollect(kind) {
   render();
   const frame = await S.cap.grab();
   const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
-  S.collect.status = st; S.collect.reading = false;
+  S.collect.status = st;
+  if (frame) await tryMap(frame, Date.now());
+  S.collect.reading = false;
   if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
     const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
     S.collect.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
@@ -187,11 +192,31 @@ async function beginCollect(kind) {
   render();
 }
 
+/** The map name from the minimap; asks for the minimap when it isn't on screen. */
+async function tryMap(frame, now) {
+  const c = S.collect;
+  if (!c || c.map || now - (c.lastMapTry || 0) < 3000) return;
+  c.lastMapTry = now;
+  const m = await readMap(frame, S.mapHeader, S.maps);
+  if (S.collect !== c) return;
+  if (m && m.name) {
+    c.map = { street: m.street, name: m.name, matched: m.matched, raw: m.raw };
+    c.mapPic = picture(frame, ...m.box, 'image/png');
+    c.mapWarn = '';
+    snapNote(`Map: ${m.name}${m.matched ? '' : ' (not found in the map list: check it in the review)'}`);
+  } else {
+    c.mapWarn = 'Map name not visible: open the minimap (M) and leave it expanded so its title shows the map name.';
+    if (!c.mapWarned) { snapNote(c.mapWarn); c.mapWarned = true; }
+  }
+  render();
+}
+
 async function pageTick(now) {
   const c = S.collect;
   if (c.reading) return;
   const frame = await S.cap.grab();
   if (!frame) return;
+  await tryMap(frame, now);
   const inv = locateInventory(frame, S.title, S.ctx);
   if (!inv) { if (now - c.lastWarn > 5000) { snapNote('inventory not found (is it open?)'); c.lastWarn = now; } return; }
   const sig = PageWatcher.signature(frame, inv.grid);
@@ -243,7 +268,7 @@ async function finishCollect() {
   const used = new Set(Object.values(c.pages).flat(Infinity).map((sl) => sl && sl.look).filter(Boolean));
   const looks = Object.fromEntries(S.cache.looks.filter((l) => used.has(l.key)).map((l) => [l.key, { id: l.id, name: l.name, match: l.match, crop: l.crop, sig: Array.from(l.sig, Math.round) }]));
   const snap = buildSnapshot(time, c.status, c.pages, c.mesos,
-    { pictures: c.pictures, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
+    { pictures: c.pictures, map: c.map || null, map_picture: c.mapPic || null, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
     c.kind === 'end' ? 'first' : 'last');
   S.collect = null;
   if (c.kind === 'start') {
@@ -273,7 +298,8 @@ async function archive() {
 }
 function defaultName(r) {
   const d = new Date(r.start.time);
-  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · ${Math.round(r.result?.minutes ?? 0)} min`;
+  const map = r.start.map?.name || r.end?.map?.name;
+  return `${map ? map + ' · ' : ''}${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · ${Math.round(r.result?.minutes ?? 0)} min`;
 }
 
 const nameOf = (id) => S.itemdb.name(id);
@@ -405,7 +431,7 @@ function renderSession() {
   $('popout').hidden = popoutOpen();
   $('sessionLine').innerHTML = c
     ? `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b> ` + COUNTED_TABS.map((t) => `<span class="chip ${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
-    : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} <b>${hms(activeMs(C().start.time, Date.now(), C().pauses))}</b>`
+    : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} <b>${hms(activeMs(C().start.time, Date.now(), C().pauses))}</b>${C().start.map ? ` · ${esc(C().start.map.name)}` : ''}`
     : '<span class="mute">No session running. Share the game window, then press Start.</span>';
 }
 
@@ -474,7 +500,7 @@ function renderView() {
     $('result').innerHTML = v.start ? `<p class="mute">Start: level ${v.start.level ?? '?'}, mesos ${fmt(v.start.mesos)}, ${Object.keys(v.start.items).length} kinds of items. Results appear after End.</p>`
       : '<p class="mute">Nothing here yet. Share the game window and press Start; finished sessions are kept and listed above.</p>';
   }
-  renderReview($('review'), { ...v, itemdb: S.itemdb, reviewVersion: S.ver }, { nameOf, priceOf, recompute: () => recompute(v), learn });
+  renderReview($('review'), { ...v, itemdb: S.itemdb, reviewVersion: S.ver }, { nameOf, priceOf, recompute: () => recompute(v), learn, maps: S.maps });
 }
 
 async function renderStorage() {

@@ -27,17 +27,23 @@ export function renderReview(el, S, h) {
     const fix = S.fixes.status[kind]?.[k];
     return `<input class="st" data-kind="${kind}" data-k="${k}" value="${esc(fix ?? '')}" placeholder="${esc(snap[k] ?? 'not read')}" title="read: ${esc(snap[k])}${fix != null && fix !== '' ? ' (you fixed it)' : ''}">`;
   };
+  const mapCell = (kind) => {
+    const snap = snaps[kind], m = snap.map, fix = S.fixes.status[kind]?.map;
+    return `<input class="mapfix" data-kind="${kind}" list="mapnames" value="${esc(fix ?? '')}" placeholder="${esc(m ? m.name : 'not read')}" title="${m ? `read: ${esc((m.raw || []).join(' / '))}${m.matched ? '' : ' (not in the map list)'}` : 'the minimap was not visible'}">
+      ${snap.map_picture ? `<br><img class="meso" src="${snap.map_picture}" alt="minimap title">` : ''}`;
+  };
   const mesoPics = (snap) => {
     const list = snap.meso_pictures || (snap.meso_picture ? [{ value: snap.mesos, pages: [], img: snap.meso_picture }] : []);
     if (!list.length) return '<span class="mute">–</span>';
     return list.map((p) => `<div class="shot"><img class="meso" src="${p.img}" alt="meso field"><span class="small ${p.value === snap.mesos ? '' : 'mute'}">read ${p.value == null ? 'nothing' : fmt(p.value)}${p.pages.length ? ` · ${esc(p.pages.join(', '))}` : ''}${p.value === snap.mesos && list.length > 1 ? ' · used' : ''}</span></div>`).join('');
   };
   let html = `<h3>Status read from the screen</h3>
-    <table><tr><th>Snapshot</th><th>Level</th><th>EXP</th><th class="l">EXP as captured</th><th>Mesos</th><th class="l">Meso field as captured</th></tr>
+    <table><tr><th>Snapshot</th><th class="l">Map</th><th>Level</th><th>EXP</th><th class="l">EXP as captured</th><th>Mesos</th><th class="l">Meso field as captured</th></tr>
     ${KINDS.filter((k) => snaps[k]).map((k) => `<tr><td>${k} <span class="mute">${esc(snaps[k].when)}</span>
       ${snaps[k].exp_checked ? '' : '<span class="bad" title="EXP did not fit the EXP table">EXP unchecked</span>'}
       ${snaps[k].mesos_changed ? `<span class="bad" title="different totals on different pages; ${k === 'end' ? 'the first (when End was pressed)' : 'the last (when the start scan finished)'} is used">mesos changed during the scan</span>`
         : snaps[k].mesos_checked ? '' : `<span class="bad" title="pages read: ${esc((snaps[k].mesos_reads || []).join(', '))}">mesos unchecked</span>`}</td>
+      <td class="l">${mapCell(k)}</td>
       <td>${field(k, 'level')}</td><td>${field(k, 'exp')}</td>
       <td class="l">${snaps[k].exp_picture ? `<img class="meso" src="${snaps[k].exp_picture}" alt="EXP">` : '<span class="mute">–</span>'}</td>
       <td>${field(k, 'mesos')}</td>
@@ -96,6 +102,11 @@ export function renderReview(el, S, h) {
     `<figure><a href="${p.img}" target="_blank"><img src="${p.img}" alt=""></a><figcaption>${esc(p.tab)} ${p.n}</figcaption></figure>`).join('') || '<span class="mute">not kept (too big for browser storage)</span>'}</div></div>`).join('');
 
   // datalist of item names for the search boxes
+  if (!document.getElementById('mapnames') && h.maps && h.maps.length) {
+    const dl = document.createElement('datalist'); dl.id = 'mapnames';
+    dl.innerHTML = [...new Set(h.maps.map((m) => m.name).filter(Boolean))].sort().map((n) => `<option value="${esc(n)}">`).join('');
+    document.body.appendChild(dl);
+  }
   if (!document.getElementById('itemnames')) {
     const dl = document.createElement('datalist'); dl.id = 'itemnames';
     const names = [...new Set(Object.values(S.itemdb.items).map((i) => i.name))].sort();
@@ -123,6 +134,10 @@ function bind(el, S0, h0) {
     if (t.classList.contains('st')) {
       const v = t.value.replace(/[^\d]/g, '');
       if (v === '') delete S.fixes.status[t.dataset.kind][t.dataset.k]; else S.fixes.status[t.dataset.kind][t.dataset.k] = +v;
+      h.recompute();
+    } else if (t.classList.contains('mapfix')) {
+      const v = t.value.trim();
+      if (v === '') delete S.fixes.status[t.dataset.kind].map; else S.fixes.status[t.dataset.kind].map = v;
       h.recompute();
     } else if (t.classList.contains('qty')) {
       S.fixes.qty[`${t.dataset.kind}|${t.dataset.ref}`] = Math.max(0, +t.value || 0);

@@ -6,6 +6,7 @@ import { locateInventory, detectTab, coveredSlots, readPage, LookCache, findCurs
 import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
 import { mat } from '../lib/img.js';
+import { readMap } from '../lib/mapname.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
 const expected = await (await fetch('./expected.json')).json();
@@ -67,6 +68,24 @@ for (const [name, want] of Object.entries(expected)) {
   const got = page.map((row) => row.map((s) => (typeof s.id === 'number' ? s.id : null)));
   if (JSON.stringify(got) !== JSON.stringify(want)) fails.push(`items: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
   log(`items: ${JSON.stringify(got)} (${ms} ms for the page, ${db.icons.size} icons)`);
+}
+// Map names from the minimap (same cases as tests/test_snapshot.py)
+{
+  const header = await loadImage('../data/minimap_header.png');
+  const rain = [{ streetName: 'Victoria Road', name: 'The Rain-Forest East of Henesys' }, { streetName: 'Victoria Road', name: 'The Rain-Forest East of Henesys 2' }];
+  const cases = [
+    ['game_frame.png', rain, 'Victoria Road', 'The Rain-Forest East of Henesys'],
+    ['use_tab_tooltip.png', rain, 'Victoria Road', 'The Rain-Forest East of Henesys'],
+    ['etc_ant_tunnel.png', ['Ant Tunnel I', 'Ant Tunnel II', 'Ant Tunnel III', 'Ant Tunnel IV', 'Deep Ant Tunnel I'].map((n) => ({ streetName: 'Dungeon', name: n })), 'Dungeon', 'Ant Tunnel IV'],
+    ['etc_excavation.png', ['I', 'II', 'III', 'IV'].map((n) => ({ streetName: 'Victoria Road', name: `Excavation Site ${n}` })), 'Victoria Road', 'Excavation Site III'],
+  ];
+  for (const [name, maps, street, map] of cases) {
+    const m = await readMap(await loadImage(`../../tests/fixtures/${name}`), header, maps);
+    if (!m || m.street !== street || m.name !== map) fails.push(`${name} map: got ${JSON.stringify(m)}, want ${street} / ${map}`);
+    log(`${name} map: ${JSON.stringify(m && { street: m.street, name: m.name, matched: m.matched })}`);
+  }
+  const black = mat(1920, 1080, 3);
+  if (await readMap(black, header, rain)) fails.push('map read on a black frame');
 }
 // The pointing-hand pointer, on a page picture the browser version saved (screen pixels, 1920x1080 game)
 {

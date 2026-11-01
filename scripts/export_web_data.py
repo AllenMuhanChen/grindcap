@@ -4,6 +4,7 @@ Reads what the Python app already has on this PC and writes web/local/ (not in g
 
   web/local/itemdb.json   item names, tabs, prices and icons (from <catalog_dir>/itemdb, downloaded from
                           maplestory.io by the Python app; your own prices from catalog.json win)
+  web/local/maps.json     Classic World map names (<catalog_dir>/itemdb/maps.json), to snap the minimap text to
   web/local/digits.json   your teach-digits examples (<catalog_dir>/digits.npz), added to the built-in ones
 
 Run from the repo root:  python scripts/export_web_data.py
@@ -57,6 +58,19 @@ def main() -> int:
         icons[iid] = base64.b64encode(p.read_bytes()).decode()
     (out / "itemdb.json").write_text(json.dumps({"items": exp_items, "icons": icons}))
     print(f"Items: {len(exp_items)} with icons -> {out / 'itemdb.json'}")
+
+    # --- map names
+    mp = itemdb / "maps.json"
+    if not mp.exists():
+        try:
+            from grindcap.mapname import download_maps
+            download_maps(itemdb)
+        except Exception as e:  # offline: map names are read but not snapped to real ones
+            print(f"Map names not downloaded ({e}); the minimap text is used as read.")
+    if mp.exists():
+        maps = [{"streetName": m.get("streetName") or "", "name": m.get("name") or ""} for m in json.loads(mp.read_text())]
+        (out / "maps.json").write_text(json.dumps(maps))
+        print(f"Map names: {len(maps)} -> {out / 'maps.json'}")
 
     # --- taught digits
     taught = data / "digits.npz"

@@ -24,6 +24,7 @@ const CSS = `
   .chips span.done { border-color: var(--ok); color: var(--ok); }
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
+  .warn { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); border: 1px solid var(--bad); border-radius: 6px; padding: 4px 6px; margin: 4px 0; font-weight: 600; }
 `;
 
 export async function openPopout(a) {
@@ -87,6 +88,7 @@ export function updatePopout() {
     const left = c.lastNew ? 4 - (Date.now() - c.lastNew) / 1000 : 4;
     scan.innerHTML = `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b>
       <div class="mute">Open the inventory (I). Click each tab and scroll it to the bottom; a page is taken whenever the view holds still. Keep the mouse off the items.</div>
+      ${c.map ? `<div>Map: <b>${c.map.name}</b></div>` : c.mapWarn ? `<div class="warn">${c.mapWarn}</div>` : ''}
       <div class="chips">${COUNTED_TABS.map((t) => `<span class="${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')}</div>
       <div>${missing.length ? `Still to do: <b>${missing.join(', ')}</b>` : left > 0 ? `<span class="ok">All tabs read. Finishing in ${Math.ceil(left)} s</span> (scroll on for more pages)` : '<span class="ok">Finishing…</span>'}</div>`;
   }
