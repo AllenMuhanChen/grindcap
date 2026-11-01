@@ -52,6 +52,8 @@
   #sessSel { max-width: 520px; padding: 5px; } #sessName { font: inherit; padding: 5px; width: 220px; }
   details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; } summary { cursor: pointer; color: var(--mute); }
   [hidden] { display: none !important; }
+  .alert { margin-top: 8px; padding: 10px 14px; border-radius: 8px; font-size: 16px; font-weight: 650; color: #fff; background: var(--bad); }
+  .scanhelp { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 15px; border: 2px solid var(--acc); background: color-mix(in srgb, var(--acc) 10%, var(--card)); }
 </style>
 </head>
 <body>
@@ -67,6 +69,8 @@
     <button id="popout" title="Small always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Re-open pop-out</button>
     <span id="sessionLine"></span>
   </div>
+  <div id="alert" class="alert" hidden></div>
+  <div id="scanHelp" class="scanhelp" hidden>Open the inventory (I). Click <b>Equip, Use, Set-up and Etc</b> in turn and scroll each to the bottom. A page is taken when the view holds still. <b>Keep the mouse off the items</b>, and keep the minimap open.</div>
   <div class="stats" id="liveStats"></div>
   <div id="liveNote" class="bad small"></div>
   <div id="lastNote" class="mute small"></div>

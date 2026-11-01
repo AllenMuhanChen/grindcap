@@ -77,7 +77,7 @@ async function init() {
 
 const popoutApi = {
   state: () => ({ ...S, ...C() }), start: startSession, end: endSession, finish: finishCollect, pause: togglePause, discard,
-  running: () => running(), lastNote: () => S.lastNote,
+  running: () => running(), lastNote: () => S.lastNote, alert: () => alertNow(),
 };
 const showPopout = () => openPopout(popoutApi).then(render).catch((e) => note(`pop-out: ${e.message}`));
 
@@ -93,6 +93,14 @@ $('saveFrame').onclick = () => S.cap && S.cap.saveLastFrame();
 $('popout').onclick = showPopout;
 
 function note(text) { if (S.cap) S.cap.note(text); else $('capLog').textContent = text + '\n' + $('capLog').textContent; renderCapture(); }
+/** Something you need to do (move the mouse, open the inventory or minimap): a big banner in the top bar
+ * and the pop-out, until a page is taken or the condition has not come back for a few seconds. */
+function warn(text) { S.alert = { text, t: Date.now() }; snapNote(text); }
+const alertNow = () => {
+  const a = S.alert, c = S.collect;
+  if (a && Date.now() - a.t < 6000) return a.text;
+  return c && !c.map && c.mapWarn ? c.mapWarn : '';
+};
 function snapNote(text) { S.lastNote = text; $('lastNote').textContent = text; $('snapLog').textContent = `${new Date().toLocaleTimeString()}  ${text}\n` + $('snapLog').textContent; updatePopout(); }
 
 // ------------------------------------------------------------------ the loop
@@ -206,7 +214,7 @@ async function tryMap(frame, now) {
     snapNote(`Map: ${m.name}${m.matched ? '' : ' (not found in the map list: check it in the review)'}`);
   } else {
     c.mapWarn = 'Map name not visible: open the minimap (M) and leave it expanded so its title shows the map name.';
-    if (!c.mapWarned) { snapNote(c.mapWarn); c.mapWarned = true; }
+    if (!c.mapWarned) { warn(c.mapWarn); c.mapWarned = true; }
   }
   render();
 }
@@ -218,27 +226,28 @@ async function pageTick(now) {
   if (!frame) return;
   await tryMap(frame, now);
   const inv = locateInventory(frame, S.title, S.ctx);
-  if (!inv) { if (now - c.lastWarn > 5000) { snapNote('inventory not found (is it open?)'); c.lastWarn = now; } return; }
+  if (!inv) { if (now - c.lastWarn > 3000) { warn('Inventory not found: open it (I) and keep it fully on screen.'); c.lastWarn = now; } return; }
   const sig = PageWatcher.signature(frame, inv.grid);
   if (!c.watcher.feed(sig)) return maybeFinish(now);
   if (coveredSlots(frame, inv.grid).length) {          // a tooltip is over the items: try again without it
     c.watcher.rejectLast();
-    snapNote('a tooltip covers some items: move the mouse off the grid');
+    warn('A tooltip covers the items: move the mouse off the inventory grid.');
     return;
   }
   const pointer = findCursor(frame, inv.grid, S.cursors, S.ctx.gameScale);
   if (pointer) {                                       // the mouse pointer hides part of a slot
     c.watcher.rejectLast();
-    snapNote('the mouse pointer is over the items: move it off the grid (page not taken)');
+    warn('The mouse pointer is over the items: move it off the inventory grid (page not taken).');
     return;
   }
   const button = detectTab(frame, inv.grid);
   const page = await readPage(frame, inv.grid, S.digits, S.itemdb, S.cache, `${c.kind}`);
   if (S.collect !== c) return;                           // discarded meanwhile
   const tab = pageTab(page, S.itemdb, button);
-  if (!tab) { snapNote('page skipped: could not tell which tab is open'); return; }
+  if (!tab) { warn('Page skipped: could not tell which tab is open. Click the tab again.'); return; }
   if (SKIP_TABS.includes(tab)) { snapNote(`${tab} page skipped (not counted)`); return; }
   (c.pages[tab] = c.pages[tab] || []).push(page);
+  S.alert = null;
   c.pictures.push({ tab, n: c.pages[tab].length, img: pagePicture(frame, inv.grid) });
   c.seen.add(tab);
   c.lastNew = Date.now();
@@ -428,6 +437,9 @@ function render() {
 
 function renderSession() {
   const run = running(), paused = isPaused(C().pauses), c = S.collect;
+  const a = alertNow();
+  $('alert').hidden = !a; $('alert').textContent = a;
+  $('scanHelp').hidden = !c;
   $('popout').hidden = popoutOpen();
   $('sessionLine').innerHTML = c
     ? `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b> ` + COUNTED_TABS.map((t) => `<span class="chip ${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')

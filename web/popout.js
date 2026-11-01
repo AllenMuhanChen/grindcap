@@ -24,7 +24,8 @@ const CSS = `
   .chips span.done { border-color: var(--ok); color: var(--ok); }
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
-  .warn { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); border: 1px solid var(--bad); border-radius: 6px; padding: 4px 6px; margin: 4px 0; font-weight: 600; }
+  .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
+  .scan .help { font-size: 14px; }
 `;
 
 export async function openPopout(a) {
@@ -43,6 +44,7 @@ export async function openPopout(a) {
   d.body.innerHTML = `
     <div class="top"><b>grindcap</b><span id="share" class="mute"></span></div>
     <div class="top"><span id="timer" class="mute">No session</span><span id="lv" class="mute"></span></div>
+    <div class="warn" id="alert" hidden></div>
     <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span></div>
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
@@ -51,7 +53,7 @@ export async function openPopout(a) {
       <button id="start" class="primary">Start</button><button id="end">End</button>
       <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
     </div>
-    <div class="box" id="scan" hidden></div>
+    <div class="box scan" id="scan" hidden></div>
     <div class="box" id="res" hidden></div>
     <div class="note mute" id="note"></div>`;
   d.getElementById('start').onclick = () => api.start(pip.confirm.bind(pip));
@@ -81,14 +83,16 @@ export function updatePopout() {
   $('pause').textContent = paused ? 'Resume' : 'Pause';
   $('discard').disabled = !running && !S.collect;
   $('finish').hidden = !S.collect;
+  const al = api.alert ? api.alert() : '';
+  $('alert').hidden = !al; $('alert').textContent = al;
   const c = S.collect, scan = $('scan');
   scan.hidden = !c;
   if (c) {
     const missing = COUNTED_TABS.filter((t) => !c.seen.has(t));
     const left = c.lastNew ? 4 - (Date.now() - c.lastNew) / 1000 : 4;
     scan.innerHTML = `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b>
-      <div class="mute">Open the inventory (I). Click each tab and scroll it to the bottom; a page is taken whenever the view holds still. Keep the mouse off the items.</div>
-      ${c.map ? `<div>Map: <b>${c.map.name}</b></div>` : c.mapWarn ? `<div class="warn">${c.mapWarn}</div>` : ''}
+      <div class="help">Open the inventory (I). Click <b>each tab</b> and scroll it to the bottom. A page is taken when the view holds still. <b>Keep the mouse off the items.</b></div>
+      ${c.map ? `<div>Map: <b>${c.map.name}</b></div>` : ''}
       <div class="chips">${COUNTED_TABS.map((t) => `<span class="${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')}</div>
       <div>${missing.length ? `Still to do: <b>${missing.join(', ')}</b>` : left > 0 ? `<span class="ok">All tabs read. Finishing in ${Math.ceil(left)} s</span> (scroll on for more pages)` : '<span class="ok">Finishing…</span>'}</div>`;
   }
