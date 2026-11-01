@@ -194,3 +194,12 @@ def test_review_has_the_potion_graph_only_with_quick_slot_readings(tmp_path):
     (s / "live.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     pts = review_data(s, e, cat, potion_prices={"Red Potion": ["hp", 40]})["potions"]
     assert [(p["t"], p["hp"], p["cum_hp"]) for p in pts] == [(30, 800, 1600)]
+
+
+def test_delete_several_items_at_once(tmp_path):
+    cat, root, s, e = setup(tmp_path)
+    apply_edit(s, e, cat, None, {"op": "ignore_item", "ids": ["item-001", "item-003"], "ignore": True})
+    d = review_data(s, e, cat)
+    assert {it["id"] for it in d["items"] if it["deleted"]} == {"item-001", "item-003"}
+    apply_edit(s, e, cat, None, {"op": "ignore_item", "ids": ["item-001"], "ignore": False})
+    assert {it["id"] for it in review_data(s, e, cat)["items"] if it["deleted"]} == {"item-003"}

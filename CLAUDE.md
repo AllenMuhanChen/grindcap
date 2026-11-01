@@ -49,7 +49,9 @@ itemdb.py    ItemDB: maplestory.io item data for region MCW (= Classic World), v
              merge rows agree only on same item AND count (repeated stacks of one item otherwise collapse).
 review.py    Session review: list_sessions (end paired with latest start before it), review_data (changed
              items + their slots, covered "?" slots, status), apply_edit (slot/slot_db/reset/status/
-             ignore_item/purge/purge_deleted/item/item_db), local http.server + data/review.html. Slot/status fixes live in
+             ignore_item (id or ids)/purge/purge_deleted/item/item_db), local http.server + data/review.html
+             (Delete removes the row at once and reloads 1.2 s after the last click; tick boxes + "Delete N
+             selected" send one ids edit). Slot/status fixes live in
              <snapshot>/fixes.json ("slots", "status", "deleted" item ids), applied by snapshot.apply_fixes in
              compare(); compare() also skips ids no longer in the catalog (purged). Prices: catalog "price"
              = user's, "npc_price" = NPC; Catalog.price() picks. Slots under a tooltip (is_covered) are

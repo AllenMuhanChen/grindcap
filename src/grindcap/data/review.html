@@ -129,7 +129,7 @@ button.danger:hover { border-color: var(--bad); color: var(--bad); }
   <section>
     <h2>Items that changed</h2>
     <table id="items"></table>
-    <p class="hint">Click a row to see the slots it was read from. Delete moves a misread item to the list below; to drop
+    <p class="hint">Click a row to see the slots it was read from. Delete moves a misread item to the list below (tick several and use "Delete selected" for many at once); to drop
       just one slot, use "Ignore this slot" there. Names and prices you set apply to every session; slot fixes apply to this
       session's snapshots only.</p>
   </section>
@@ -158,6 +158,22 @@ async function api(path, body) {
 }
 async function edit(e, done = "Saved") { await api("/api/edit", e); await load(); toast(done); }
 
+// Deleting: the row goes at once and the page reloads once you stop clicking, so several quick deletes
+// don't each wait for (and redraw from) the server.
+let pending = Promise.resolve(), reloadT = null, picked = new Set();
+function deleteNow(ids) {
+  ids = ids.filter(id => D.items.some(it => it.id === id && !it.deleted));
+  if (!ids.length) return;
+  for (const it of D.items) if (ids.includes(it.id)) {
+    it.deleted = true; it.read_before = it.before; it.read_after = it.after; picked.delete(it.id); open.delete(it.id);
+  }
+  render();
+  pending = pending.then(() => api("/api/edit", {op: "ignore_item", ids, ignore: true})).catch(() => {});
+  clearTimeout(reloadT);
+  reloadT = setTimeout(async () => { await pending; await load(); }, 1200);
+  toast(ids.length > 1 ? `Deleted ${ids.length} items: moved to the list at the bottom` : "Deleted: moved to the list at the bottom");
+}
+
 let SESS = [], MAPS = [];
 
 async function loadSessions(want) {
@@ -174,7 +190,7 @@ async function loadSessions(want) {
 
 async function init() {
   await loadSessions();
-  $("#session").onchange = () => { SID = $("#session").value; open.clear(); load(); };
+  $("#session").onchange = () => { SID = $("#session").value; open.clear(); picked.clear(); load(); };
   $("#savedonly").onchange = async () => { await loadSessions(SID); load(); };
   $("#showall").onchange = render;
   api("/api/maps").then(m => { MAPS = m; const dl = document.createElement("datalist"); dl.id = "maplist";
@@ -360,7 +376,10 @@ function render() {
     && edit({op: "purge_deleted"}, "Purged");
 
   const rows = D.items.filter(it => !it.deleted && (it.change !== 0 || $("#showall").checked));
-  let h = `<tr><th></th><th class="l">Item</th><th>Before</th><th>After</th><th>Change</th><th>Per hr</th><th>Price</th><th>Value</th><th></th></tr>`;
+  for (const id of [...picked]) if (!rows.some(it => it.id === id)) picked.delete(id);
+  let h = `<tr><th><input type="checkbox" id="pickall" title="Select all" ${rows.length && picked.size === rows.length ? "checked" : ""}></th>
+    <th></th><th class="l">Item</th><th>Before</th><th>After</th><th>Change</th><th>Per hr</th><th>Price</th><th>Value</th>
+    <th><button id="delsel" ${picked.size ? "" : "disabled"} title="Delete every ticked item">Delete ${picked.size || ""} selected</button></th></tr>`;
   for (const it of rows) {
     const tags = [];
     if (!it.name) tags.push(`<span class="tag warn">unnamed</span>`);
@@ -369,6 +388,7 @@ function render() {
     const fixed = [...it.slots.start, ...it.slots.end].filter(x => x.fixed).length;
     if (fixed) tags.push(`<span class="tag">${fixed} slot fix${fixed > 1 ? "es" : ""}</span>`);
     h += `<tr class="item" data-id="${esc(it.id)}">
+      <td><input type="checkbox" class="pick" data-id="${esc(it.id)}" ${picked.has(it.id) ? "checked" : ""}></td>
       <td><img class="icon" src="/icon?id=${encodeURIComponent(it.id)}" alt=""></td>
       <td class="l"><input class="name" data-id="${esc(it.id)}" value="${esc(it.name)}" placeholder="${esc(it.id)}"> ${tags.join("")}</td>
       <td>${fmt(it.before)}</td><td>${fmt(it.after)}</td>
@@ -380,9 +400,9 @@ function render() {
                                     : `<div class="muted" style="font-size:11px">${it.npc_price != null ? "NPC price" : ""}</div>`}</td>
       <td>${fmt(it.value)}</td>
       <td><button class="del" data-id="${esc(it.id)}" title="A misread: don't count it in this session">Delete</button></td></tr>`;
-    if (open.has(it.id)) h += `<tr class="detail"><td colspan="9">${detail(it)}</td></tr>`;
+    if (open.has(it.id)) h += `<tr class="detail"><td colspan="10">${detail(it)}</td></tr>`;
   }
-  if (!rows.length) h += `<tr><td colspan="9" class="l muted">No item counts changed.</td></tr>`;
+  if (!rows.length) h += `<tr><td colspan="10" class="l muted">No item counts changed.</td></tr>`;
   const t = $("#items"); t.innerHTML = h;
 
   t.querySelectorAll("tr.item").forEach(tr => tr.onclick = e => {
@@ -393,8 +413,18 @@ function render() {
   t.querySelectorAll("input.price").forEach(i => i.onchange = () => edit({op: "item", id: i.dataset.id, price: i.value}));
   t.querySelectorAll("select.cand").forEach(s => s.onchange = () => s.value && edit({op: "item_db", id: s.dataset.id, db_id: s.value}));
   t.querySelectorAll("button.npc").forEach(b => b.onclick = () => edit({op: "item", id: b.dataset.id, price: ""}, "Back to the NPC price"));
-  t.querySelectorAll("button.del").forEach(b => b.onclick = () => edit({op: "ignore_item", id: b.dataset.id, ignore: true},
-    "Deleted: moved to the list at the bottom"));
+  t.querySelectorAll("button.del").forEach(b => b.onclick = () => deleteNow([b.dataset.id]));
+  const delsel = $("#delsel");
+  const pickUi = () => {
+    delsel.disabled = !picked.size; delsel.textContent = `Delete ${picked.size || ""} selected`;
+    $("#pickall").checked = rows.length > 0 && picked.size === rows.length;
+  };
+  t.querySelectorAll("input.pick").forEach(c => c.onchange = () => { c.checked ? picked.add(c.dataset.id) : picked.delete(c.dataset.id); pickUi(); });
+  $("#pickall").onchange = e => {
+    rows.forEach(it => e.target.checked ? picked.add(it.id) : picked.delete(it.id));
+    t.querySelectorAll("input.pick").forEach(c => c.checked = e.target.checked); pickUi();
+  };
+  delsel.onclick = () => deleteNow([...picked]);
   wireSlots(t);
 }
 

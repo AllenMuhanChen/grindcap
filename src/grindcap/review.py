@@ -195,12 +195,13 @@ def apply_edit(start_dir, end_dir, catalog: Catalog, itemdb, edit: dict) -> None
                     slots.pop(ref, None)
         save_fixes(folder, fixes)
     elif op == "ignore_item":
-        # Delete a misread item from this session (or restore it). Recorded per snapshot, so it works
-        # for every snapshot, including ones saved before slots were recorded.
-        iid, on = edit["id"], bool(edit.get("ignore", True))
+        # Delete misread items from this session (or restore them): "id", or "ids" for several at once.
+        # Recorded per snapshot, so it works for every snapshot, including ones saved before slots were
+        # recorded.
+        ids, on = list(edit.get("ids") or [edit["id"]]), bool(edit.get("ignore", True))
         for folder in folders.values():
             fixes = load_snapshot(folder).get("fixes") or {}
-            deleted = [x for x in fixes.get("deleted", []) if x != iid] + ([iid] if on else [])
+            deleted = [x for x in fixes.get("deleted", []) if x not in ids] + (ids if on else [])
             fixes["deleted"] = deleted
             if not deleted:
                 fixes.pop("deleted")
