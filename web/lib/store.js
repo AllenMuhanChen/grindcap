@@ -40,7 +40,7 @@ export function set(k, v) {
 
 const light = (r) => ({ id: r.id, name: r.name, character: r.character || null,
   map: r.meta?.map ?? r.start?.map?.name ?? null, level: r.meta?.level ?? r.start?.level ?? null, level_end: r.meta?.level_end ?? r.end?.level ?? null, start_time: r.start?.time, end_time: r.end?.time,
-  result: r.result && { minutes: r.result.minutes, exp_per_hr: r.result.exp_per_hr, net_per_hr: r.result.net_per_hr, mesos_per_hr: r.result.mesos_per_hr } });
+  result: r.result && { minutes: r.result.minutes, exp_per_hr: r.result.exp_per_hr, net_per_hr: r.result.net_per_hr, mesos_per_hr: r.result.mesos_per_hr, revenue_per_hr: r.result.revenue_per_hr, cost_per_hr: r.result.cost_per_hr } });
 
 /** Saves a finished session and keeps the light index (kv "sessions") in step. */
 export async function putSession(rec) {

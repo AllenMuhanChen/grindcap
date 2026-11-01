@@ -81,7 +81,7 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
-  if (store.listSessions().some((x) => !('level' in x))) await store.reindex();   // index from before map/level columns
+  if (store.listSessions().some((x) => !('level' in x) || (x.result && !('revenue_per_hr' in x.result)))) await store.reindex();   // index from before map/level columns
   showTab(tab);
   recompute(C());
   // an ended session from the older single-session version goes into the list
@@ -557,18 +557,18 @@ function renderSummary() {
   const val = {
     id: (x) => x.id, name: (x) => (x.name || '').toLowerCase(), char: (x) => (x.character?.name || '').toLowerCase(), map: (x) => (x.map || '').toLowerCase(),
     level: (x) => x.level ?? -1, minutes: (x) => x.result?.minutes ?? -1, net: (x) => x.result?.net_per_hr ?? -Infinity,
-    exp: (x) => x.result?.exp_per_hr ?? -Infinity, mesos: (x) => x.result?.mesos_per_hr ?? -Infinity,
+    exp: (x) => x.result?.exp_per_hr ?? -Infinity, rev: (x) => x.result?.revenue_per_hr ?? -Infinity, cost: (x) => x.result?.cost_per_hr ?? -Infinity,
   };
   const { k, dir } = sumSort, f = val[k] || val.id;
   const rows = list.filter((x) => (!pc || x.character?.name === pc) && (!pm || x.map === pm))
     .sort((a, b) => { const p = f(a), q = f(b); return (p < q ? -1 : p > q ? 1 : 0) * dir || b.id - a.id; });
   const th = (key, label, cls = '') => `<th class="${cls}" data-k="${key}">${label}${k === key ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   const lv = (x) => (x.level == null ? '–' : x.level_end != null && x.level_end !== x.level ? `${x.level}→${x.level_end}` : x.level);
-  $('summary').innerHTML = rows.length ? `<table><tr>${th('name', 'Session', 'l')}${th('char', 'Character', 'l')}${th('map', 'Map', 'l')}${th('level', 'Level')}${th('minutes', 'Minutes')}${th('net', 'Net mesos/hr')}${th('exp', 'EXP/hr')}${th('mesos', 'Mesos/hr')}</tr>
+  $('summary').innerHTML = rows.length ? `<table><tr>${th('name', 'Session', 'l')}${th('char', 'Character', 'l')}${th('map', 'Map', 'l')}${th('level', 'Level')}${th('minutes', 'Minutes')}${th('rev', 'Revenue/hr')}${th('cost', 'Cost/hr')}${th('net', 'Net mesos/hr')}${th('exp', 'EXP/hr')}</tr>
     ${rows.map((x) => `<tr class="itemrow" data-id="${x.id}"><td class="l">${esc(x.name || new Date(x.id).toLocaleString())}</td>
       <td class="l">${esc(x.character ? `${x.character.name}${x.character.job ? ` (${x.character.job})` : ''}` : '–')}</td>
       <td class="l">${esc(x.map || '–')}</td><td>${lv(x)}</td>
-      <td>${fmt(x.result?.minutes, 1)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b></td><td>${fmt(x.result?.mesos_per_hr)}</td></tr>`).join('')}</table>
+      <td>${fmt(x.result?.minutes, 1)}</td><td>${fmt(x.result?.revenue_per_hr)}</td><td>${fmt(x.result?.cost_per_hr)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b></td></tr>`).join('')}</table>
     <p class="mute small">${rows.length} of ${list.length} sessions. Click a column to sort (again to reverse), a session to open it. More summary views come here later.</p>`
     : `<p class="mute">${list.length ? 'No sessions match these filters.' : 'No saved sessions yet.'}</p>`;
   for (const h of $('summary').querySelectorAll('th[data-k]')) h.onclick = () => {
