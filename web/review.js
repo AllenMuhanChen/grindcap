@@ -35,7 +35,7 @@ export function renderReview(el, S, h) {
       <td>${field(k, 'level')}</td><td>${field(k, 'exp')}</td><td>${field(k, 'mesos')}</td>
       <td>${snaps[k].meso_picture ? `<img class="meso" src="${snaps[k].meso_picture}" alt="meso field">` : '<span class="mute">–</span>'}</td></tr>`).join('')}
     </table><p class="mute">Type a value to correct a misread; clear it to go back to what was read.</p>`;
-  html += '<p class="mute small">Naming an icon here also teaches this browser: later scans name it by itself (see "icons you named" above to export or clear them).</p>';
+  html += '<p class="mute small">Naming an icon here also teaches this browser: later scans name it by itself (export or clear them under "icons you named" at the bottom of the page).</p>';
 
   // ---- unrecognised icons
   const slotsOf = (kind, key) => (eff[kind] ? Object.values(eff[kind].tabs).flat(2).filter((s) => s.look === key) : []);

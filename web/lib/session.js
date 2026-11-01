@@ -88,7 +88,7 @@ export function compare(start, end, priceOf, pauses = []) {
   return {
     minutes: +(hours * 60).toFixed(1), paused_minutes: +((end.time - start.time) / 6e4 - hours * 60).toFixed(1), exp, exp_per_hr: perHr(exp), levels: (end.level || 0) - (start.level || 0),
     mesos, mesos_per_hr: perHr(mesos), items_gained_value: gained, items_used_value: used,
-    net_mesos_incl_items: net, net_per_hr: perHr(net), items: rows,
+    net_mesos_incl_items: net, net_per_hr: perHr(net), revenue_per_hr: perHr((mesos || 0) + gained), cost_per_hr: perHr(used), items: rows,
     unpriced: rows.filter((r) => r.price == null).map((r) => r.name),
     tabs_left_out: [...new Set([...tabsS, ...tabsE])].filter((t) => !both.includes(t)),
     items_left_out: leftOut.map((id) => (end.items[id] || start.items[id]).name || id),

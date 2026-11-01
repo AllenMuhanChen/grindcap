@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>grindcap (browser test)</title>
+<title>grindcap</title>
 <style>
   :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --mute: #667085; --line: #e4e7ec; --acc: #2f6fde; --ok: #1a7f4b; --bad: #b42318; }
   @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1d2128; --ink: #e6e9ef; --mute: #98a2b3; --line: #2c323c; --acc: #6ea0ff; --ok: #4cc38a; --bad: #f97066; } }
@@ -19,7 +19,7 @@
   .mute { color: var(--mute); } .ok { color: var(--ok); } .bad { color: var(--bad); }
   .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
-  .stats div span { display: block; color: var(--mute); font-size: 12px; }
+  .stats div > span:first-child { display: block; color: var(--mute); font-size: 12px; }
   table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); }
   th:first-child, td:first-child { text-align: left; }
@@ -44,63 +44,66 @@
   .pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
   .pages img { height: 180px; border: 1px solid var(--line); border-radius: 4px; } figure { margin: 0; } figcaption { font-size: 12px; color: var(--mute); }
   input.st { width: 110px; }
+  header#bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line); padding: 8px 16px; }
+  header#bar .stats { margin: 6px 0 0; } header#bar .stats:empty { display: none; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); margin-left: 4px; }
+  .chip.done { border-color: var(--ok); color: var(--ok); }
+  #sessSel { max-width: 520px; padding: 5px; } #sessName { font: inherit; padding: 5px; width: 220px; }
+  details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; } summary { cursor: pointer; color: var(--mute); }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
-<main>
-  <div>
-    <h1>grindcap, browser test</h1>
-    <div class="mute">Everything runs in this tab. Nothing is uploaded; nothing is sent to the game.</div>
+<header id="bar">
+  <div class="row">
+    <b>grindcap</b>
+    <button id="share" class="primary">Share MapleStory window</button>
+    <button id="startSnap" class="primary" disabled>Start</button>
+    <button id="endSnap" disabled>End</button>
+    <button id="pauseSnap" disabled>Pause</button>
+    <button id="discardSnap" disabled>Discard</button>
+    <button id="finishSnap" hidden title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
+    <button id="popout" title="Small always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Re-open pop-out</button>
+    <span id="sessionLine"></span>
   </div>
-
-  <section>
-    <h2>1. Share the game window</h2>
+  <div class="stats" id="liveStats"></div>
+  <div id="liveNote" class="bad small"></div>
+  <div id="lastNote" class="mute small"></div>
+</header>
+<main>
+  <section id="viewSec">
     <div class="row">
-      <button id="share" class="primary">Share MapleStory window</button>
-      <button id="saveFrame" disabled>Save current frame (PNG)</button>
-      <button id="popout" title="Always-on-top window with EXP/hr, the graph, Start/End and the tab checklist (Chrome/Edge)">Open pop-out</button>
-      <span id="data" class="mute"></span>
-    </div>
-    <div class="stats" id="capStats"></div>
-    <pre id="capLog"></pre>
-  </section>
-
-  <section>
-    <h2>2. Session</h2>
-    <div class="row">
-      <button id="startSnap" class="primary" disabled>Start</button>
-      <button id="endSnap" disabled>End</button>
-      <button id="pauseSnap" disabled>Pause</button>
-      <button id="discardSnap" disabled>Discard</button>
-      <button id="finishSnap" disabled title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
-      <label class="mute">live EXP every <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s</label>
-    </div>
-    <p id="snapHelp" class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP is read every few seconds. End does the same inventory pass and shows the results. Paused time doesn't count towards the per-hour rates.</p>
-    <div id="sessionLine"></div>
-    <div class="tabs" id="tabs"></div>
-    <div class="stats" id="liveStats"></div>
-    <div id="liveNote" class="mute"></div>
-    <canvas id="graph" width="940" height="160"></canvas>
-    <div class="mute" style="font-size:12px">dots: EXP/min per reading · line: 5-min average · dashed: session average · x: active minutes</div>
-    <table id="liveTable"></table>
-    <pre id="snapLog"></pre>
-  </section>
-
-  <section>
-    <h2>3. Results</h2>
-    <div class="row">
-      <button id="download" disabled>Download session JSON</button>
-      <button id="corrDownload" disabled title="The icons you named, with their pictures: send this file to Allen">Download my corrections</button>
-      <button id="corrClear" disabled>Forget them</button>
-      <span id="corrCount" class="mute"></span>
+      <button id="prevSess" title="Older session">‹</button>
+      <select id="sessSel"></select>
+      <button id="nextSess" title="Newer session">›</button>
+      <input id="sessName" placeholder="session name" title="Rename this session">
+      <button id="deleteSess">Delete</button>
+      <button id="download">Download JSON</button>
+      <span id="sessCount" class="mute small"></span>
     </div>
     <div id="result"></div>
+    <div id="graphWrap" hidden>
+      <canvas id="graph" width="940" height="170"></canvas>
+      <div class="mute small">EXP/hr. dots: per reading · line: 5-min average · dashed: session average · x: active minutes</div>
+    </div>
+    <div id="review"></div>
   </section>
 
-  <section>
-    <h2>4. Review</h2>
-    <div id="review" class="mute">Appears after Start.</div>
-  </section>
+  <details>
+    <summary>How scanning works, icons you named, capture details</summary>
+    <p class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP is read every
+      <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s.
+      End does the same inventory pass and saves the session. Paused time doesn't count towards the per-hour rates. Nothing is uploaded and nothing is sent to the game.</p>
+    <div class="row"><span id="corrCount" class="mute"></span>
+      <button id="corrDownload" disabled title="The icons you named, with their pictures: send this file to Allen">Download my corrections</button>
+      <button id="corrClear" disabled>Forget them</button>
+      <span id="storage" class="mute small"></span></div>
+    <div class="row" style="margin-top:8px"><button id="saveFrame" disabled>Save current frame (PNG)</button><span id="data" class="mute"></span></div>
+    <div class="stats" id="capStats"></div>
+    <pre id="capLog"></pre>
+    <h3>Scan log</h3>
+    <pre id="snapLog"></pre>
+  </details>
 </main>
 <script type="module" src="./app.js"></script>
 </body>

@@ -175,8 +175,9 @@ snapshots of mesos and items. Nothing is uploaded and nothing is sent to the gam
 3. **Start**, open the inventory and click through Equip, Use, Set-up and Etc. The session then
    runs: EXP is read every 10-60 s (graph + EXP/hr). **Pause** leaves time out of the per-hour
    rates; **Discard** throws the session away. **End**, click through the tabs again, results follow.
-4. **Open pop-out** gives a small always-on-top window (Chrome/Edge 116+) with the same controls,
-   EXP/hr, the graph and the tab checklist while scanning, so you don't have to switch back.
+4. A small always-on-top pop-out (Chrome/Edge 116+) opens when you Share or Start, with the same
+   controls, EXP/hr, the graph and the tab checklist while scanning. **Re-open pop-out** if you close it.
+   Ended sessions are kept in the browser (IndexedDB) and can be paged through with ‹ ›, renamed or deleted.
 5. **Review** shows every item with the slot pictures it was read from. Unrecognised icons get the
    closest guesses from the item data; pick one, type a name, or "Don't count". A named icon is
    remembered by this browser for later scans; **Download my corrections** saves them as a file.

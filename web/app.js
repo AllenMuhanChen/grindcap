@@ -1,5 +1,7 @@
-// grindcap browser test: share the game window, live EXP/min, before/after mesos and items.
-import { loadImage } from './lib/img.js';
+// grindcap browser test. One session at a time, like the control window: Start (status + inventory
+// pages) -> live EXP while it runs -> End (status + pages) -> results. Finished sessions are kept in
+// IndexedDB and can be paged through below; the review is the main part of the page.
+import { loadImage, crop as cropMat, toImageData } from './lib/img.js';
 import { ocrReady } from './lib/ocr.js';
 import { readStatus, readMesosField } from './lib/statusbar.js';
 import { StackDigits } from './lib/digits.js';
@@ -7,29 +9,42 @@ import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
+import * as store from './lib/store.js';
 import { renderReview } from './review.js';
 import { drawGraph } from './graph.js';
-import { openPopout, updatePopout } from './popout.js';
-import { crop as cropMat, toImageData } from './lib/img.js';
+import { openPopout, updatePopout, popoutOpen } from './popout.js';
 
 const $ = (id) => document.getElementById(id);
-const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
-const store = {
-  get: (k) => { try { return JSON.parse(localStorage.getItem('grindcap.' + k)); } catch { return null; } },
-  set: (k, v) => { try { localStorage.setItem('grindcap.' + k, JSON.stringify(v)); } catch { /* full or blocked */ } },
-};
+const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
+const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null });
 
+await store.openStore();
+
+// S.cur = the session being run (once it has ended it is also the saved record with the same id).
+// S.view = the session shown below (S.cur, or a saved one loaded from IndexedDB).
 const S = {
   cap: null, ctx: {}, title: null, digits: null, itemdb: new ItemDB(), cache: new LookCache(),
-  busy: false, lastTick: 0, lastGrab: 0,
-  live: store.get('live') || { rows: [], fails: 0 },
-  pauses: store.get('pauses') || [],
-  start: store.get('start'), end: store.get('end'), collect: null, result: null,
-  fixes: store.get('fixes') || { looks: {}, qty: {}, status: { start: {}, end: {} } },
+  busy: false, lastGrab: 0, collect: null, ver: 0,
+  cur: {
+    id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
+    live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
+  },
+  view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
 };
+S.view = S.cur;
 for (const c of S.corrections) S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop);
+const C = () => S.cur;
+
+function resetCur() {
+  S.cur = blank();
+  for (const k of ['start', 'end', 'name']) store.set(k, null);
+  store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
+  S.view = S.cur;
+}
 
 // ------------------------------------------------------------------ setup
 
@@ -50,20 +65,31 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
-  recompute();
+  recompute(C());
+  // an ended session from the older single-session version goes into the list
+  if (C().end && !store.listSessions().some((x) => x.id === C().id)) await archive();
+  renderStorage();
 }
+
+const popoutApi = {
+  state: () => ({ ...S, ...C() }), start: startSession, end: endSession, finish: finishCollect, pause: togglePause, discard,
+  running: () => running(), lastNote: () => S.lastNote,
+};
+const showPopout = () => openPopout(popoutApi).then(render).catch((e) => note(`pop-out: ${e.message}`));
 
 $('share').onclick = async () => {
   S.cap = new Capture(() => { render(); });
   try { await S.cap.start(); } catch (e) { note(`Sharing cancelled or refused: ${e.message}`); S.cap = null; return; }
   ticker(500, () => onTick().catch((e) => note(`error: ${e.message}`)));
   document.addEventListener('visibilitychange', () => S.cap && S.cap.note(document.hidden ? 'this tab went to the background' : 'this tab is in front again'));
+  showPopout();   // Chrome opens it only right after a click; if the share dialog took too long, Start opens it
   render();
 };
 $('saveFrame').onclick = () => S.cap && S.cap.saveLastFrame();
+$('popout').onclick = showPopout;
 
 function note(text) { if (S.cap) S.cap.note(text); else $('capLog').textContent = text + '\n' + $('capLog').textContent; renderCapture(); }
-function snapNote(text) { S.lastNote = text; updatePopout(); $('snapLog').textContent = `${new Date().toLocaleTimeString()}  ${text}\n` + $('snapLog').textContent; }
+function snapNote(text) { S.lastNote = text; $('lastNote').textContent = text; $('snapLog').textContent = `${new Date().toLocaleTimeString()}  ${text}\n` + $('snapLog').textContent; updatePopout(); }
 
 // ------------------------------------------------------------------ the loop
 
@@ -73,61 +99,92 @@ async function onTick() {
   if (!S.cap || !S.cap.live || S.busy) return;
   S.busy = true;
   try {
+    const every = +$('every').value * 1000, live = C().live;
     if (S.collect) await pageTick(now);
-    else if (liveActive() && now - (S.live.rows.at(-1)?.t || 0) >= +$('every').value * 1000 && now - (S.live.lastTry || 0) >= +$('every').value * 1000) await liveRead(now);
+    else if (liveActive() && now - (live.rows.at(-1)?.t || 0) >= every && now - (live.lastTry || 0) >= every) await liveRead(now);
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
   } finally { S.busy = false; }
 }
 
 async function liveRead(now) {
-  S.live.lastTry = now;
+  const live = C().live;
+  live.lastTry = now;
   const frame = await S.cap.grab();
   if (!frame) return;
-  const prior = S.live.rows.at(-1)?.level ?? S.start?.level ?? null;
-  const st = await readStatus(frame, S.ctx, prior);
+  const st = await readStatus(frame, S.ctx, live.rows.at(-1)?.level ?? C().start?.level ?? null);
   if (st.checked) {
-    S.live.rows.push({ t: now, level: st.level, exp: st.exp, pct: st.pct });
-    $('liveNote').textContent = '';
+    live.rows.push({ t: now, level: st.level, exp: st.exp, pct: st.pct });
+    live.why = '';
   } else {
-    S.live.fails = (S.live.fails || 0) + 1;
-    $('liveNote').innerHTML = `<span class="bad">Last read didn't fit the EXP table</span> (read "${(st.texts || []).join(' | ')}", level ${st.level ?? '?'}${st.why ? ', ' + st.why : ''})`;
+    live.fails = (live.fails || 0) + 1;
+    live.why = `Last read didn't fit the EXP table (read "${(st.texts || []).join(' | ')}", level ${st.level ?? '?'}${st.why ? ', ' + st.why : ''})`;
   }
-  store.set('live', S.live);
-  renderLive();
+  store.set('live', live);
+  renderTop();
+  if (S.view === C()) renderGraph();
 }
 
-// One session, like the control window: Start (scan) -> live EXP while it runs -> End (scan).
-const running = () => !!(S.start && !S.end);
-const liveActive = () => running() && !S.collect && !isPaused(S.pauses);
+const running = () => !!(C().start && !C().end);
+const liveActive = () => running() && !S.collect && !isPaused(C().pauses);
 
 function togglePause() {
-  if (!running()) return;
-  const now = Date.now();
-  if (isPaused(S.pauses)) { S.pauses.at(-1)[1] = now; S.live.lastTry = 0; snapNote('Resumed.'); }
-  else { S.pauses.push([now, null]); snapNote("Paused: this time won't count towards the per-hour rates."); }
-  store.set('pauses', S.pauses);
+  if (!running() || S.collect) return;
+  const now = Date.now(), p = C().pauses;
+  if (isPaused(p)) { p.at(-1)[1] = now; C().live.lastTry = 0; snapNote('Resumed.'); }
+  else { p.push([now, null]); snapNote("Paused: this time won't count towards the per-hour rates."); }
+  store.set('pauses', p);
   render();
 }
 $('pauseSnap').onclick = togglePause;
 
-// ------------------------------------------------------------------ snapshots
+// ------------------------------------------------------------------ start / end
+
+function startSession() {
+  if (running() || S.collect || !S.cap?.live) return;
+  if (!popoutOpen()) showPopout();
+  resetCur();
+  $('snapLog').textContent = '';
+  beginCollect('start');
+}
+function endSession() {
+  if (!running() || S.collect) return;
+  if (!popoutOpen()) showPopout();
+  S.view = S.cur;
+  beginCollect('end');
+}
+$('startSnap').onclick = startSession;
+$('endSnap').onclick = endSession;
+$('finishSnap').onclick = () => finishCollect();
+
+function discard(ask = confirm) {
+  if (!running() && !S.collect) return;
+  if (!ask('Discard this session? Its start snapshot and live readings are deleted.')) return;
+  S.collect = null;
+  resetCur();
+  snapNote('Session discarded.');
+  recompute(S.cur);
+}
+$('discardSnap').onclick = () => discard();
 
 async function beginCollect(kind) {
-  const t = Date.now();
+  const t = Date.now(), cur = C();
+  S.collect = { kind, t, status: {}, pages: {}, mesos: [], pictures: [], mesoPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0, reading: true };
+  render();
   const frame = await S.cap.grab();
-  const st = frame ? await readStatus(frame, S.ctx, S.start?.level ?? S.live.rows.at(-1)?.level ?? null) : {};
+  const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
+  S.collect.status = st; S.collect.reading = false;
   snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
-  if (kind === 'end' && isPaused(S.pauses)) { S.pauses.at(-1)[1] = t; store.set('pauses', S.pauses); }   // End ends the pause
+  if (kind === 'end' && isPaused(cur.pauses)) { cur.pauses.at(-1)[1] = t; store.set('pauses', cur.pauses); }   // End ends the pause
   if (st.checked) {
-    if (kind === 'start') S.live.rows = [];
-    S.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
+    if (kind === 'start') cur.live.rows = [];
+    cur.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
   }
-  S.collect = { kind, t, status: st, pages: {}, mesos: [], pictures: [], mesoPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0 };
   render();
 }
 
 async function pageTick(now) {
   const c = S.collect;
+  if (c.reading) return;
   const frame = await S.cap.grab();
   if (!frame) return;
   const inv = locateInventory(frame, S.title, S.ctx);
@@ -141,6 +198,7 @@ async function pageTick(now) {
   }
   const button = detectTab(frame, inv.grid);
   const page = await readPage(frame, inv.grid, S.digits, S.itemdb, S.cache, `${c.kind}`);
+  if (S.collect !== c) return;                           // discarded meanwhile
   const tab = pageTab(page, S.itemdb, button);
   if (!tab) { snapNote('page skipped: could not tell which tab is open'); return; }
   if (SKIP_TABS.includes(tab)) { snapNote(`${tab} page skipped (not counted)`); return; }
@@ -165,40 +223,63 @@ function maybeFinish(now) {
   if (COUNTED_TABS.every((t) => c.seen.has(t)) && c.lastNew && now - c.lastNew > 4000) finishCollect();
 }
 
-function finishCollect() {
-  const c = S.collect;
-  if (!c) return;
+async function finishCollect() {
+  const c = S.collect, cur = C();
+  if (!c || c.reading) return;
   const time = c.kind === 'start' ? (c.lastNew || c.t) : c.t;   // start: when the last page was taken; end: when End was pressed
   const used = new Set(Object.values(c.pages).flat(Infinity).map((sl) => sl && sl.look).filter(Boolean));
   const looks = Object.fromEntries(S.cache.looks.filter((l) => used.has(l.key)).map((l) => [l.key, { id: l.id, name: l.name, match: l.match, crop: l.crop, sig: Array.from(l.sig, Math.round) }]));
   const snap = buildSnapshot(time, c.status, c.pages, c.mesos, { pictures: c.pictures, meso_picture: c.mesoPic, looks });
   S.collect = null;
   if (c.kind === 'start') {
-    S.start = snap; S.end = null; save('start', snap); save('end', null);
-    S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } }; store.set('fixes', S.fixes);
-    S.pauses = []; store.set('pauses', S.pauses); store.set('live', S.live);
+    cur.start = snap; cur.id = snap.time; store.set('start', snap);
+    cur.pauses = []; store.set('pauses', cur.pauses); store.set('live', cur.live);
     snapNote(`Start saved: mesos ${fmt(snap.mesos)}, ${Object.keys(snap.items).length} kinds of items in ${Object.keys(snap.tabs).join(', ') || 'no tabs'}. Go grind; press End when done.`);
+    recompute(cur);
   } else {
-    S.end = snap; save('end', snap);
-    store.set('live', S.live);
-    snapNote('End read. Results and review below.');
+    cur.end = snap; store.set('end', snap); store.set('live', cur.live);
+    recompute(cur);
+    await archive();
+    snapNote(`Session saved as "${cur.name}". Results and review below.`);
+    render();
   }
-  recompute();
 }
 
-/** Keep a snapshot across reloads; if it's too big for browser storage, keep it without page pictures. */
-function save(k, snap) {
-  try { localStorage.setItem('grindcap.' + k, JSON.stringify(snap)); }
-  catch { store.set(k, snap && { ...snap, pictures: [] }); }
+const record = (v) => ({ id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, saved: v.saved || Date.now() });
+const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
+
+/** Put the ended current session in the saved list. */
+async function archive() {
+  const cur = C();
+  if (!cur.end || !cur.start) return;
+  if (!cur.name) { cur.name = defaultName(cur); store.set('name', cur.name); }
+  await store.putSession(record(cur)).catch((e) => snapNote(`Could not save the session: ${e.message}`));
+  renderStorage();
+}
+function defaultName(r) {
+  const d = new Date(r.start.time);
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · ${Math.round(r.result?.minutes ?? 0)} min`;
 }
 
 const nameOf = (id) => S.itemdb.name(id);
 const priceOf = (id) => S.itemdb.items[id]?.price ?? null;
 
+/** Apply a session's fixes, compare, save, redraw. Called after every edit on the review panel. */
+function recompute(v = S.view) {
+  const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
+  v.result = a && b ? compare(a, b, priceOf, v.pauses) : null;
+  if (v === S.cur) store.set('fixes', v.fixes);
+  if (isSaved(v)) store.putSession(record(v)).then(renderNav);
+  S.ver++;
+  render();
+}
+
+// ------------------------------------------------------------------ corrections
+
 /** You named a look on the review panel: remember it for every later scan (this browser), and keep
  * it in the corrections list you can export. id 'ignore' = not an item / don't count. */
 function learn(key, id, how) {
-  const l = { ...(S.start?.looks || {}), ...(S.end?.looks || {}) }[key];
+  const v = S.view, l = { ...(v.start?.looks || {}), ...(v.end?.looks || {}) }[key];
   if (!l || !l.sig) return;
   const name = id === 'ignore' ? "(don't count)" : nameOf(id);
   S.corrections = S.corrections.filter((c) => c.key !== key);
@@ -207,35 +288,69 @@ function learn(key, id, how) {
   const mine = S.cache.looks.find((x) => x.correctionOf === key);
   if (mine) Object.assign(mine, { id, name });
   else S.cache.add(Float32Array.from(l.sig), id, name, [], { corrected: true }, l.crop).correctionOf = key;
-  renderCorrections();
+  renderStorage();
 }
-
-function renderCorrections() {
-  $('corrCount').textContent = S.corrections.length ? `${S.corrections.length} icon${S.corrections.length > 1 ? 's' : ''} you named (kept in this browser)` : '';
-  $('corrDownload').disabled = !S.corrections.length;
-  $('corrClear').disabled = !S.corrections.length;
-}
-$('corrDownload').onclick = () => {
-  const out = { kind: 'grindcap-corrections', version: 1, made: new Date().toISOString(), signature: '24x24 RGB, stack-number corner blacked out, row-major', corrections: S.corrections };
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: 'application/json' }));
-  a.download = `grindcap-corrections-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-};
+$('corrDownload').onclick = () => download(`grindcap-corrections-${new Date().toISOString().slice(0, 10)}.json`,
+  { kind: 'grindcap-corrections', version: 1, made: new Date().toISOString(), signature: '24x24 RGB, stack-number corner blacked out, row-major', corrections: S.corrections });
 $('corrClear').onclick = () => {
   if (!confirm('Forget every icon you named? Later scans go back to the item data alone.')) return;
   S.corrections = []; store.set('corrections', []);
   S.cache.looks = S.cache.looks.filter((l) => !(l.match && l.match.corrected));
-  renderCorrections();
+  renderStorage();
 };
 
-/** Apply your fixes, compare, redraw. Called after every edit on the review panel. */
-function recompute() {
-  store.set('fixes', S.fixes);
-  S.reviewVersion = (S.reviewVersion || 0) + 1;
-  const a = withFixes(S.start, 'start', S.fixes, nameOf), b = withFixes(S.end, 'end', S.fixes, nameOf);
-  S.result = a && b ? compare(a, b, priceOf, S.pauses) : null;
+function download(name, obj) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(obj)], { type: 'application/json' }));
+  a.download = name; a.click();
+}
+
+// ------------------------------------------------------------------ saved sessions
+
+async function showSession(id) {
+  if (id === 'cur' || +id === C().id) S.view = S.cur;
+  else {
+    const r = await store.getSession(+id);
+    if (!r) return;
+    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || [];
+    S.view = r;
+  }
+  S.ver++;
   render();
 }
+/** Newest first: the running session (if any), then the saved ones. */
+function navIds() {
+  const ids = store.listSessions().map((x) => String(x.id));
+  if ((C().start && !C().end) || (!C().start && S.collect)) ids.unshift('cur');
+  return ids;
+}
+const viewKey = () => (S.view === S.cur && !isSaved(S.cur) ? 'cur' : String(S.view.id));
+$('sessSel').onchange = (e) => showSession(e.target.value);
+$('prevSess').onclick = () => { const ids = navIds(), i = ids.indexOf(viewKey()); if (i >= 0 && i < ids.length - 1) showSession(ids[i + 1]); };
+$('nextSess').onclick = () => { const ids = navIds(), i = ids.indexOf(viewKey()); if (i > 0) showSession(ids[i - 1]); };
+$('sessName').onchange = (e) => {
+  const v = S.view;
+  if (!v.end) return;
+  v.name = e.target.value.trim() || defaultName(v);
+  if (v === S.cur) store.set('name', v.name);
+  recompute(v);
+};
+$('deleteSess').onclick = async () => {
+  const v = S.view;
+  if (!v.end || !confirm(`Delete "${v.name}"? This can't be undone.`)) return;
+  await store.deleteSession(v.id);
+  if (v === S.cur) resetCur();
+  const next = navIds()[0];
+  if (next) await showSession(next); else { S.view = S.cur; S.ver++; render(); }
+  renderStorage();
+};
+$('download').onclick = () => {
+  const v = S.view;
+  download(`grindcap-session-${new Date(v.start?.time || Date.now()).toISOString().slice(0, 16).replace(':', '')}.json`,
+    { name: v.name, start: v.start, end: v.end, fixes: v.fixes, pauses: v.pauses, result: v.result, live: v.live.rows });
+};
+
+// ------------------------------------------------------------------ pictures
 
 function picture(frame, x, y, w, h, type = 'image/jpeg') {
   const m = cropMat(frame, x, y, w, h);
@@ -252,64 +367,43 @@ function pagePicture(frame, grid) {
   return picture(frame, x0 - 0.4 * px, y0 - 1.0 * py, x1 + w - x0 + 1.4 * px, y1 + h - y0 + 2.4 * py);
 }
 
-function startSession(ask = confirm) {
-  if (running() || S.collect) return;
-  if (S.end && !ask('Start a new session? The last result is cleared from this page (Download session JSON keeps it).')) return;
-  S.end = null; S.result = null; beginCollect('start');
-}
-$('startSnap').onclick = () => startSession();
-$('popout').onclick = () => openPopout({
-  state: () => S, start: startSession, end: () => beginCollect('end'), finish: finishCollect, pause: togglePause, discard,
-  running, lastNote: () => S.lastNote,
-}).catch((e) => note(`pop-out failed: ${e.message}`));
-$('endSnap').onclick = () => beginCollect('end');
-$('finishSnap').onclick = () => finishCollect();
-function discard(ask = confirm) {
-  if (!ask(running() ? 'Discard this session? The start snapshot and live readings are deleted.' : 'Clear the finished session from this page?')) return;
-  Object.assign(S, { start: null, end: null, result: null, collect: null, pauses: [] });
-  S.live = { rows: [], fails: 0 };
-  store.set('pauses', []);
-  S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } };
-  store.set('start', null); store.set('end', null); store.set('live', S.live); store.set('fixes', S.fixes);
-  $('snapLog').textContent = '';
-  render();
-}
-$('discardSnap').onclick = () => discard();
-$('download').onclick = () => {
-  const blob = new Blob([JSON.stringify({ start: S.start, end: S.end, fixes: S.fixes, result: S.result, live: S.live.rows }, null, 1)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `grindcap-session-${new Date().toISOString().slice(0, 16).replace(':', '')}.json`; a.click();
-};
-
 // ------------------------------------------------------------------ rendering
 
 function render() {
   const sharing = !!(S.cap && S.cap.live);
   $('share').disabled = sharing;
+  $('share').textContent = sharing ? 'Sharing the game window' : 'Share MapleStory window';
   $('saveFrame').disabled = !sharing;
-  const run = running(), paused = isPaused(S.pauses);
+  const run = running(), paused = isPaused(C().pauses);
   $('startSnap').disabled = !sharing || !!S.collect || run;
   $('endSnap').disabled = !sharing || !!S.collect || !run;
   $('pauseSnap').disabled = !run || !!S.collect;
   $('pauseSnap').textContent = paused ? 'Resume' : 'Pause';
-  $('discardSnap').disabled = !S.start && !S.collect;
-  $('discardSnap').textContent = run || S.collect ? 'Discard' : 'Clear';
-  renderSession();
-  $('finishSnap').disabled = !S.collect;
-  $('download').disabled = !S.start;
-  const c = S.collect;
-  $('tabs').innerHTML = c ? `<b>${c.kind === 'start' ? 'Start' : 'End'} pages:</b> ` + COUNTED_TABS.map((t) => `<span class="${c.seen.has(t) ? 'done' : ''}">${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
-    : (S.start && !S.end ? `<span class="mute">Start: mesos ${fmt(S.start.mesos)}, ${Object.keys(S.start.items).length} kinds of items.</span>` : '');
-  renderCapture(); renderLive(); renderResult();
-  renderReview($('review'), S, { nameOf, priceOf, recompute, learn });
-  renderCorrections();
+  $('discardSnap').disabled = !run && !S.collect;
+  $('finishSnap').hidden = !S.collect;
+  renderCapture(); renderSession(); renderTop(); renderNav(); renderView();
   updatePopout();
 }
 
 function renderSession() {
-  const run = running(), paused = isPaused(S.pauses);
-  $('sessionLine').innerHTML = S.collect ? '' : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} ${hms(activeMs(S.start.time, Date.now(), S.pauses))} <span class="mute">(started ${S.start.when}; live EXP read every ${$('every').value} s)</span>`
-    : S.end ? '<span class="mute">Session finished. Results and review below.</span>' : '<span class="mute">No session. Press Start.</span>';
+  const run = running(), paused = isPaused(C().pauses), c = S.collect;
+  $('popout').hidden = popoutOpen();
+  $('sessionLine').innerHTML = c
+    ? `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b> ` + COUNTED_TABS.map((t) => `<span class="chip ${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
+    : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} <b>${hms(activeMs(C().start.time, Date.now(), C().pauses))}</b>`
+    : '<span class="mute">No session running. Share the game window, then press Start.</span>';
+}
+
+function renderTop() {
+  const live = C().live, rows = live.rows, ser = liveSeries(rows, 5, C().pauses), last = rows.at(-1), s = ser.at(-1);
+  $('liveStats').innerHTML = running() || S.collect ? [
+    ['Level', last ? `${last.level} · ${last.pct}%` : '–'],
+    ['EXP/hr (5-min)', `<b>${fmt(s ? s.ema * 60 : null)}</b>`],
+    ['EXP/hr (session)', fmt(s ? s.cum * 60 : null)],
+    ['EXP gained', fmt(s?.gained)],
+    ['Readings', `${rows.length}${live.fails ? ` (${live.fails} failed)` : ''}`],
+  ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('') : '';
+  $('liveNote').textContent = running() ? live.why || '' : '';
 }
 
 function renderCapture() {
@@ -326,36 +420,54 @@ function renderCapture() {
   $('capLog').textContent = st.log.join('\n');
 }
 
-function renderLive() {
-  const rows = S.live.rows, ser = liveSeries(rows, 5, S.pauses), last = rows.at(-1), lastS = ser.at(-1);
-  $('liveStats').innerHTML = [
-    ['Level / EXP', last ? `${last.level} · ${fmt(last.exp)} [${last.pct}%]` : '–'],
-    ['EXP gained', fmt(lastS?.gained)],
-    ['EXP/min (5-min avg)', `<span class="big">${fmt(lastS?.ema)}</span>`],
-    ['EXP/min (session)', fmt(lastS?.cum)], ['EXP/hr (session)', fmt(lastS ? lastS.cum * 60 : null)],
-    ['Readings', `${rows.length}${S.live.fails ? ` (${S.live.fails} failed)` : ''}`],
-  ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('');
-  $('liveTable').innerHTML = '<tr><th>Time</th><th>Level</th><th>EXP</th><th>%</th><th>EXP/min</th></tr>' + rows.slice(-8).reverse().map((r, i, arr) => {
-    const s = ser.find((x) => Math.abs(x.min - (r.t - rows[0].t) / 60000) < 1e-9);
-    return `<tr><td>${new Date(r.t).toLocaleTimeString()}</td><td>${r.level}</td><td>${fmt(r.exp)}</td><td>${r.pct}</td><td>${fmt(s?.rate)}</td></tr>`;
-  }).join('');
-  drawGraph($('graph'), ser);
+function renderNav() {
+  const list = store.listSessions(), key = viewKey(), ids = navIds();
+  const opts = [];
+  if (ids[0] === 'cur') opts.push(['cur', `Current session (${S.collect ? 'scanning' : 'running'})`]);
+  for (const x of list) opts.push([String(x.id), `${x.name || new Date(x.id).toLocaleString()}  ·  ${fmt(x.result?.exp_per_hr)} EXP/hr  ·  ${fmt(x.result?.net_per_hr)} net/hr`]);
+  if (!opts.length) opts.push(['cur', 'No sessions yet']);
+  $('sessSel').innerHTML = opts.map(([v, t]) => `<option value="${v}" ${v === key ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  const i = ids.indexOf(key);
+  $('prevSess').disabled = i < 0 || i >= ids.length - 1;   // older
+  $('nextSess').disabled = i <= 0;                          // newer
+  const v = S.view;
+  $('sessName').disabled = !v.end; $('deleteSess').disabled = !v.end; $('download').disabled = !v.start;
+  if (document.activeElement !== $('sessName')) $('sessName').value = v.end ? v.name || '' : '';
+  $('sessCount').textContent = `${list.length} saved`;
 }
 
-function renderResult() {
-  const r = S.result;
-  if (!r) { $('result').innerHTML = ''; return; }
-  const k = [
-    ['Minutes', fmt(r.minutes, 1) + (r.paused_minutes > 0.05 ? ` <span class="mute">(+${fmt(r.paused_minutes, 1)} paused)</span>` : '')], ['EXP gained', fmt(r.exp)], ['EXP/hr', fmt(r.exp_per_hr)],
-    ['Mesos change', fmt(r.mesos)], ['Mesos/hr', fmt(r.mesos_per_hr)],
-    ['Items gained (value)', fmt(r.items_gained_value)], ['Items used (value)', fmt(r.items_used_value)],
-    ['Net mesos/hr incl. items', `<span class="big">${fmt(r.net_per_hr)}</span>`],
-  ];
-  const rows = r.items.map((i) => `<tr><td>${i.name}</td><td>${fmt(i.before)}</td><td>${fmt(i.after)}</td><td>${i.change > 0 ? '+' : ''}${fmt(i.change)}</td><td>${fmt(i.per_hr)}</td><td>${fmt(i.price)}</td><td>${fmt(i.value)}</td></tr>`).join('');
-  $('result').innerHTML = `<div class="stats">${k.map(([a, b]) => `<div><span>${a}</span>${b}</div>`).join('')}</div>
-    <table><tr><th>Item</th><th>Before</th><th>After</th><th>Change</th><th>/hr</th><th>Price</th><th>Value</th></tr>${rows || '<tr><td colspan="7" class="mute">No item changes</td></tr>'}</table>
-    ${r.unpriced.length ? `<p class="mute">No price for: ${r.unpriced.join(', ')}</p>` : ''}
-    ${r.tabs_left_out.length ? `<p class="mute">Tabs only one snapshot read (not compared): ${r.tabs_left_out.join(', ')}</p>` : ''}`;
+function renderGraph() {
+  const v = S.view, ser = liveSeries(v.live?.rows || [], 5, v.pauses);
+  $('graphWrap').hidden = !ser.length;
+  if (ser.length) drawGraph($('graph'), ser, 60, 'EXP/hr');
+}
+
+function renderView() {
+  const v = S.view, r = v.result;
+  renderGraph();
+  if (r) {
+    const k = [
+      ['Net mesos/hr incl. items', `<span class="big">${fmt(r.net_per_hr)}</span>`], ['EXP/hr', `<span class="big">${fmt(r.exp_per_hr)}</span>`],
+      ['Revenue/hr (mesos + items gained)', fmt(r.revenue_per_hr)], ['Cost/hr (items used)', fmt(r.cost_per_hr)],
+      ['Minutes', fmt(r.minutes, 1) + (r.paused_minutes > 0.05 ? ` <span class="mute">(+${fmt(r.paused_minutes, 1)} paused)</span>` : '')],
+      ['EXP gained', fmt(r.exp)], ['Mesos change', fmt(r.mesos)],
+    ];
+    $('result').innerHTML = `<div class="stats">${k.map(([a, b]) => `<div><span>${a}</span>${b}</div>`).join('')}</div>
+      ${r.unpriced.length ? `<p class="mute small">No price for: ${esc(r.unpriced.join(', '))}</p>` : ''}
+      ${r.tabs_left_out.length ? `<p class="mute small">Tabs only one scan read (not compared): ${r.tabs_left_out.join(', ')}</p>` : ''}`;
+  } else {
+    $('result').innerHTML = v.start ? `<p class="mute">Start: level ${v.start.level ?? '?'}, mesos ${fmt(v.start.mesos)}, ${Object.keys(v.start.items).length} kinds of items. Results appear after End.</p>`
+      : '<p class="mute">Nothing here yet. Share the game window and press Start; finished sessions are kept and listed above.</p>';
+  }
+  renderReview($('review'), { ...v, itemdb: S.itemdb, reviewVersion: S.ver }, { nameOf, priceOf, recompute: () => recompute(v), learn });
+}
+
+async function renderStorage() {
+  const n = S.corrections.length;
+  $('corrCount').textContent = n ? `${n} icon${n > 1 ? 's' : ''} you named` : 'No icons named yet';
+  $('corrDownload').disabled = !n; $('corrClear').disabled = !n;
+  const e = await store.usage();
+  $('storage').textContent = e ? `Browser storage: ${(e.usage / 1e6).toFixed(1)} MB used of ${(e.quota / 1e9).toFixed(0)} GB allowed` : '';
 }
 
 init();
