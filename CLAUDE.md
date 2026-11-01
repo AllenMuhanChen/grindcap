@@ -115,8 +115,10 @@ quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quick
              only; scripts/build_quickslot_template.py) in the bottom third, scaled by frame height. 2x4 slots
              (KEYS Shift..PgDn), counts via StackDigits (same font; a lone "0" only if cost < 0.2: "ATTACK"
              on Ctrl reads as 0 at 0.39). Verified on all 5 fixtures. Item: config quickslot.slots
-             {key: name}, else itemdb.identify with key-label rows + digits ignored (NOT verified on real
-             icons: no network to maplestory.io in the dev container), cached per key by 8x8 signature.
+             {key: name}, else itemdb.rescore (key-label rows + digits ignored) among use_candidates = the
+             catalog's Use items (else all Use icons); a different name within 1.1x = unknown. The general
+             identify() read Orange Potions as Brick and Lemons wrong on the real game (2026-11-01). Cached
+             per key by 8x8 signature.
              POTIONS = NPC shop price + hp/mp (from memory: Red 50, Orange 160, White 320, Blue 200, Mana
              Elixir 620; config quickslot.prices overrides). Read at Start (first live.jsonl row, time = the
              start snapshot's) and with each live reading (row["potions"]). potion_series: drops between

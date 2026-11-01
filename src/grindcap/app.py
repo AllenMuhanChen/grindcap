@@ -197,13 +197,15 @@ class SnapFlow:
         """What's on the quick slots ([{"key", "count", "name"}]); None if the panel wasn't found or
         reading failed (a missed reading is skipped, it doesn't count as zero)."""
         from .digits import StackDigits
-        from .quickslot import read_quickslot
+        from .quickslot import read_quickslot, use_candidates
 
         try:
             if self._digits is None:
                 self._digits = StackDigits(Path(self.cfg["inventory"]["catalog_dir"]) / "digits.npz")
             q = self.cfg.data.get("quickslot") or {}
-            out = read_quickslot(frame, self._digits, self._itemdb(), q.get("slots"), self._qs_cache)
+            db = self._itemdb()
+            cands = use_candidates(self._catalog(), db) if db is not None else None
+            out = read_quickslot(frame, self._digits, db, q.get("slots"), self._qs_cache, cands)
             return out or None
         except Exception:
             import traceback

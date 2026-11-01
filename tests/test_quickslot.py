@@ -68,3 +68,33 @@ def test_describe_says_what_the_scan_found():
     assert Q.describe([{"key": "Del", "count": 155, "name": "Orange Potion"},
                        {"key": "PgUp", "count": 12, "name": None}], t) == \
         "Potions: Del Orange Potion 155 · PgUp unknown item 12 (not counted)"
+
+
+def test_quick_slot_items_are_matched_among_your_use_items_only():
+    import numpy as np
+
+    class DB:          # Brick fits the icon best, but it isn't a Use item you have
+        max_score = 9000.0
+        items = {4000000: {"name": "Brick", "category": "Etc"},
+                 2000001: {"name": "Orange Potion", "category": "Use"},
+                 2000000: {"name": "Red Potion", "category": "Use"},
+                 2010000: {"name": "Lemon", "category": "Use"}}
+        scores = {4000000: 100.0, 2000001: 300.0, 2000000: 900.0, 2010000: 2000.0}
+
+        def rescore(self, patch, ignore, ids):
+            return sorted((self.scores[i], i) for i in ids)
+
+        def rank(self, patch, k=120):
+            return sorted((s, i) for i, s in self.scores.items())
+
+    class Cat:
+        items = {"item-001": {"db": {"id": 2000001}}, "item-002": {"db": {"id": 2000000}},
+                 "item-003": {"db": {"id": 4000000}}, "item-004": {}}
+
+    db, patch, ignore = DB(), np.zeros((40, 40, 3), np.uint8), np.zeros((40, 40), bool)
+    cands = Q.use_candidates(Cat(), db)
+    assert cands == [2000001, 2000000]
+    assert Q._identify(patch, ignore, db, "Del", {}, cands) == "Orange Potion"
+    assert Q._identify(patch, ignore, db, "Del", {}) == "Orange Potion"     # no catalog: all Use items
+    db.scores[2000000] = 310.0                                            # Red fits about as well: unsure
+    assert Q._identify(patch, ignore, db, "End", {}, cands) is None

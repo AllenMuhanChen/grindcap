@@ -71,10 +71,12 @@ def slot_boxes(frame) -> list[list[int]] | None:
     return [[round(x + dx), round(y + dy), round(SLOT * s), round(SLOT * s)] for dx, dy in slot_offsets(s)]
 
 
-def read_quickslot(frame, digits, itemdb=None, names: dict | None = None, cache: dict | None = None) -> list[dict]:
+def read_quickslot(frame, digits, itemdb=None, names: dict | None = None, cache: dict | None = None,
+                   candidates: list[int] | None = None) -> list[dict]:
     """Every slot with a number: {"key", "count", "name"} (name None if it couldn't be told).
     `names` = quickslot.slots from config (key -> item name). `cache` remembers identified icons
-    (key -> (icon signature, name)) so an item is looked up once, not every minute."""
+    (key -> (icon signature, name)) so an item is looked up once, not every minute. `candidates` =
+    item database ids the slot can be (the Use items in your catalog, see use_candidates)."""
     from .digits import slot_patch
 
     boxes = slot_boxes(frame)
@@ -98,21 +100,43 @@ def read_quickslot(frame, digits, itemdb=None, names: dict | None = None, cache:
             if patch is not None:
                 ignore = digits.digit_mask(r, patch.shape[:2], -4 - ox, -4 - oy)
                 ignore[:4 + LABEL_H] = True       # the key label is drawn over the icon's top
-                name = _identify(patch, ignore, itemdb, key, cache)
+                name = _identify(patch, ignore, itemdb, key, cache, candidates)
         out.append({"key": key, "count": n, "name": name})
     return out
 
 
-def _identify(patch, ignore, itemdb, key, cache) -> str | None:
+def use_candidates(catalog, itemdb) -> list[int]:
+    """Database ids of the Use items in your catalog: what you've ever had in the Use tab. Only things
+    you own can be on a quick slot with a count, so a quick slot is matched against these only."""
+    ids = []
+    for it in catalog.items.values():
+        db = (it.get("db") or {}).get("id")
+        if db is not None and (itemdb.items.get(int(db)) or {}).get("category") == "Use" and int(db) not in ids:
+            ids.append(int(db))
+    return ids
+
+
+def _identify(patch, ignore, itemdb, key, cache, candidates=None) -> str | None:
+    """Closest icon among `candidates` (else among all Use items) with the key label and the number
+    left out. The key label covers the icon's top, so the general match (every Etc/Use/Setup icon)
+    mixes potions up with look-alikes from other tabs (an Orange Potion read as a brick)."""
     import cv2
 
     sig = cv2.resize(patch, (8, 8), interpolation=cv2.INTER_AREA).astype(np.float32)
     hit = cache.get(key)
     if hit and np.abs(hit[0] - sig).mean() < 12:     # same icon as last time: same item
         return hit[1]
-    m = itemdb.identify(patch, ignore)
-    cache[key] = (sig, m.name if m else None)
-    return cache[key][1]
+    ids = candidates or [i for _, i in itemdb.rank(patch, None) if itemdb.items[i].get("category") == "Use"][:20]
+    ranked = itemdb.rescore(patch, ignore, ids)
+    name = None
+    if ranked and ranked[0][0] <= itemdb.max_score:
+        s0, best = ranked[0]
+        name = itemdb.items[best]["name"]
+        other = next((s for s, i in ranked[1:] if itemdb.items[i]["name"] != name), None)
+        if other is not None and s0 > 0 and other / s0 < 1.1:     # two different items fit about equally
+            name = None
+    cache[key] = (sig, name)
+    return name
 
 
 def describe(potions: list[dict] | None, price_table: dict) -> str:
