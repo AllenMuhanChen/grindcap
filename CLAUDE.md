@@ -204,6 +204,11 @@ web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/E
                       "corrections" ({sig 24x24, id|'ignore', name, how, crop}), seeded into LookCache on load (a corrected
                       look wins only within threshold/2, else the normal re-check), "Download my corrections" exports them.
 scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -> web/local/ (gitignored).
+scripts/export_web_backup.py  grindcap-gui sessions (sessions.list_sessions + load_snapshot, fixes applied, ids no longer in
+                      the catalog dropped like compare) -> a grindcap-backup file for Restore: items keyed by catalog db id
+                      (else "gui:item-NNN" with the catalog price in kv "prices"), sessions.json name/map, pauses, checked
+                      live rows, potion rows + quickslot.json, page PNGs cropped to the slots as JPEG, --character/--job.
+                      Restore computes the missing result with the web compare (matched Python on a synthetic session).
 scripts/serve_web.py  localhost:8765 with explicit JS MIME types (Windows registry can make .js text/plain).
 ```
 

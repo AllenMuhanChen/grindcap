@@ -10,3 +10,4 @@ captures/
 /snapshots/
 /web/local/
 node_modules/
+grindcap-backup-from-gui.json

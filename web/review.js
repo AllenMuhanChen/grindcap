@@ -69,7 +69,7 @@ export function renderReview(el, S, h) {
   const ids = new Set([...Object.keys(eff.start.items), ...Object.keys(eff.end ? eff.end.items : {})]);
   const rows = [...ids].map((id) => {
     const a = eff.start.items[id]?.qty || 0, b = eff.end ? eff.end.items[id]?.qty || 0 : null;
-    const price = isNaN(+id) ? null : h.priceOf(+id);
+    const price = h.priceOf(isNaN(+id) ? id : +id);
     return { id, name: (eff.end?.items[id] || eff.start.items[id]).name || id, a, b, change: b == null ? null : b - a, price, value: b == null || price == null ? null : (b - a) * price };
   }).filter((r) => showAll || !S.end || r.change !== 0)
     .sort((x, y) => Math.abs(y.value || 0) - Math.abs(x.value || 0) || Math.abs(y.change || 0) - Math.abs(x.change || 0) || x.name.localeCompare(y.name));
@@ -82,6 +82,7 @@ export function renderReview(el, S, h) {
     const fixedName = slots.some((s) => s.fixedName), fixedQty = slots.some((s) => s.fixedQty);
     const m = lk.find((l) => l.match && l.match.ratio)?.match;
     const how = fixedName ? '<span class="tag">you named it</span>'
+      : slots.some((s) => s.how === 'from grindcap-gui') ? '<span class="tag" title="named in grindcap-gui (the Python app)">from grindcap-gui</span>'
       : isNaN(+r.id) ? '<span class="tag bad">not recognised</span>'
       : m ? `<span class="tag" title="score ${m.score}; next: ${esc(m.runnerUp)}">${m.ratio}× better than ${esc(m.runnerUp)}</span>` : '<span class="tag">re-checked look</span>';
     html += `<tr class="itemrow" data-id="${esc(r.id)}"><td>${pic ? `<img class="slot" src="${pic}" alt="">` : ''}</td>

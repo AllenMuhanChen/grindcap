@@ -401,7 +401,7 @@ function defaultName(r) {
 }
 
 const nameOf = (id) => S.itemdb.name(id);
-const priceOf = (id) => S.itemdb.items[id]?.price ?? null;
+const priceOf = (id) => S.itemdb.items[id]?.price ?? store.get('prices')?.[id] ?? null;   // kv prices: items from grindcap-gui with your own price
 
 /** Apply a session's fixes, compare, save, redraw. Called after every edit on the review panel. */
 function recompute(v = S.view) {
@@ -486,7 +486,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
+const BACKUP_KEYS = ['prices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -507,7 +507,16 @@ $('restoreFile').onchange = async (e) => {
   const kv = b.kv || {}, runHere = !!(C().start && !C().end) || !!S.collect, runThere = !!(kv.start && !kv.end);
   if (!confirm(`Restore from ${f.name}?\n\n${add.length} new session(s) added, ${newer.length} replaced by a newer copy, ${b.sessions.length - add.length - newer.length} already here.\n`
     + `Named icons and characters are merged.${runThere ? (runHere ? '\nThe backup has a running session, but one is running here: it is left out.' : '\nThe running session in the backup becomes the running session here.') : ''}`)) return;
-  for (const r of [...add, ...newer]) await store.putSession(r);
+  for (const r of [...add, ...newer]) {
+    r.fixes = r.fixes || noFixes(); r.pauses = r.pauses || [];
+    if (!r.result && r.start && r.end) {               // sessions from grindcap-gui come without a result
+      const a = withFixes(r.start, 'start', r.fixes, nameOf), z = withFixes(r.end, 'end', r.fixes, nameOf);
+      r.result = compare(a, z, (id) => S.itemdb.items[id]?.price ?? kv.prices?.[id] ?? store.get('prices')?.[id] ?? null, r.pauses);
+    }
+    if (!r.meta && r.start) r.meta = meta(r);
+    await store.putSession(r);
+  }
+  if (kv.prices) store.set('prices', { ...kv.prices, ...(store.get('prices') || {}) });
   // named icons: the backup's are added (a look named here wins)
   const keys = new Set(S.corrections.map((c) => c.key));
   for (const c of kv.corrections || []) if (!keys.has(c.key)) { S.corrections.push(c); S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop); }
