@@ -35,7 +35,7 @@ POTIONS = {
     "White Potion": ("hp", 320),
     "Blue Potion": ("mp", 200),
     "Mana Elixir": ("mp", 620),
-    "Lemon": ("hp", 150),          # not sold by NPCs; what Allen pays (2026-11-01)
+    "Lemon": ("mp", 150),          # restores MP; not sold by NPCs, 150 = what Allen pays (2026-11-01)
 }
 
 

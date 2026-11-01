@@ -122,7 +122,7 @@ quickslot.py Quick slot potions. find_panel: masked grey TM_SQDIFF of data/quick
              catalog's Use items (else all Use icons); a different name within 1.1x = unknown. The general
              identify() read Orange Potions as Brick and Lemons wrong on the real game (2026-11-01). Cached
              per key by 8x8 signature.
-             POTIONS = NPC shop price + hp/mp (from memory: Red 50, Orange 160, White 320, Blue 200, Lemon 150 (Allen), Mana
+             POTIONS = NPC shop price + hp/mp (from memory: Red 50, Orange 160, White 320, Blue 200, Lemon 150 MP (Allen), Mana
              Elixir 620; config quickslot.prices overrides). Read at Start (first live.jsonl row, time = the
              start snapshot's) and with each live reading (row["potions"]). potion_series: drops between
              readings = used, rises ignored, a reading outside its agreeing neighbours dropped; rates per
