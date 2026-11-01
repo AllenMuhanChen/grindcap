@@ -53,9 +53,17 @@ export function withFixes(snap, kind, fixes, nameOf) {
   return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos') };
 }
 
-/** Before vs after. prices: item id -> mesos each (or null). */
-export function compare(start, end, priceOf) {
-  const hours = (end.time - start.time) / 3.6e6;
+/** Milliseconds between a and b that weren't paused. pauses: [[t0, t1|null], ...] (null = still paused). */
+export function activeMs(a, b, pauses = []) {
+  let ms = b - a;
+  for (const [p0, p1] of pauses || []) ms -= Math.max(0, Math.min(b, p1 ?? b) - Math.max(a, p0));
+  return Math.max(0, ms);
+}
+export const isPaused = (pauses) => !!(pauses && pauses.length && pauses.at(-1)[1] == null);
+
+/** Before vs after. prices: item id -> mesos each (or null). Paused time is left out of every rate. */
+export function compare(start, end, priceOf, pauses = []) {
+  const hours = activeMs(start.time, end.time, pauses) / 3.6e6;
   const perHr = (v) => (hours > 0 && v != null ? Math.round(v / hours) : null);
   const tabsS = new Set(Object.keys(start.tabs || {})), tabsE = new Set(Object.keys(end.tabs || {}));
   const both = [...tabsS].filter((t) => tabsE.has(t));
@@ -78,7 +86,7 @@ export function compare(start, end, priceOf) {
   const used = rows.filter((r) => r.value && r.change < 0).reduce((a, r) => a - r.value, 0);
   const net = (mesos || 0) + gained - used;
   return {
-    minutes: +(hours * 60).toFixed(1), exp, exp_per_hr: perHr(exp), levels: (end.level || 0) - (start.level || 0),
+    minutes: +(hours * 60).toFixed(1), paused_minutes: +((end.time - start.time) / 6e4 - hours * 60).toFixed(1), exp, exp_per_hr: perHr(exp), levels: (end.level || 0) - (start.level || 0),
     mesos, mesos_per_hr: perHr(mesos), items_gained_value: gained, items_used_value: used,
     net_mesos_incl_items: net, net_per_hr: perHr(net), items: rows,
     unpriced: rows.filter((r) => r.price == null).map((r) => r.name),
@@ -88,20 +96,20 @@ export function compare(start, end, priceOf) {
 }
 
 /** Live readings [{t (ms), level, exp}] -> per-reading EXP/min, a 5-minute EMA and the session average. */
-export function liveSeries(rows, tauMin = 5) {
+export function liveSeries(rows, tauMin = 5, pauses = []) {
   const out = [];
   if (rows.length < 2) return out;
-  const t0 = rows[0].t;
+  const t0 = rows[0].t, act = (t) => activeMs(t0, t, pauses) / 60000;   // x = active minutes
   let ema = null, total = 0;
   for (let i = 1; i < rows.length; i++) {
-    const a = rows[i - 1], b = rows[i], dt = (b.t - a.t) / 60000;
+    const a = rows[i - 1], b = rows[i], dt = act(b.t) - act(a.t);
     const g = expBetween(a.level, a.exp, b.level, b.exp);
     if (g == null || dt <= 0) continue;
     total += g;
     const rate = g / dt;
     const k = 1 - Math.exp(-dt / tauMin);
     ema = ema == null ? rate : ema + k * (rate - ema);
-    out.push({ min: (b.t - t0) / 60000, rate, ema, cum: total / ((b.t - t0) / 60000), gained: total });
+    out.push({ min: act(b.t), rate, ema, cum: total / act(b.t), gained: total });
   }
   return out;
 }

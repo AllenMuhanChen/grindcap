@@ -160,8 +160,10 @@ web/lib/inventory.js  No calibration: locateInventory finds the "ITEM INVENTORY"
 web/lib/session.js    build_snapshot / compare / exp_gained / live_series equivalents.
 web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with video-element fallback, ticker in a
                       worker, stats (grabs while hidden, longest gap) to test background capture.
-web/app.js            UI. Start/End read status at once, then auto-capture pages (PageWatcher), auto-finish when
-                      Equip/Use/Setup/Etc seen + 4 s idle. Start snapshot + live rows kept in localStorage.
+web/app.js            UI, one session like gui.py: Start (status + pages) -> live EXP every N s while running ->
+                      End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
+                      minutes and liveSeries x/rates), Discard. Pages auto-captured (PageWatcher), auto-finish when
+                      Equip/Use/Setup/Etc seen + 4 s idle. Start/end snapshots, live rows, pauses in localStorage.
 web/review.js         Review panel: status inputs + meso field crop, "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.

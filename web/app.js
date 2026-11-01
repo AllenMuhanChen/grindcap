@@ -6,13 +6,14 @@ import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, detectTab, tabFromItems, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
 import { Capture, ticker } from './lib/capture.js';
-import { buildSnapshot, compare, withFixes, liveSeries, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
+import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import { renderReview } from './review.js';
 import { drawGraph } from './graph.js';
 import { openPopout, updatePopout } from './popout.js';
 import { crop as cropMat, toImageData } from './lib/img.js';
 
 const $ = (id) => document.getElementById(id);
+const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
 const store = {
   get: (k) => { try { return JSON.parse(localStorage.getItem('grindcap.' + k)); } catch { return null; } },
@@ -22,7 +23,8 @@ const store = {
 const S = {
   cap: null, ctx: {}, title: null, digits: null, itemdb: new ItemDB(), cache: new LookCache(),
   busy: false, lastTick: 0, lastGrab: 0,
-  live: store.get('live') || { on: false, rows: [], fails: 0 },
+  live: store.get('live') || { rows: [], fails: 0 },
+  pauses: store.get('pauses') || [],
   start: store.get('start'), end: store.get('end'), collect: null, result: null,
   fixes: store.get('fixes') || { looks: {}, qty: {}, status: { start: {}, end: {} } },
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -67,12 +69,12 @@ function snapNote(text) { S.lastNote = text; updatePopout(); $('snapLog').textCo
 
 async function onTick() {
   const now = Date.now();
-  renderCapture(); updatePopout();
+  renderCapture(); renderSession(); updatePopout();
   if (!S.cap || !S.cap.live || S.busy) return;
   S.busy = true;
   try {
     if (S.collect) await pageTick(now);
-    else if (S.live.on && now - (S.live.rows.at(-1)?.t || 0) >= +$('every').value * 1000 && now - (S.live.lastTry || 0) >= +$('every').value * 1000) await liveRead(now);
+    else if (liveActive() && now - (S.live.rows.at(-1)?.t || 0) >= +$('every').value * 1000 && now - (S.live.lastTry || 0) >= +$('every').value * 1000) await liveRead(now);
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
   } finally { S.busy = false; }
 }
@@ -94,14 +96,19 @@ async function liveRead(now) {
   renderLive();
 }
 
-function toggleLive() {
-  S.live.on = !S.live.on;
-  if (S.live.on && !S.start) S.live.rows = [];
-  S.live.lastTry = 0;
-  store.set('live', S.live);
+// One session, like the control window: Start (scan) -> live EXP while it runs -> End (scan).
+const running = () => !!(S.start && !S.end);
+const liveActive = () => running() && !S.collect && !isPaused(S.pauses);
+
+function togglePause() {
+  if (!running()) return;
+  const now = Date.now();
+  if (isPaused(S.pauses)) { S.pauses.at(-1)[1] = now; S.live.lastTry = 0; snapNote('Resumed.'); }
+  else { S.pauses.push([now, null]); snapNote("Paused: this time won't count towards the per-hour rates."); }
+  store.set('pauses', S.pauses);
   render();
 }
-$('liveBtn').onclick = toggleLive;
+$('pauseSnap').onclick = togglePause;
 
 // ------------------------------------------------------------------ snapshots
 
@@ -110,7 +117,8 @@ async function beginCollect(kind) {
   const frame = await S.cap.grab();
   const st = frame ? await readStatus(frame, S.ctx, S.start?.level ?? S.live.rows.at(-1)?.level ?? null) : {};
   snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
-  if (st.checked && (kind === 'start' || S.live.on)) {
+  if (kind === 'end' && isPaused(S.pauses)) { S.pauses.at(-1)[1] = t; store.set('pauses', S.pauses); }   // End ends the pause
+  if (st.checked) {
     if (kind === 'start') S.live.rows = [];
     S.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
   }
@@ -168,11 +176,11 @@ function finishCollect() {
   if (c.kind === 'start') {
     S.start = snap; S.end = null; save('start', snap); save('end', null);
     S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } }; store.set('fixes', S.fixes);
-    S.live.on = true; store.set('live', S.live);
+    S.pauses = []; store.set('pauses', S.pauses); store.set('live', S.live);
     snapNote(`Start saved: mesos ${fmt(snap.mesos)}, ${Object.keys(snap.items).length} kinds of items in ${Object.keys(snap.tabs).join(', ') || 'no tabs'}. Go grind; press End when done.`);
   } else {
     S.end = snap; save('end', snap);
-    S.live.on = false; store.set('live', S.live);
+    store.set('live', S.live);
     snapNote('End read. Results and review below.');
   }
   recompute();
@@ -225,7 +233,7 @@ function recompute() {
   store.set('fixes', S.fixes);
   S.reviewVersion = (S.reviewVersion || 0) + 1;
   const a = withFixes(S.start, 'start', S.fixes, nameOf), b = withFixes(S.end, 'end', S.fixes, nameOf);
-  S.result = a && b ? compare(a, b, priceOf) : null;
+  S.result = a && b ? compare(a, b, priceOf, S.pauses) : null;
   render();
 }
 
@@ -245,24 +253,28 @@ function pagePicture(frame, grid) {
 }
 
 function startSession(ask = confirm) {
-  if (S.start && !ask('Start a new session? The current start snapshot and your fixes are replaced.')) return;
+  if (running() || S.collect) return;
+  if (S.end && !ask('Start a new session? The last result is cleared from this page (Download session JSON keeps it).')) return;
   S.end = null; S.result = null; beginCollect('start');
 }
 $('startSnap').onclick = () => startSession();
 $('popout').onclick = () => openPopout({
-  state: () => S, start: startSession, end: () => beginCollect('end'), finish: finishCollect, toggleLive, lastNote: () => S.lastNote,
+  state: () => S, start: startSession, end: () => beginCollect('end'), finish: finishCollect, pause: togglePause, discard,
+  running, lastNote: () => S.lastNote,
 }).catch((e) => note(`pop-out failed: ${e.message}`));
 $('endSnap').onclick = () => beginCollect('end');
 $('finishSnap').onclick = () => finishCollect();
-$('resetSnap').onclick = () => {
-  if (!confirm('Forget the start snapshot and the live readings?')) return;
-  Object.assign(S, { start: null, end: null, result: null, collect: null });
-  S.live = { on: false, rows: [], fails: 0 };
+function discard(ask = confirm) {
+  if (!ask(running() ? 'Discard this session? The start snapshot and live readings are deleted.' : 'Clear the finished session from this page?')) return;
+  Object.assign(S, { start: null, end: null, result: null, collect: null, pauses: [] });
+  S.live = { rows: [], fails: 0 };
+  store.set('pauses', []);
   S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } };
   store.set('start', null); store.set('end', null); store.set('live', S.live); store.set('fixes', S.fixes);
   $('snapLog').textContent = '';
   render();
-};
+}
+$('discardSnap').onclick = () => discard();
 $('download').onclick = () => {
   const blob = new Blob([JSON.stringify({ start: S.start, end: S.end, fixes: S.fixes, result: S.result, live: S.live.rows }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -275,19 +287,29 @@ function render() {
   const sharing = !!(S.cap && S.cap.live);
   $('share').disabled = sharing;
   $('saveFrame').disabled = !sharing;
-  $('liveBtn').disabled = !sharing;
-  $('liveBtn').textContent = S.live.on ? 'Stop live EXP' : 'Start live EXP';
-  $('startSnap').disabled = !sharing || !!S.collect;
-  $('endSnap').disabled = !sharing || !!S.collect || !S.start;
+  const run = running(), paused = isPaused(S.pauses);
+  $('startSnap').disabled = !sharing || !!S.collect || run;
+  $('endSnap').disabled = !sharing || !!S.collect || !run;
+  $('pauseSnap').disabled = !run || !!S.collect;
+  $('pauseSnap').textContent = paused ? 'Resume' : 'Pause';
+  $('discardSnap').disabled = !S.start && !S.collect;
+  $('discardSnap').textContent = run || S.collect ? 'Discard' : 'Clear';
+  renderSession();
   $('finishSnap').disabled = !S.collect;
   $('download').disabled = !S.start;
   const c = S.collect;
   $('tabs').innerHTML = c ? `<b>${c.kind === 'start' ? 'Start' : 'End'} pages:</b> ` + COUNTED_TABS.map((t) => `<span class="${c.seen.has(t) ? 'done' : ''}">${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
-    : (S.start && !S.end ? `<span class="mute">Started ${S.start.when}. Mesos ${fmt(S.start.mesos)}.</span>` : '');
+    : (S.start && !S.end ? `<span class="mute">Start: mesos ${fmt(S.start.mesos)}, ${Object.keys(S.start.items).length} kinds of items.</span>` : '');
   renderCapture(); renderLive(); renderResult();
   renderReview($('review'), S, { nameOf, priceOf, recompute, learn });
   renderCorrections();
   updatePopout();
+}
+
+function renderSession() {
+  const run = running(), paused = isPaused(S.pauses);
+  $('sessionLine').innerHTML = S.collect ? '' : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} ${hms(activeMs(S.start.time, Date.now(), S.pauses))} <span class="mute">(started ${S.start.when}; live EXP read every ${$('every').value} s)</span>`
+    : S.end ? '<span class="mute">Session finished. Results and review below.</span>' : '<span class="mute">No session. Press Start.</span>';
 }
 
 function renderCapture() {
@@ -305,7 +327,7 @@ function renderCapture() {
 }
 
 function renderLive() {
-  const rows = S.live.rows, ser = liveSeries(rows), last = rows.at(-1), lastS = ser.at(-1);
+  const rows = S.live.rows, ser = liveSeries(rows, 5, S.pauses), last = rows.at(-1), lastS = ser.at(-1);
   $('liveStats').innerHTML = [
     ['Level / EXP', last ? `${last.level} · ${fmt(last.exp)} [${last.pct}%]` : '–'],
     ['EXP gained', fmt(lastS?.gained)],
@@ -324,7 +346,7 @@ function renderResult() {
   const r = S.result;
   if (!r) { $('result').innerHTML = ''; return; }
   const k = [
-    ['Minutes', fmt(r.minutes, 1)], ['EXP gained', fmt(r.exp)], ['EXP/hr', fmt(r.exp_per_hr)],
+    ['Minutes', fmt(r.minutes, 1) + (r.paused_minutes > 0.05 ? ` <span class="mute">(+${fmt(r.paused_minutes, 1)} paused)</span>` : '')], ['EXP gained', fmt(r.exp)], ['EXP/hr', fmt(r.exp_per_hr)],
     ['Mesos change', fmt(r.mesos)], ['Mesos/hr', fmt(r.mesos_per_hr)],
     ['Items gained (value)', fmt(r.items_gained_value)], ['Items used (value)', fmt(r.items_used_value)],
     ['Net mesos/hr incl. items', `<span class="big">${fmt(r.net_per_hr)}</span>`],

@@ -2,7 +2,7 @@
 // Session timer, EXP/hr, Start/End/Finish, the tab checklist while scanning, the live graph and the
 // key results, so you don't have to switch back to the browser tab.
 import { drawGraph } from './graph.js';
-import { liveSeries, COUNTED_TABS } from './lib/session.js';
+import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
 const fmt = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocaleString());
@@ -48,7 +48,7 @@ export async function openPopout(a) {
     <div class="mute" style="font-size:11px">dots: per reading · line: 5-min average · dashed: session</div>
     <div class="row">
       <button id="start" class="primary">Start</button><button id="end">End</button>
-      <button id="finish">Finish pages</button><button id="live">Live EXP</button>
+      <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
     </div>
     <div class="box" id="scan" hidden></div>
     <div class="box" id="res" hidden></div>
@@ -56,7 +56,8 @@ export async function openPopout(a) {
   d.getElementById('start').onclick = () => api.start(pip.confirm.bind(pip));
   d.getElementById('end').onclick = () => api.end();
   d.getElementById('finish').onclick = () => api.finish();
-  d.getElementById('live').onclick = () => api.toggleLive();
+  d.getElementById('pause').onclick = () => api.pause();
+  d.getElementById('discard').onclick = () => api.discard(pip.confirm.bind(pip));
   pip.addEventListener('pagehide', () => { pip = null; });
   updatePopout();
 }
@@ -66,18 +67,19 @@ export function updatePopout() {
   const S = api.state(), d = pip.document, $ = (id) => d.getElementById(id);
   const sharing = !!(S.cap && S.cap.live);
   $('share').innerHTML = sharing ? '<span class="ok">● sharing</span>' : '<span class="bad">● not sharing</span>';
-  const running = S.start && !S.end;
-  $('timer').textContent = S.collect ? `Scanning ${S.collect.kind} pages` : running ? `Session ${hms(Date.now() - S.start.time)}` : S.end ? 'Session ended' : 'No session';
-  const ser = liveSeries(S.live.rows), last = ser.at(-1), r = S.live.rows.at(-1);
+  const running = api.running(), paused = isPaused(S.pauses);
+  $('timer').innerHTML = S.collect ? `Scanning ${S.collect.kind} pages` : running ? `${paused ? '<b class="bad">PAUSED</b>' : 'Session'} ${hms(activeMs(S.start.time, Date.now(), S.pauses))}` : S.end ? 'Session ended' : 'No session';
+  const ser = liveSeries(S.live.rows, 5, S.pauses), last = ser.at(-1), r = S.live.rows.at(-1);
   $('lv').textContent = r ? `Lv ${r.level} · ${r.pct}%` : '';
   $('xph').textContent = fmt(last ? last.ema * 60 : null);
-  $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr · ${fmt(last.ema)}/min · +${fmt(last.gained)} EXP` : (S.live.on ? 'waiting for two readings…' : 'live EXP is off');
+  $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr · ${fmt(last.ema)}/min · +${fmt(last.gained)} EXP` : (running ? 'waiting for two readings…' : '');
   drawGraph($('g'), ser, 60, 'EXP/hr');
-  $('start').disabled = !sharing || !!S.collect;
-  $('end').disabled = !sharing || !!S.collect || !S.start;
-  $('finish').disabled = !S.collect;
-  $('live').disabled = !sharing;
-  $('live').textContent = S.live.on ? 'Stop live EXP' : 'Live EXP';
+  $('start').disabled = !sharing || !!S.collect || running;
+  $('end').disabled = !sharing || !!S.collect || !running;
+  $('pause').disabled = !running || !!S.collect;
+  $('pause').textContent = paused ? 'Resume' : 'Pause';
+  $('discard').disabled = !running && !S.collect;
+  $('finish').hidden = !S.collect;
   const c = S.collect, scan = $('scan');
   scan.hidden = !c;
   if (c) {
@@ -95,7 +97,7 @@ export function updatePopout() {
       <span>Net mesos/hr incl. items</span><b>${fmt(res.net_per_hr)}</b>
       <span>EXP/hr</span><b>${fmt(res.exp_per_hr)}</b>
       <span>Mesos/hr</span><span>${fmt(res.mesos_per_hr)}</span>
-      <span>Minutes</span><span>${res.minutes}</span></div>
+      <span>Minutes</span><span>${res.minutes}${res.paused_minutes > 0.05 ? ` (+${res.paused_minutes} paused)` : ''}</span></div>
       <div class="mute">Details and the review are in the browser tab.</div>`;
   }
   $('note').textContent = api.lastNote() || '';

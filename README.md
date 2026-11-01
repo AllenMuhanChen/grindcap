@@ -172,11 +172,12 @@ snapshots of mesos and items. Nothing is uploaded and nothing is sent to the gam
 1. Double-click `grindcap-web.bat`. It exports your item data and taught digits for the page
    (`scripts/export_web_data.py` -> `web/local/`), serves the repo on http://localhost:8765 and opens it.
 2. **Share MapleStory window** and pick the game window.
-3. **Live EXP**: reads level and EXP every 10-60 s and shows EXP/min.
-4. **Start**, open the inventory and click through Equip, Use, Set-up and Etc; **End** when done.
-5. **Open pop-out** gives a small always-on-top window (Chrome/Edge 116+) with EXP/hr, the graph,
-   Start/End and the tab checklist while scanning, so you don't have to switch back to the browser.
-6. **Review** shows every item with the slot pictures it was read from. Unrecognised icons get the
+3. **Start**, open the inventory and click through Equip, Use, Set-up and Etc. The session then
+   runs: EXP is read every 10-60 s (graph + EXP/hr). **Pause** leaves time out of the per-hour
+   rates; **Discard** throws the session away. **End**, click through the tabs again, results follow.
+4. **Open pop-out** gives a small always-on-top window (Chrome/Edge 116+) with the same controls,
+   EXP/hr, the graph and the tab checklist while scanning, so you don't have to switch back.
+5. **Review** shows every item with the slot pictures it was read from. Unrecognised icons get the
    closest guesses from the item data; pick one, type a name, or "Don't count". A named icon is
    remembered by this browser for later scans; **Download my corrections** saves them as a file.
 

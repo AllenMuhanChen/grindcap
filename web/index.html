@@ -66,33 +66,34 @@
   </section>
 
   <section>
-    <h2>2. Live EXP</h2>
+    <h2>2. Session</h2>
     <div class="row">
-      <button id="liveBtn" disabled>Start live EXP</button>
-      <label class="mute">read every <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s</label>
-      <span id="liveNote" class="mute"></span>
+      <button id="startSnap" class="primary" disabled>Start</button>
+      <button id="endSnap" disabled>End</button>
+      <button id="pauseSnap" disabled>Pause</button>
+      <button id="discardSnap" disabled>Discard</button>
+      <button id="finishSnap" disabled title="Stop taking pages now instead of waiting for the automatic finish">Finish pages</button>
+      <label class="mute">live EXP every <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s</label>
     </div>
+    <p id="snapHelp" class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP is read every few seconds. End does the same inventory pass and shows the results. Paused time doesn't count towards the per-hour rates.</p>
+    <div id="sessionLine"></div>
+    <div class="tabs" id="tabs"></div>
     <div class="stats" id="liveStats"></div>
+    <div id="liveNote" class="mute"></div>
     <canvas id="graph" width="940" height="160"></canvas>
-    <div class="mute" style="font-size:12px">dots: EXP/min per reading · line: 5-min average · dashed: session average</div>
+    <div class="mute" style="font-size:12px">dots: EXP/min per reading · line: 5-min average · dashed: session average · x: active minutes</div>
     <table id="liveTable"></table>
+    <pre id="snapLog"></pre>
   </section>
 
   <section>
-    <h2>3. Before / after: mesos and items</h2>
+    <h2>3. Results</h2>
     <div class="row">
-      <button id="startSnap" disabled>Start</button>
-      <button id="endSnap" disabled>End</button>
-      <button id="finishSnap" disabled>Finish pages</button>
-      <button id="resetSnap">Reset</button>
       <button id="download" disabled>Download session JSON</button>
       <button id="corrDownload" disabled title="The icons you named, with their pictures: send this file to Allen">Download my corrections</button>
       <button id="corrClear" disabled>Forget them</button>
       <span id="corrCount" class="mute"></span>
     </div>
-    <p id="snapHelp" class="mute">Press Start, then open the inventory (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still. Keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page.</p>
-    <div class="tabs" id="tabs"></div>
-    <pre id="snapLog"></pre>
     <div id="result"></div>
   </section>
 
