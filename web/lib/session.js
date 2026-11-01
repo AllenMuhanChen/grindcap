@@ -17,7 +17,7 @@ export function expBetween(l0, e0, l1, e1) {
 }
 
 /** pages: {tab: [page, ...]} -> snapshot. status = {level, exp, pct}; mesosReads = values read per page. */
-export function buildSnapshot(time, status, pages, mesosReads) {
+export function buildSnapshot(time, status, pages, mesosReads, extra = {}) {
   const tabs = {}, mergeLog = {};
   for (const [tab, list] of Object.entries(pages)) { mergeLog[tab] = []; tabs[tab] = mergePages(list, mergeLog[tab]); }
   const c = new Map();
@@ -28,9 +28,29 @@ export function buildSnapshot(time, status, pages, mesosReads) {
     time, when: new Date(time).toLocaleString(),
     level: status.level, exp: status.exp, exp_pct: status.pct, exp_checked: status.checked,
     mesos, mesos_checked: n >= 2 || mesosReads.length === 1, mesos_reads: mesosReads,
-    tabs: Object.fromEntries(Object.entries(tabs).map(([t, rows]) => [t, rows.map((r) => r.map((s) => ({ id: s.id, qty: s.qty, name: s.name })))])),
-    items: totals(tabs), merge_log: mergeLog,
+    // every slot keeps its picture, what was read and which look it was, for the review panel
+    tabs: Object.fromEntries(Object.entries(tabs).map(([t, rows]) => [t, rows.map((r) => r.map((s) => ({ ...s })))])),
+    items: totals(tabs), merge_log: mergeLog, ...extra,
   };
+}
+
+/** A snapshot with your corrections applied. fixes = {looks: {lookKey: itemId}, qty: {"<kind>|<ref>": n},
+ * status: {start|end: {level, exp, mesos}}}; kind = "start" or "end". nameOf(id) names an item id. */
+export function withFixes(snap, kind, fixes, nameOf) {
+  if (!snap) return snap;
+  const st = (fixes.status || {})[kind] || {};
+  const tabs = {};
+  for (const [t, rows] of Object.entries(snap.tabs || {})) {
+    tabs[t] = rows.map((r) => r.map((s) => {
+      if (!s.id || s.id === '?') return s;
+      const id = fixes.looks?.[s.look] ?? s.id;
+      if (id === 'ignore') return { ...s, id: null, qty: 0, ignored: true };
+      const q = fixes.qty?.[`${kind}|${s.ref}`];
+      return { ...s, id, name: typeof id === 'number' ? nameOf(id) : s.name, qty: q ?? s.qty, fixedQty: q != null, fixedName: fixes.looks?.[s.look] != null };
+    }));
+  }
+  const pick = (k) => (st[k] != null && st[k] !== '' ? Number(st[k]) : snap[k]);
+  return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos') };
 }
 
 /** Before vs after. prices: item id -> mesos each (or null). */

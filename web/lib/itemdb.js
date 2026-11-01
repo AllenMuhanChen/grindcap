@@ -118,10 +118,21 @@ export class ItemDB {
     const name = this.name(best);
     const other = ranked.slice(1).find(([, i]) => this.name(i) !== name);
     const ratio = other ? (s0 > 0 ? other[0] / s0 : Infinity) : Infinity;
+    // the closest few items with different names, for the review page
+    const cands = [], seen = new Set();
+    for (const [sc, i] of ranked) {
+      if (seen.has(this.name(i))) continue;
+      seen.add(this.name(i)); cands.push({ id: i, name: this.name(i), score: Math.round(sc) });
+      if (cands.length >= 6) break;
+    }
+    const info = { score: Math.round(s0), ratio: Number.isFinite(ratio) ? +ratio.toFixed(2) : null,
+                   bestName: name, best, runnerUp: other ? this.name(other[1]) : '', cands };
     if (s0 > this.maxScore || ratio < this.minRatio) {
-      return { id: null, name: null, score: s0, ratio, best, bestName: name, runnerUp: other ? this.name(other[1]) : '' };
+      info.why = s0 > this.maxScore ? `no icon close enough (best ${name}, score ${Math.round(s0)} > ${this.maxScore})`
+                                    : `${name} only ${info.ratio}x better than ${info.runnerUp} (needs ${this.minRatio}x)`;
+      return { id: null, name: null, ...info };
     }
     const neighbors = ranked.slice(1).filter(([, i]) => this.name(i) !== name).slice(0, 8).map(([, i]) => i);
-    return { id: best, name, score: +s0.toFixed(1), ratio: +ratio.toFixed(2), runnerUp: other ? this.name(other[1]) : '', neighbors };
+    return { id: best, name, neighbors, ...info };
   }
 }

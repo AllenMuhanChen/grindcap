@@ -1,7 +1,7 @@
 // The inventory window: find it, split it into slots, read each slot. Port of src/grindcap/inventory.py,
 // except that the window is found by its "ITEM INVENTORY" title (no calibration) and items are keyed
 // by their item-data id directly.
-import { crop, gray, resizeArea, findScaled, matchCCoeff } from './img.js';
+import { crop, gray, resizeArea, findScaled, matchCCoeff, toImageData } from './img.js';
 import { slotPatch } from './digits.js';
 import { BASE_SCALE, scaleRange } from './statusbar.js';
 
@@ -160,18 +160,35 @@ function signature(img) {
 
 /** Remembers which item each icon look turned out to be, so each look is searched only once. */
 export class LookCache {
-  constructor(threshold = 6) { this.looks = []; this.threshold = threshold; }
+  constructor(threshold = 6) {
+    this.looks = []; this.threshold = threshold;
+    this.prefix = Math.random().toString(36).slice(2, 6);   // keys stay unique across page reloads
+  }
   /** Looks within the threshold, closest first. */
   near(sig) {
     const out = [];
     for (const l of this.looks) {
-      let d = 0; for (let i = 0; i < sig.length; i++) d += Math.abs(sig[i] - l.sig[i]);
-      d /= sig.length;
+      const d = this.dist(sig, l);
       if (d <= this.threshold) out.push([d, l]);
     }
     return out.sort((a, b) => a[0] - b[0]).map((x) => x[1]);
   }
-  add(sig, id, name, neighbors = []) { const l = { sig, id, name, neighbors }; this.looks.push(l); return l; }
+  dist(sig, l) { let d = 0; for (let i = 0; i < sig.length; i++) d += Math.abs(sig[i] - l.sig[i]); return d / sig.length; }
+  /** match = what the item data said about this look (best guess, runner-up, ratio, candidates). */
+  add(sig, id, name, neighbors = [], match = null, crop = null) {
+    const l = { key: `${this.prefix}-${this.looks.length + 1}`, sig, id, name, neighbors, match, crop };
+    this.looks.push(l);
+    return l;
+  }
+}
+
+/** A slot as a small PNG data URL, for the review panel. */
+export function slotPicture(img) {
+  if (typeof document === 'undefined') return null;
+  const cv = document.createElement('canvas');
+  cv.width = img.w; cv.height = img.h;
+  cv.getContext('2d').putImageData(toImageData(img), 0, 0);
+  return cv.toDataURL('image/png');
 }
 
 /** One picture of the visible grid -> rows of {id, qty, name, ref}. id = item-data id, a
@@ -195,8 +212,10 @@ export async function readPage(frame, grid, digits, itemdb, cache, pageKey = '',
       const sig = signature(img);
       const patch = itemdb && itemdb.ready ? slotPatch(view, u, v) : null;
       const near = cache.near(sig);
-      let look = null;
-      if (near.length) {
+      // A look you named yourself wins when it is clearly the same icon (the item data's icon may be
+      // why it wasn't recognised); a merely similar one (another ore colour) still goes through the re-check.
+      let look = near.length && near[0].match && near[0].match.corrected && cache.dist(sig, near[0]) <= cache.threshold / 2 ? near[0] : null;
+      if (!look && near.length) {
         // Seen a look like this before. Look-alikes (ores that differ only in colour) can be within
         // the threshold too, so the named ones and their neighbours are re-checked on this slot.
         const named = near.filter((l) => typeof l.id === 'number');
@@ -207,7 +226,7 @@ export async function readPage(frame, grid, digits, itemdb, cache, pageKey = '',
           for (const [id, v] of sc) if (v < bs) { bs = v; best = id; }
           if (best !== null && bs <= itemdb.maxScore) {
             look = named.find((l) => l.id === best);
-            if (!look) look = cache.add(sig, best, itemdb.name(best));
+            if (!look) look = cache.add(sig, best, itemdb.name(best), [], { rechecked: true, score: Math.round(bs) }, slotPicture(img));
           }
         }
         if (!look) look = near.find((l) => typeof l.id !== 'number') || (patch ? null : near[0]);
@@ -223,10 +242,12 @@ export async function readPage(frame, grid, digits, itemdb, cache, pageKey = '',
           m = itemdb.identify(patch, ignore);
           if (i % yieldEvery === 0) await new Promise((res) => setTimeout(res));
         }
-        look = m && m.id ? cache.add(sig, m.id, m.name, m.neighbors)
-                         : cache.add(sig, `look-${cache.looks.length + 1}`, m && m.bestName ? `? (looks like ${m.bestName})` : '?');
+        const pic = slotPicture(img);
+        look = m && m.id ? cache.add(sig, m.id, m.name, m.neighbors, m, pic)
+                         : cache.add(sig, `look-${cache.looks.length + 1}`, m && m.bestName ? `? (looks like ${m.bestName})` : '?', [], m, pic);
       }
-      line.push({ id: look.id, qty: num.value || 1, name: look.name, ref, text: num.text });
+      if (look.id === 'ignore') { line.push({ id: null, qty: 0, ref, look: look.key, ignored: true }); continue; }
+      line.push({ id: look.id, qty: num.value || 1, name: look.name, ref, text: num.text, look: look.key, crop: slotPicture(img) });
     }
     out.push(line);
   }

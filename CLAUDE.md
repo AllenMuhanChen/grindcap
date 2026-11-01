@@ -162,9 +162,20 @@ web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with vide
                       worker, stats (grabs while hidden, longest gap) to test background capture.
 web/app.js            UI. Start/End read status at once, then auto-capture pages (PageWatcher), auto-finish when
                       Equip/Use/Setup/Etc seen + 4 s idle. Start snapshot + live rows kept in localStorage.
+web/review.js         Review panel: status inputs + meso field crop, "Not recognised" cards (slot picture, why, 6 closest
+                      item-data guesses as buttons, name search, Don't count), items table with how each was named and
+                      per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.
+web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr
+                      (5-min EMA), graph (web/graph.js), Start/End/Finish/Live, tab checklist + finish countdown, result.
+                      Corrections: naming a look on the review panel (learn() in app.js) is kept in localStorage
+                      "corrections" ({sig 24x24, id|'ignore', name, how, crop}), seeded into LookCache on load (a corrected
+                      look wins only within threshold/2, else the normal re-check), "Download my corrections" exports them.
 scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -> web/local/ (gitignored).
 scripts/serve_web.py  localhost:8765 with explicit JS MIME types (Windows registry can make .js text/plain).
 ```
+
+Allen's local teaching (data/catalog.json names/prices, icons/ looks, data/digits.npz, all gitignored) must
+become the hosted version's starting data; he must never re-teach. Planned: tooltip-hover naming of unknown icons.
 
 Not yet tested on the real game in a browser: covered window, background tab, windowed mode (title bar in
 the frame), other resolutions. Unrecognised items get "look-N" ids that only line up within one page load.

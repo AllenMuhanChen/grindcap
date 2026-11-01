@@ -6,7 +6,11 @@ import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, detectTab, tabFromItems, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
 import { Capture, ticker } from './lib/capture.js';
-import { buildSnapshot, compare, liveSeries, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
+import { buildSnapshot, compare, withFixes, liveSeries, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
+import { renderReview } from './review.js';
+import { drawGraph } from './graph.js';
+import { openPopout, updatePopout } from './popout.js';
+import { crop as cropMat, toImageData } from './lib/img.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
@@ -19,8 +23,11 @@ const S = {
   cap: null, ctx: {}, title: null, digits: null, itemdb: new ItemDB(), cache: new LookCache(),
   busy: false, lastTick: 0, lastGrab: 0,
   live: store.get('live') || { on: false, rows: [], fails: 0 },
-  start: store.get('start'), end: null, collect: null, result: null,
+  start: store.get('start'), end: store.get('end'), collect: null, result: null,
+  fixes: store.get('fixes') || { looks: {}, qty: {}, status: { start: {}, end: {} } },
+  corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
 };
+for (const c of S.corrections) S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop);
 
 // ------------------------------------------------------------------ setup
 
@@ -41,7 +48,7 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
-  render();
+  recompute();
 }
 
 $('share').onclick = async () => {
@@ -54,13 +61,13 @@ $('share').onclick = async () => {
 $('saveFrame').onclick = () => S.cap && S.cap.saveLastFrame();
 
 function note(text) { if (S.cap) S.cap.note(text); else $('capLog').textContent = text + '\n' + $('capLog').textContent; renderCapture(); }
-function snapNote(text) { $('snapLog').textContent = `${new Date().toLocaleTimeString()}  ${text}\n` + $('snapLog').textContent; }
+function snapNote(text) { S.lastNote = text; updatePopout(); $('snapLog').textContent = `${new Date().toLocaleTimeString()}  ${text}\n` + $('snapLog').textContent; }
 
 // ------------------------------------------------------------------ the loop
 
 async function onTick() {
   const now = Date.now();
-  renderCapture();
+  renderCapture(); updatePopout();
   if (!S.cap || !S.cap.live || S.busy) return;
   S.busy = true;
   try {
@@ -87,13 +94,14 @@ async function liveRead(now) {
   renderLive();
 }
 
-$('liveBtn').onclick = () => {
+function toggleLive() {
   S.live.on = !S.live.on;
   if (S.live.on && !S.start) S.live.rows = [];
   S.live.lastTry = 0;
   store.set('live', S.live);
   render();
-};
+}
+$('liveBtn').onclick = toggleLive;
 
 // ------------------------------------------------------------------ snapshots
 
@@ -106,7 +114,7 @@ async function beginCollect(kind) {
     if (kind === 'start') S.live.rows = [];
     S.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
   }
-  S.collect = { kind, t, status: st, pages: {}, mesos: [], watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0 };
+  S.collect = { kind, t, status: st, pages: {}, mesos: [], pictures: [], mesoPic: null, watcher: new PageWatcher(), lastNew: 0, seen: new Set(), lastWarn: 0 };
   render();
 }
 
@@ -129,10 +137,15 @@ async function pageTick(now) {
   if (!tab) { snapNote('page skipped: could not tell which tab is open'); return; }
   if (SKIP_TABS.includes(tab)) { snapNote(`${tab} page skipped (not counted)`); return; }
   (c.pages[tab] = c.pages[tab] || []).push(page);
+  c.pictures.push({ tab, n: c.pages[tab].length, img: pagePicture(frame, inv.grid) });
   c.seen.add(tab);
   c.lastNew = Date.now();
   const counts = new Map(); for (const v of c.mesos) if (v != null) counts.set(v, (counts.get(v) || 0) + 1);
-  if (Math.max(0, ...counts.values()) < 3) c.mesos.push((await readMesosField(frame, inv.grid)).value);
+  if (Math.max(0, ...counts.values()) < 3) {
+    const m = await readMesosField(frame, inv.grid);
+    c.mesos.push(m.value);
+    if (m.box && (!c.mesoPic || (m.value != null && !c.mesoPicOk))) { c.mesoPic = picture(frame, ...m.box, 'image/png'); c.mesoPicOk = m.value != null; }
+  }
   const named = page.flat().filter((s) => s.id && s.id !== UNKNOWN);
   const unknown = named.filter((s) => typeof s.id !== 'number').length;
   snapNote(`${tab} page ${c.pages[tab].length}: ${named.length} items${unknown ? `, ${unknown} not recognised` : ''}; mesos read ${fmt(c.mesos.at(-1))}`);
@@ -148,34 +161,110 @@ function finishCollect() {
   const c = S.collect;
   if (!c) return;
   const time = c.kind === 'start' ? (c.lastNew || c.t) : c.t;   // start: when the last page was taken; end: when End was pressed
-  const snap = buildSnapshot(time, c.status, c.pages, c.mesos);
+  const used = new Set(Object.values(c.pages).flat(Infinity).map((sl) => sl && sl.look).filter(Boolean));
+  const looks = Object.fromEntries(S.cache.looks.filter((l) => used.has(l.key)).map((l) => [l.key, { id: l.id, name: l.name, match: l.match, crop: l.crop, sig: Array.from(l.sig, Math.round) }]));
+  const snap = buildSnapshot(time, c.status, c.pages, c.mesos, { pictures: c.pictures, meso_picture: c.mesoPic, looks });
   S.collect = null;
   if (c.kind === 'start') {
-    S.start = snap; store.set('start', snap);
+    S.start = snap; S.end = null; save('start', snap); save('end', null);
+    S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } }; store.set('fixes', S.fixes);
     S.live.on = true; store.set('live', S.live);
     snapNote(`Start saved: mesos ${fmt(snap.mesos)}, ${Object.keys(snap.items).length} kinds of items in ${Object.keys(snap.tabs).join(', ') || 'no tabs'}. Go grind; press End when done.`);
   } else {
-    S.end = snap;
+    S.end = snap; save('end', snap);
     S.live.on = false; store.set('live', S.live);
-    S.result = compare(S.start, S.end, (id) => S.itemdb.items[id]?.price ?? null);
-    snapNote('End read. Results below.');
+    snapNote('End read. Results and review below.');
   }
+  recompute();
+}
+
+/** Keep a snapshot across reloads; if it's too big for browser storage, keep it without page pictures. */
+function save(k, snap) {
+  try { localStorage.setItem('grindcap.' + k, JSON.stringify(snap)); }
+  catch { store.set(k, snap && { ...snap, pictures: [] }); }
+}
+
+const nameOf = (id) => S.itemdb.name(id);
+const priceOf = (id) => S.itemdb.items[id]?.price ?? null;
+
+/** You named a look on the review panel: remember it for every later scan (this browser), and keep
+ * it in the corrections list you can export. id 'ignore' = not an item / don't count. */
+function learn(key, id, how) {
+  const l = { ...(S.start?.looks || {}), ...(S.end?.looks || {}) }[key];
+  if (!l || !l.sig) return;
+  const name = id === 'ignore' ? "(don't count)" : nameOf(id);
+  S.corrections = S.corrections.filter((c) => c.key !== key);
+  S.corrections.push({ key, id, name, how, was: l.name, best_guess: l.match?.bestName ?? null, t: new Date().toISOString(), crop: l.crop, sig: l.sig });
+  store.set('corrections', S.corrections);
+  const mine = S.cache.looks.find((x) => x.correctionOf === key);
+  if (mine) Object.assign(mine, { id, name });
+  else S.cache.add(Float32Array.from(l.sig), id, name, [], { corrected: true }, l.crop).correctionOf = key;
+  renderCorrections();
+}
+
+function renderCorrections() {
+  $('corrCount').textContent = S.corrections.length ? `${S.corrections.length} icon${S.corrections.length > 1 ? 's' : ''} you named (kept in this browser)` : '';
+  $('corrDownload').disabled = !S.corrections.length;
+  $('corrClear').disabled = !S.corrections.length;
+}
+$('corrDownload').onclick = () => {
+  const out = { kind: 'grindcap-corrections', version: 1, made: new Date().toISOString(), signature: '24x24 RGB, stack-number corner blacked out, row-major', corrections: S.corrections };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(out)], { type: 'application/json' }));
+  a.download = `grindcap-corrections-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+};
+$('corrClear').onclick = () => {
+  if (!confirm('Forget every icon you named? Later scans go back to the item data alone.')) return;
+  S.corrections = []; store.set('corrections', []);
+  S.cache.looks = S.cache.looks.filter((l) => !(l.match && l.match.corrected));
+  renderCorrections();
+};
+
+/** Apply your fixes, compare, redraw. Called after every edit on the review panel. */
+function recompute() {
+  store.set('fixes', S.fixes);
+  S.reviewVersion = (S.reviewVersion || 0) + 1;
+  const a = withFixes(S.start, 'start', S.fixes, nameOf), b = withFixes(S.end, 'end', S.fixes, nameOf);
+  S.result = a && b ? compare(a, b, priceOf) : null;
   render();
 }
 
-$('startSnap').onclick = () => { S.end = null; S.result = null; beginCollect('start'); };
+function picture(frame, x, y, w, h, type = 'image/jpeg') {
+  const m = cropMat(frame, x, y, w, h);
+  if (!m.w || !m.h) return null;
+  const cv = document.createElement('canvas');
+  cv.width = m.w; cv.height = m.h;
+  cv.getContext('2d').putImageData(toImageData(m), 0, 0);
+  return cv.toDataURL(type, 0.85);
+}
+
+/** The inventory window as captured: tab buttons, grid and meso field. */
+function pagePicture(frame, grid) {
+  const [px, py] = grid.pitch(), [x0, y0] = grid.first, [x1, y1, w, h] = grid.last;
+  return picture(frame, x0 - 0.4 * px, y0 - 1.0 * py, x1 + w - x0 + 1.4 * px, y1 + h - y0 + 2.4 * py);
+}
+
+function startSession(ask = confirm) {
+  if (S.start && !ask('Start a new session? The current start snapshot and your fixes are replaced.')) return;
+  S.end = null; S.result = null; beginCollect('start');
+}
+$('startSnap').onclick = () => startSession();
+$('popout').onclick = () => openPopout({
+  state: () => S, start: startSession, end: () => beginCollect('end'), finish: finishCollect, toggleLive, lastNote: () => S.lastNote,
+}).catch((e) => note(`pop-out failed: ${e.message}`));
 $('endSnap').onclick = () => beginCollect('end');
 $('finishSnap').onclick = () => finishCollect();
 $('resetSnap').onclick = () => {
   if (!confirm('Forget the start snapshot and the live readings?')) return;
   Object.assign(S, { start: null, end: null, result: null, collect: null });
   S.live = { on: false, rows: [], fails: 0 };
-  store.set('start', null); store.set('live', S.live);
+  S.fixes = { looks: {}, qty: {}, status: { start: {}, end: {} } };
+  store.set('start', null); store.set('end', null); store.set('live', S.live); store.set('fixes', S.fixes);
   $('snapLog').textContent = '';
   render();
 };
 $('download').onclick = () => {
-  const blob = new Blob([JSON.stringify({ start: S.start, end: S.end, result: S.result, live: S.live.rows }, null, 1)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ start: S.start, end: S.end, fixes: S.fixes, result: S.result, live: S.live.rows }, null, 1)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = `grindcap-session-${new Date().toISOString().slice(0, 16).replace(':', '')}.json`; a.click();
 };
@@ -189,13 +278,16 @@ function render() {
   $('liveBtn').disabled = !sharing;
   $('liveBtn').textContent = S.live.on ? 'Stop live EXP' : 'Start live EXP';
   $('startSnap').disabled = !sharing || !!S.collect;
-  $('endSnap').disabled = !sharing || !!S.collect || !S.start || !!S.end;
+  $('endSnap').disabled = !sharing || !!S.collect || !S.start;
   $('finishSnap').disabled = !S.collect;
   $('download').disabled = !S.start;
   const c = S.collect;
   $('tabs').innerHTML = c ? `<b>${c.kind === 'start' ? 'Start' : 'End'} pages:</b> ` + COUNTED_TABS.map((t) => `<span class="${c.seen.has(t) ? 'done' : ''}">${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
     : (S.start && !S.end ? `<span class="mute">Started ${S.start.when}. Mesos ${fmt(S.start.mesos)}.</span>` : '');
   renderCapture(); renderLive(); renderResult();
+  renderReview($('review'), S, { nameOf, priceOf, recompute, learn });
+  renderCorrections();
+  updatePopout();
 }
 
 function renderCapture() {
@@ -225,28 +317,7 @@ function renderLive() {
     const s = ser.find((x) => Math.abs(x.min - (r.t - rows[0].t) / 60000) < 1e-9);
     return `<tr><td>${new Date(r.t).toLocaleTimeString()}</td><td>${r.level}</td><td>${fmt(r.exp)}</td><td>${r.pct}</td><td>${fmt(s?.rate)}</td></tr>`;
   }).join('');
-  drawGraph(ser);
-}
-
-function drawGraph(ser) {
-  const cv = $('graph'), g = cv.getContext('2d'), W = cv.width, H = cv.height, P = 34;
-  g.clearRect(0, 0, W, H);
-  const css = getComputedStyle(document.documentElement);
-  const ink = css.getPropertyValue('--mute'), acc = css.getPropertyValue('--acc');
-  if (ser.length < 1) { g.fillStyle = ink; g.font = '13px system-ui'; g.fillText('EXP/min appears after two readings.', P, H / 2); return; }
-  const xmax = Math.max(1, ser.at(-1).min), ys = ser.flatMap((p) => [p.ema, p.cum]);
-  const ymax = Math.max(...ys) * 1.15 || 1, ymin = Math.max(0, Math.min(...ys) * 0.85);
-  const X = (m) => P + (W - P - 8) * m / xmax, Y = (v) => H - 18 - (H - 26) * (v - ymin) / (ymax - ymin);
-  g.strokeStyle = ink; g.globalAlpha = 0.3; g.beginPath(); g.moveTo(P, H - 18); g.lineTo(W - 8, H - 18); g.stroke(); g.globalAlpha = 1;
-  g.fillStyle = ink; g.font = '11px system-ui';
-  g.fillText(fmt(ymax), 2, 12); g.fillText(fmt(ymin), 2, H - 20); g.fillText(`${xmax.toFixed(1)} min`, W - 60, H - 4);
-  g.fillStyle = acc; g.globalAlpha = 0.45;
-  for (const p of ser) { const y = Math.min(H - 18, Math.max(2, Y(p.rate))); g.beginPath(); g.arc(X(p.min), y, 2.5, 0, 7); g.fill(); }
-  g.globalAlpha = 1; g.strokeStyle = acc; g.lineWidth = 2;
-  g.beginPath(); ser.forEach((p, i) => (i ? g.lineTo(X(p.min), Y(p.ema)) : g.moveTo(X(p.min), Y(p.ema)))); g.stroke();
-  g.setLineDash([5, 4]); g.lineWidth = 1.5; g.strokeStyle = ink;
-  g.beginPath(); ser.forEach((p, i) => (i ? g.lineTo(X(p.min), Y(p.cum)) : g.moveTo(X(p.min), Y(p.cum)))); g.stroke();
-  g.setLineDash([]);
+  drawGraph($('graph'), ser);
 }
 
 function renderResult() {
