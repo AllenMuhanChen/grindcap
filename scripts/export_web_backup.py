@@ -156,14 +156,14 @@ def main() -> int:
             for w in (start, end):
                 w["map"] = {**(w.get("map") or {}), "name": s["map"]}
         live = [{"t": start["time"], "level": start["level"], "exp": start["exp"], "pct": start["exp_pct"]}]
-        pots = []
+        pots, names = [], load_names(sp)
         for row in load_live(sp):
             if row.get("time", 0) > b["time"] + 1:
                 continue
             if row.get("checked") and row.get("exp") is not None and row.get("level") is not None:
                 live.append({"t": int(row["time"] * 1000), "level": row["level"], "exp": row["exp"], "pct": None})
-            if row.get("potions"):
-                pots.append({"time": row["time"], "potions": row["potions"]})
+            if row.get("potions"):              # the session's key names, as gui.py's graph applies them
+                pots.append({"time": row["time"], "potions": [{**q, "name": names.get(q["key"], q.get("name"))} for q in row["potions"]]})
         live.append({"t": end["time"], "level": end["level"], "exp": end["exp"], "pct": end["exp_pct"]})
         rec = {
             "id": start["time"], "name": s["name"], "start": start, "end": end,

@@ -130,6 +130,18 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
     { Del: 'Orange Potion', End: 'Lemon', Ins: 'Blue Potion' }, 'match_by_count');
   const g = potionSeries({ time: 0 }, [[0, 100], [60, 103]].map(([t, n]) => ({ time: t, potions: [{ key: 'End', count: n, name: 'Lemon' }] })), prices()).at(-1);
   eq([g.mp, g.raw_mp], [-450, -27000], 'gains negative');
+  // a potion swapped on a key mid-run: the old one's use stops, the new one's starts, no fake restock
+  const sw = [[0, 'Orange Potion', 100], [60, 'Orange Potion', 90], [120, 'White Potion', 200], [180, 'White Potion', 190]]
+    .map(([t, n, c]) => ({ time: t, potions: [{ key: 'Del', count: c, name: n }] }));
+  const last = potionSeries({ time: 0 }, sw, prices()).at(-1);
+  eq([last.hp, last.used], [10 * 160 + 10 * 320, { 'Orange Potion': 10, 'White Potion': 10 }], 'swap mid-run');
+  // the icon check: the same key's look stays put across frames; another item's look is a change
+  const fr = await loadImage('../../tests/fixtures/game_frame.png'), fr2 = await loadImage('../../tests/fixtures/use_tab_tooltip.png');   // same session, counts changed
+  const base = Object.fromEntries(readQuickslot(fr, panel, digits).map((p) => [p.key, p.sig]));
+  const same = readQuickslot(fr2, panel, digits, null, {}, {}, null, { sigs: base });
+  if (same.some((p) => p.changed)) fails.push(`swap check: unchanged keys flagged ${JSON.stringify(same.filter((p) => p.changed).map((p) => p.key))}`);
+  const moved = readQuickslot(fr2, panel, digits, null, {}, {}, null, { sigs: { Del: base.End, End: base.Del, PgUp: base.PgUp } });
+  eq(moved.filter((p) => p.changed).map((p) => p.key).sort(), ['Del', 'End'], 'swap check: changed keys');
 }
 // The pointing-hand pointer, on a page picture the browser version saved (screen pixels, 1920x1080 game)
 {

@@ -1,10 +1,12 @@
 // Always-on-top pop-out (Chrome/Edge Document Picture-in-Picture): the old control window's job.
 // Session timer, EXP/hr, Start/End/Finish, the tab checklist while scanning, the live graph and the
 // key results, so you don't have to switch back to the browser tab.
-import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
+import { drawGraph, drawPotionGraph, potionSummary, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
+const FULL = [380, 560], SMALL = [260, 150];
+let small = (() => { try { return localStorage.getItem('grindcap.popSmall') === '1'; } catch { return false; } })();
 const fmt = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocaleString());
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -25,6 +27,8 @@ const CSS = `
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
   .timer { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; } .timer.idle { font-size: 14px; font-weight: 400; color: var(--mute); }
+  .mode { padding: 0 9px; font-size: 16px; line-height: 20px; margin-left: 6px; }
+  .mpot { font-size: 15px; font-weight: 600; margin-top: 2px; } body.small { padding: 6px 10px; } body.small .top b { display: none; }
   .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
   .scan .help { font-size: 14px; }
 `;
@@ -36,16 +40,23 @@ export async function openPopout(a) {
     alert('This browser has no always-on-top pop-out (Document Picture-in-Picture). Use Chrome or Edge 116 or newer.');
     return;
   }
-  pip = await window.documentPictureInPicture.requestWindow({ width: 380, height: 560 });
+  const [w0, h0] = small ? SMALL : FULL;
+  pip = await window.documentPictureInPicture.requestWindow({ width: w0, height: h0 });
   const d = pip.document;
   // the page's colour tokens (light/dark), then the pop-out's own layout
   const root = getComputedStyle(document.documentElement);
   const vars = ['--bg', '--card', '--ink', '--mute', '--line', '--acc', '--ok', '--bad'].map((v) => `${v}:${root.getPropertyValue(v)}`).join(';');
   d.head.innerHTML = `<title>grindcap</title><style>:root{${vars}}${CSS}</style>`;
   d.body.innerHTML = `
-    <div class="top"><b>grindcap</b><span id="share" class="mute"></span></div>
-    <div class="top"><span id="timer" class="timer">No session</span><span id="lv" class="mute"></span></div>
+    <div class="top"><b>grindcap</b><span><span id="share" class="mute"></span> <button id="mode" class="mode" title="Small window: timer, EXP/hr and potion cost only">–</button></span></div>
     <div class="warn" id="alert" hidden></div>
+    <div id="mini" hidden>
+      <div class="timer" id="mtimer"></div>
+      <div><span class="big" id="mxph">–</span> <span class="mute">EXP/hr</span> <span id="mpph" class="pct"></span></div>
+      <div class="mpot" id="mpot"></div>
+    </div>
+    <div id="full">
+    <div class="top"><span id="timer" class="timer">No session</span><span id="lv" class="mute"></span></div>
     <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
@@ -58,7 +69,14 @@ export async function openPopout(a) {
     </div>
     <div class="box scan" id="scan" hidden></div>
     <div class="box" id="res" hidden></div>
-    <div class="note mute" id="note"></div>`;
+    <div class="note mute" id="note"></div>
+    </div>`;
+  d.getElementById('mode').onclick = () => {
+    small = !small;
+    try { localStorage.setItem('grindcap.popSmall', small ? '1' : '0'); } catch { /* private window */ }
+    try { pip.resizeTo(...(small ? SMALL : FULL)); } catch { /* the browser may refuse: the layout still changes */ }
+    updatePopout();
+  };
   d.getElementById('start').onclick = () => api.start(pip.confirm.bind(pip));
   d.getElementById('end').onclick = () => api.end();
   d.getElementById('finish').onclick = () => api.finish();
@@ -87,6 +105,16 @@ export function updatePopout() {
   $('pg').hidden = !pot.pts.length;
   if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
   $('pgs').innerHTML = potionSummary(pot.pts);
+  d.body.classList.toggle('small', small);
+  $('mini').hidden = !small; $('full').hidden = small;
+  $('mode').textContent = small ? '+' : '–'; $('mode').title = small ? 'Full window' : 'Small window: timer, EXP/hr and potion cost only';
+  if (small) {
+    $('mtimer').innerHTML = $('timer').innerHTML;
+    $('mtimer').classList.toggle('idle', $('timer').classList.contains('idle'));
+    $('mxph').textContent = $('xph').textContent; $('mpph').textContent = $('pph').textContent;
+    const lp = pot.pts.at(-1);
+    $('mpot').innerHTML = lp ? `<span style="color:${HP}">HP ${fmt(lp.ema_hp)}/hr</span> · <span style="color:${MP}">MP ${fmt(lp.ema_mp)}/hr</span>` : '';
+  }
   $('start').disabled = !sharing || !!S.collect || running;
   $('end').disabled = !sharing || !!S.collect || !running;
   $('pause').disabled = !running || !!S.collect;

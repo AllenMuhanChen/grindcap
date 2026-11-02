@@ -22,7 +22,7 @@ const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLo
 const pctTxt = (v) => (v == null ? '' : ` <span class="mute">(${v.toFixed(1)}%/hr)</span>`);
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, lastPot: undefined, character: null });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null });
 
 await store.openStore();
 
@@ -34,7 +34,7 @@ const S = {
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
-    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, lastPot: undefined, character: store.get('character'),
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'),
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -49,7 +49,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
-  store.set('potions', []); store.set('qsNames', {}); store.set('character', null);
+  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null);
   S.view = S.cur;
 }
 
@@ -159,7 +159,7 @@ async function liveRead(now) {
   }
   store.set('live', live);
   if (S.trackPotions) {                 // the quick slots on the same frame; a missed reading is skipped
-    const p = readPotions(frame, C().qsNames);
+    const p = readPotions(frame, C().qsNames, C());
     C().lastPot = p;
     if (p) { C().potions.push({ time: now / 1000, potions: p }); store.set('potions', C().potions); }
   }
@@ -169,11 +169,32 @@ async function liveRead(now) {
 
 /** What's on the quick slots ([{key, count, name}]); null if the panel wasn't found or reading failed.
  * Names: config slots, then the session's (from the start inventory), then the icon among Use items. */
-function readPotions(frame, names = {}) {
+function readPotions(frame, names = {}, cur = null) {
   try {
+    S.qsCtx.sigs = cur?.qsSigs || {};
+    S.itemdb.extraPrices = S.qs.prices;
     const out = readQuickslot(frame, S.qsPanel, S.digits, S.itemdb, { ...names, ...S.qs.slots }, S.qsCache, store.get('useIds') || null, S.qsCtx);
+    if (cur) keepTrack(cur, out);
+    for (const p of out) { delete p.sig; delete p.changed; }
     return out.length ? out : null;
   } catch (e) { console.warn('quick slot read failed', e); return null; }
+}
+
+/** A key's icon changed: you swapped potions. Each reading keeps the name it was read with, and the
+ * series is per item, so the old potion's use stops there and the new one's starts. A swap the item
+ * data can't name is left unnamed for that reading (not counted) and checked again next time. */
+function keepTrack(cur, out) {
+  cur.qsSigs = cur.qsSigs || {};
+  for (const p of out) {
+    if (!p.sig) continue;
+    if (!cur.qsSigs[p.key]) cur.qsSigs[p.key] = p.sig;
+    else if (p.changed && p.name) {
+      const was = cur.qsNames[p.key];
+      cur.qsNames[p.key] = p.name; cur.qsSigs[p.key] = p.sig;
+      if (was !== p.name) snapNote(`Quick slot ${p.key}: now ${p.name}${was ? ` (was ${was})` : ''}`);
+    } else if (p.changed) warn(`Quick slot ${p.key}: the item changed and couldn't be named; not counted until it is.`);
+  }
+  if (cur === C()) { store.set('qsNames', cur.qsNames); store.set('qsSigs', cur.qsSigs); }
 }
 $('trackPot').onchange = (e) => { S.trackPotions = e.target.checked; store.set('trackPotions', S.trackPotions); render(); };
 
@@ -230,7 +251,7 @@ async function beginCollect(kind) {
     if (!frame) snapNote(`${kind}: no frame from the shared window yet; the status bar is read again during the scan`);
     else {
       await statusRead(frame, c, t);
-      if (kind === 'start' && S.trackPotions) c.potions = readPotions(frame);
+      if (kind === 'start' && S.trackPotions) { const tmp = { qsNames: {}, qsSigs: {} }; c.potions = readPotions(frame, {}, tmp); c.potionSigs = tmp.qsSigs; }
       if (kind === 'start') await readChar(frame, c);
     }
   } catch (e) {
@@ -398,6 +419,7 @@ async function finishCollect() {
     for (const id of Object.keys(snap.items)) if (!isNaN(+id) && S.itemdb.items[id]?.category === 'Use') useIds.add(+id);
     store.set('useIds', [...useIds]);
     cur.qsNames = c.potions ? matchByCount(c.potions, snap.items, S.itemdb) : {};
+    cur.qsSigs = c.potionSigs || {}; store.set('qsSigs', cur.qsSigs);
     cur.potions = c.potions ? [{ time: snap.time / 1000, potions: c.potions.map((p) => ({ ...p, name: cur.qsNames[p.key] ?? p.name })) }] : [];
     cur.lastPot = cur.potions[0]?.potions;
     cur.character = c.character ? { name: c.character.name, job: c.character.job } : S.char ? { ...S.char } : null;
@@ -727,7 +749,7 @@ function potPoints(v) {
   if (!v.start || !(v.potions || []).length) return [];
   const toS = (ms) => (ms == null ? null : ms / 1000), endS = v.end ? v.end.time / 1000 : Infinity;
   const rows = v.potions.filter((r) => r.time <= endS + 1);
-  return potionSeries({ time: v.start.time / 1000, pauses: (v.pauses || []).map(([a, b]) => [toS(a), toS(b)]) }, rows, S.qsTable, 5, v.qsNames || {})
+  return potionSeries({ time: v.start.time / 1000, pauses: (v.pauses || []).map(([a, b]) => [toS(a), toS(b)]) }, rows, S.qsTable, 5, {})   // each reading keeps the name it was read with (keys can change item mid-run)
     .filter((p) => p.ema_hp != null);
 }
 

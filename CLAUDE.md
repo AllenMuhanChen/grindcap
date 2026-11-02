@@ -181,6 +181,10 @@ web/lib/quickslot.js  quickslot.py: findPanel (coarse /4 search then refine, las
                       matchByCount on the start inventory (session.qsNames), then icon among kv "useIds" (Use ids seen in
                       snapshots). Rows in session.potions [{time s, potions}]; graph (graph.js drawPotionGraph) in the view
                       and the pop-out, describe line under the live stats.
+                      Swaps mid-run: keySig (6x6 mean colour, key label + digits masked) per key, baseline in session.qsSigs;
+                      sigDiff > SIG_CHANGE 18 (same item same session <= 7, other items >= 24 on fixtures) = item changed ->
+                      identify among potion-table Use items + useIds, qsNames[key] updated. Rows keep the name they were read
+                      with and potPoints passes no keyNames, so the old potion's series stops and the new one's starts.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.
@@ -198,7 +202,8 @@ web/app.js            Page = big control section (Share, Start/End/Pause/Discard
 web/review.js         Review panel: status inputs + meso field crop, "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.
-web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr
+web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr, –/+ button = small mode
+                      (timer, EXP/hr + %/hr, current HP/MP mesos/hr; resizeTo 260x150; localStorage grindcap.popSmall),
                       (5-min EMA), graph (web/graph.js), Start/End/Finish/Live, tab checklist + finish countdown, result.
                       Corrections: naming a look on the review panel (learn() in app.js) is kept in localStorage
                       "corrections" ({sig 24x24, id|'ignore', name, how, crop}), seeded into LookCache on load (a corrected

@@ -95,7 +95,7 @@ export function readQuickslot(frame, tmpl, digits, itemdb = null, names = {}, ca
   ctx.panel = panel;
   const boxes = slotBoxes(panel), s = frame.h / 1080, px = PITCH[0] * s, py = PITCH[1] * s;
   const useIcons = !!(itemdb && itemdb.ready);
-  const view = digits.pageView(frame, boxes, px, useIcons);
+  const view = digits.pageView(frame, boxes, px, true);      // colour: the icon's look tells a swapped item
   const origins = digits.slotOrigins(view, boxes, px, py, boxes[0]);
   const readings = digits.readView(view, origins);
   const [ox, oy] = digits.lastOffset;
@@ -104,19 +104,54 @@ export function readQuickslot(frame, tmpl, digits, itemdb = null, names = {}, ca
     const r = readings[i];
     const n = r.text === '0' && r.costs[0] < 0.2 ? 0 : r.value;     // a lone "0" must be a clear one
     if (n == null) return;
-    let name = names[key] ?? null;
-    if (name == null && useIcons) {
-      const [u, v] = origins[i];
-      const patch = slotPatch(view, u, v);
-      if (patch) {
-        const ignore = digits.digitMask(r, patch.h, patch.w, -4 - ox, -4 - oy);
-        ignore.fill(1, 0, (4 + LABEL_H) * patch.w);                    // the key label is drawn over the icon's top
-        name = identify(patch, ignore, itemdb, key, cache, candidates);
-      }
+    let name = names[key] ?? null, sig = null, changed = false;
+    const [u, v] = origins[i];
+    const patch = slotPatch(view, u, v);
+    if (patch) {
+      const ignore = digits.digitMask(r, patch.h, patch.w, -4 - ox, -4 - oy);
+      ignore.fill(1, 0, (4 + LABEL_H) * patch.w);                      // the key label is drawn over the icon's top
+      sig = keySig(patch, ignore);
+      const base = ctx.sigs?.[key];
+      if (base && sigDiff(sig, base) > SIG_CHANGE) {                   // a different item is on this key now
+        changed = true;
+        delete cache[key];
+        name = useIcons ? identify(patch, ignore, itemdb, key, cache, potionIds(itemdb, candidates)) : null;
+      } else if (name == null && useIcons) name = identify(patch, ignore, itemdb, key, cache, candidates);
     }
-    out.push({ key, count: n, name });
+    out.push({ key, count: n, name, sig, changed });
   });
   return out;
+}
+
+/** The icon's look without the key label and the number: mean colour of each cell of a 6x6 grid, over the
+ * pixels not covered. Stays put while the count changes; another item looks different. */
+export const SIG_CHANGE = 18;
+export function keySig(patch, ignore) {
+  const G = 6, out = [];
+  for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+    const ya = Math.floor(gy * patch.h / G), yb = Math.floor((gy + 1) * patch.h / G), xa = Math.floor(gx * patch.w / G), xb = Math.floor((gx + 1) * patch.w / G);
+    const acc = [0, 0, 0]; let n = 0;
+    for (let y = ya; y < yb; y++) for (let x = xa; x < xb; x++) {
+      const i = y * patch.w + x;
+      if (ignore[i]) continue;
+      for (let c = 0; c < 3; c++) acc[c] += patch.data[3 * i + c];
+      n++;
+    }
+    out.push(n >= 4 ? acc.map((a) => Math.round(a / n)) : null);
+  }
+  return out;
+}
+/** Mean absolute colour difference over the cells both signatures have. */
+export function sigDiff(a, b) {
+  let s = 0, n = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] && b[i]) { for (let c = 0; c < 3; c++) s += Math.abs(a[i][c] - b[i][c]); n += 3; }
+  return n ? s / n : 0;
+}
+/** Item-data ids a swapped-in item is looked for among: potions with a known price, then your Use items. */
+function potionIds(itemdb, candidates) {
+  const want = new Set(Object.keys(prices(itemdb.extraPrices)));
+  const ids = Object.entries(itemdb.items).filter(([, it]) => it.category === 'Use' && want.has(it.name)).map(([id]) => +id);
+  return [...new Set([...ids, ...(candidates || [])])];
 }
 
 function identify(patch, ignore, itemdb, key, cache, candidates) {
