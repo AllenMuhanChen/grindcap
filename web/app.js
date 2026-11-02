@@ -19,6 +19,7 @@ import { openPopout, updatePopout, popoutOpen } from './popout.js';
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }));
+const pctTxt = (v) => (v == null ? '' : ` <span class="mute">(${v.toFixed(1)}%/hr)</span>`);
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
 const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, lastPot: undefined, character: null });
@@ -81,7 +82,17 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
-  if (store.listSessions().some((x) => !('level' in x) || (x.result && !('revenue_per_hr' in x.result)))) await store.reindex();   // index from before map/level columns
+  if (store.listSessions().some((x) => !('level' in x) || (x.result && !('pct_per_hr' in x.result)))) {   // saved before these columns
+    for (const r of await store.allSessions()) {
+      if (r.start && r.end && !(r.result && 'pct_per_hr' in r.result)) {
+        r.fixes = r.fixes || noFixes();
+        r.result = compare(withFixes(r.start, 'start', r.fixes, nameOf), withFixes(r.end, 'end', r.fixes, nameOf), priceOf, r.pauses || []);
+        r.meta = meta(r);
+        await store.putSession(r);
+      }
+    }
+    await store.reindex();
+  }
   showTab(tab);
   recompute(C());
   // an ended session from the older single-session version goes into the list
@@ -594,7 +605,7 @@ function renderSummary() {
     ${rows.map((x) => `<tr class="itemrow" data-id="${x.id}"><td class="l">${esc(x.name || new Date(x.id).toLocaleString())}</td>
       <td class="l">${esc(x.character ? `${x.character.name}${x.character.job ? ` (${x.character.job})` : ''}` : '–')}</td>
       <td class="l">${esc(x.map || '–')}</td><td>${lv(x)}</td>
-      <td>${fmt(x.result?.minutes, 1)}</td><td>${fmt(x.result?.revenue_per_hr)}</td><td>${fmt(x.result?.cost_per_hr)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b></td></tr>`).join('')}</table>
+      <td>${fmt(x.result?.minutes, 1)}</td><td>${fmt(x.result?.revenue_per_hr)}</td><td>${fmt(x.result?.cost_per_hr)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b>${x.result?.pct_per_hr != null ? `<br><span class="mute small">${x.result.pct_per_hr.toFixed(1)}%/hr</span>` : ''}</td></tr>`).join('')}</table>
     <p class="mute small">${rows.length} of ${list.length} sessions. Click a column to sort (again to reverse), a session to open it. More summary views come here later.</p>`
     : `<p class="mute">${list.length ? 'No sessions match these filters.' : 'No saved sessions yet.'}</p>`;
   for (const h of $('summary').querySelectorAll('th[data-k]')) h.onclick = () => {
@@ -659,8 +670,8 @@ function renderTop() {
   const live = C().live, rows = live.rows, ser = liveSeries(rows, 5, C().pauses), last = rows.at(-1), s = ser.at(-1);
   $('liveStats').innerHTML = running() || S.collect ? [
     ['Level', last ? `${last.level} · ${last.pct}%` : '–'],
-    ['EXP/hr (5-min)', `<b>${fmt(s ? s.ema * 60 : null)}</b>`],
-    ['EXP/hr (session)', fmt(s ? s.cum * 60 : null)],
+    ['EXP/hr (5-min)', `<b>${fmt(s ? s.ema * 60 : null)}</b>${pctTxt(s?.emaPct)}`],
+    ['EXP/hr (session)', `${fmt(s ? s.cum * 60 : null)}${pctTxt(s?.pct)}`],
     ['EXP gained', fmt(s?.gained)],
     ['Readings', `${rows.length}${live.fails ? ` (${live.fails} failed)` : ''}`],
   ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('') : '';
@@ -724,7 +735,7 @@ function renderView() {
   renderGraph();
   if (r) {
     const k = [
-      ['Net mesos/hr incl. items', `<span class="big">${fmt(r.net_per_hr)}</span>`], ['EXP/hr', `<span class="big">${fmt(r.exp_per_hr)}</span>`],
+      ['Net mesos/hr incl. items', `<span class="big">${fmt(r.net_per_hr)}</span>`], ['EXP/hr', `<span class="big">${fmt(r.exp_per_hr)}</span>${pctTxt(r.pct_per_hr)}`],
       ['Revenue/hr (mesos + items gained)', fmt(r.revenue_per_hr)], ['Cost/hr (items used)', fmt(r.cost_per_hr)],
       ['Minutes', fmt(r.minutes, 1) + (r.paused_minutes > 0.05 ? ` <span class="mute">(+${fmt(r.paused_minutes, 1)} paused)</span>` : '')],
       ['EXP gained', fmt(r.exp)], ['Mesos change', fmt(r.mesos)],

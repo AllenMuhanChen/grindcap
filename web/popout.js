@@ -24,7 +24,7 @@ const CSS = `
   .chips span.done { border-color: var(--ok); color: var(--ok); }
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
-  .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
+  .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
   .scan .help { font-size: 14px; }
 `;
 
@@ -45,7 +45,7 @@ export async function openPopout(a) {
     <div class="top"><b>grindcap</b><span id="share" class="mute"></span></div>
     <div class="top"><span id="timer" class="mute">No session</span><span id="lv" class="mute"></span></div>
     <div class="warn" id="alert" hidden></div>
-    <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span></div>
+    <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
     <div class="mute" style="font-size:11px">dots: per reading · line: 5-min average · dashed: session</div>
@@ -77,7 +77,8 @@ export function updatePopout() {
   const ser = liveSeries(S.live.rows, 5, S.pauses), last = ser.at(-1), r = S.live.rows.at(-1);
   $('lv').textContent = r ? `Lv ${r.level} · ${r.pct}%` : '';
   $('xph').textContent = fmt(last ? last.ema * 60 : null);
-  $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr · ${fmt(last.ema)}/min · +${fmt(last.gained)} EXP` : (running ? 'waiting for two readings…' : '');
+  $('pph').textContent = last?.emaPct != null ? `${last.emaPct.toFixed(1)}%/hr` : '';
+  $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr${last.pct != null ? ` (${last.pct.toFixed(1)}%/hr)` : ''} · +${fmt(last.gained)} EXP` : (running ? 'waiting for two readings…' : '');
   drawGraph($('g'), ser, 60, 'EXP/hr');
   const pot = api.potions ? api.potions() : { pts: [], line: '' };
   $('pot').textContent = pot.line;
@@ -107,7 +108,7 @@ export function updatePopout() {
   if (res) {
     box.innerHTML = `<b>Session result</b><div class="kv">
       <span>Net mesos/hr incl. items</span><b>${fmt(res.net_per_hr)}</b>
-      <span>EXP/hr</span><b>${fmt(res.exp_per_hr)}</b>
+      <span>EXP/hr</span><b>${fmt(res.exp_per_hr)}${res.pct_per_hr != null ? ` (${res.pct_per_hr.toFixed(1)}%/hr)` : ''}</b>
       <span>Mesos/hr</span><span>${fmt(res.mesos_per_hr)}</span>
       <span>Minutes</span><span>${res.minutes}${res.paused_minutes > 0.05 ? ` (+${res.paused_minutes} paused)` : ''}</span></div>
       <div class="mute">Details and the review are in the browser tab.</div>`;

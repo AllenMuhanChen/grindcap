@@ -91,7 +91,7 @@ export function compare(start, end, priceOf, pauses = []) {
   const used = rows.filter((r) => r.value && r.change < 0).reduce((a, r) => a - r.value, 0);
   const net = (mesos || 0) + gained - used;
   return {
-    minutes: +(hours * 60).toFixed(1), paused_minutes: +((end.time - start.time) / 6e4 - hours * 60).toFixed(1), exp, exp_per_hr: perHr(exp), levels: (end.level || 0) - (start.level || 0),
+    minutes: +(hours * 60).toFixed(1), paused_minutes: +((end.time - start.time) / 6e4 - hours * 60).toFixed(1), exp, exp_per_hr: perHr(exp), pct_per_hr: hours > 0 && levelPct(start.level, start.exp, end.level, end.exp) != null ? +(levelPct(start.level, start.exp, end.level, end.exp) / hours).toFixed(2) : null, levels: (end.level || 0) - (start.level || 0),
     mesos, mesos_per_hr: perHr(mesos), items_gained_value: gained, items_used_value: used,
     net_mesos_incl_items: net, net_per_hr: perHr(net), revenue_per_hr: perHr((mesos || 0) + gained), cost_per_hr: perHr(used), items: rows,
     unpriced: rows.filter((r) => r.price == null).map((r) => r.name),
@@ -100,7 +100,16 @@ export function compare(start, end, priceOf, pauses = []) {
   };
 }
 
-/** Live readings [{t (ms), level, exp}] -> per-reading EXP/min, a 5-minute EMA and the session average. */
+/** Progress from (l0, e0) to (l1, e1) in % of a level (a level-up counts 100%), like snapshot._level_pct. */
+export function levelPct(l0, e0, l1, e1) {
+  const f = (l, e) => { const n = expToNext(l); return n ? l + e / n : null; };
+  if ([l0, e0, l1, e1].some((v) => v == null)) return null;
+  const a = f(l0, e0), b = f(l1, e1);
+  return a == null || b == null ? null : (b - a) * 100;
+}
+
+/** Live readings [{t (ms), level, exp}] -> per-reading EXP/min, a 5-minute EMA and the session average.
+ * pct = level %/hr since the first reading; emaPct = the 5-min EXP/hr as % of the current level per hour. */
 export function liveSeries(rows, tauMin = 5, pauses = []) {
   const out = [];
   if (rows.length < 2) return out;
@@ -114,7 +123,9 @@ export function liveSeries(rows, tauMin = 5, pauses = []) {
     const rate = g / dt;
     const k = 1 - Math.exp(-dt / tauMin);
     ema = ema == null ? rate : ema + k * (rate - ema);
-    out.push({ min: act(b.t), rate, ema, cum: total / act(b.t), gained: total });
+    const p = levelPct(rows[0].level, rows[0].exp, b.level, b.exp), need = expToNext(b.level);
+    out.push({ min: act(b.t), rate, ema, cum: total / act(b.t), gained: total, level: b.level,
+      pct: p == null ? null : p / (act(b.t) / 60), emaPct: need ? (ema * 60 / need) * 100 : null });
   }
   return out;
 }
