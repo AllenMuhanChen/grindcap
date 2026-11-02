@@ -214,20 +214,13 @@ async function beginCollect(kind) {
   if (kind === 'end' && cur.start?.map) c.map = cur.start.map;      // same map as at Start: not read again
   render();
   try {
-    const frame = await S.cap.grab();
-    const st = frame ? await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null) : {};
-    c.status = st;
-    if (kind === 'start' && S.trackPotions && frame) c.potions = readPotions(frame);
-    if (kind === 'start' && frame) await readChar(frame, c);
-    if (frame && st.expBox) {            // the EXP text as captured (with the "EXP." label), for the review
-      const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
-      c.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
-    }
-    snapNote(`${kind}: level ${st.level ?? '?'}, EXP ${fmt(st.exp)} [${st.pct ?? '?'}%]${st.checked ? '' : ' (not checked against the EXP table)'}`);
     if (kind === 'end' && isPaused(cur.pauses)) { cur.pauses.at(-1)[1] = t; store.set('pauses', cur.pauses); }   // End ends the pause
-    if (st.checked) {
-      if (kind === 'start') cur.live.rows = [];
-      cur.live.rows.push({ t, level: st.level, exp: st.exp, pct: st.pct });
+    const frame = await S.cap.grab();
+    if (!frame) snapNote(`${kind}: no frame from the shared window yet; the status bar is read again during the scan`);
+    else {
+      await statusRead(frame, c, t);
+      if (kind === 'start' && S.trackPotions) c.potions = readPotions(frame);
+      if (kind === 'start') await readChar(frame, c);
     }
   } catch (e) {
     warn(`Reading the status bar failed (${e.message}); the inventory scan goes on.`);
@@ -235,6 +228,36 @@ async function beginCollect(kind) {
     c.reading = false;                   // never leave the scan waiting, whatever failed above
   }
   render();
+}
+
+/** Level + EXP for a Start/End scan, with the EXP text's picture. Not read (or not fitting the EXP table):
+ * tried again on the scan's frames every few seconds (pageTick), so one bad frame can't lose it. */
+async function statusRead(frame, c, t, retry = false) {
+  const cur = C();
+  c.lastStatusTry = Date.now(); c.statusTries = (c.statusTries || 0) + 1;
+  let st;
+  try { st = await readStatus(frame, S.ctx, cur.start?.level ?? cur.live.rows.at(-1)?.level ?? null); } catch (e) { st = { why: e.message }; }
+  if (S.collect !== c) return;
+  // keep the best reading: a checked one wins over an unchecked one
+  if (!retry || st.checked || (!c.status.checked && st.exp != null && c.status.exp == null)) {
+    c.status = st;
+    if (st.expBox) {                     // the EXP text as captured (with the "EXP." label), for the review
+      const [x, y, w, h] = st.expBox, lab = Math.round(40 * (S.ctx.gameScale || 1.4));
+      c.expPic = picture(frame, x - lab, y, w + lab, h, 'image/png');
+    } else if (!c.expPic) {              // label not found: the bottom of the window, so you can see why
+      c.expPic = picture(frame, 0, Math.floor(frame.h * 0.9), Math.floor(frame.w * 0.6), Math.ceil(frame.h * 0.1), 'image/jpeg');
+    }
+  }
+  if (st.checked) {
+    if (c.kind === 'start') cur.live.rows = [];
+    cur.live.rows = cur.live.rows.filter((r) => r.t < c.t);   // a retry replaces this scan's row
+    cur.live.rows.push({ t: retry ? Date.now() : t, level: st.level, exp: st.exp, pct: st.pct });
+    c.statusLate = retry;
+    snapNote(`${c.kind}: level ${st.level}, EXP ${fmt(st.exp)} [${st.pct}%]${retry ? ' (read on a later frame of the scan)' : ''}`);
+  } else if (!retry || c.statusTries === 2) {
+    const why = st.why || (st.texts?.length ? `read "${st.texts.join(' | ')}"` : 'nothing read');
+    warn(`${c.kind}: EXP not read from the status bar (${why}). Keep the status bar visible; it is tried again while you scan.`);
+  }
 }
 
 /** Class and name from the status bar at Start. A name close to one seen before is taken as that one;
@@ -297,6 +320,8 @@ async function pageTick(now) {
   if (c.reading) return;
   const frame = await S.cap.grab();
   if (!frame) return;
+  if (!c.status.checked && (c.statusTries || 0) < 30 && now - (c.lastStatusTry || 0) > 2500) await statusRead(frame, c, c.t, true);
+  if (S.collect !== c) return;
   if (!c.map && c.lastNew) await tryMap(frame, now);   // after the first page, so the map never holds up the scan
   const inv = locateInventory(frame, S.title, S.ctx);
   if (!inv) { if (now - c.lastWarn > 3000) { warn('Inventory not found: open it (I) and keep it fully on screen.'); c.lastWarn = now; } return; }
@@ -340,7 +365,7 @@ async function pageTick(now) {
 
 function maybeFinish(now) {
   const c = S.collect;
-  if (COUNTED_TABS.every((t) => c.seen.has(t)) && c.lastNew && now - c.lastNew > 4000) finishCollect();
+  if (COUNTED_TABS.every((t) => c.seen.has(t)) && c.lastNew && now - c.lastNew > 4000 && (c.status.checked || (c.statusTries || 0) >= 3)) finishCollect();
 }
 
 async function finishCollect() {
@@ -353,6 +378,7 @@ async function finishCollect() {
     { pictures: c.pictures, map: c.map || null, map_picture: c.mapPic || null, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
     c.kind === 'end' ? 'first' : 'last');
   S.collect = null;
+  if (!c.status.checked) warn(`${c.kind}: EXP was never read from the status bar. Type it in on the review below (the picture shows what was captured).`);
   if (c.kind === 'start') {
     cur.start = snap; cur.id = snap.time; store.set('start', snap);
     cur.pauses = []; store.set('pauses', cur.pauses); store.set('live', cur.live);
