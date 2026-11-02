@@ -1,7 +1,7 @@
 // Always-on-top pop-out (Chrome/Edge Document Picture-in-Picture): the old control window's job.
 // Session timer, EXP/hr, Start/End/Finish, the tab checklist while scanning, the live graph and the
 // key results, so you don't have to switch back to the browser tab.
-import { drawGraph, drawPotionGraph } from './graph.js';
+import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
@@ -24,6 +24,7 @@ const CSS = `
   .chips span.done { border-color: var(--ok); color: var(--ok); }
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
+  .timer { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; } .timer.idle { font-size: 14px; font-weight: 400; color: var(--mute); }
   .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
   .scan .help { font-size: 14px; }
 `;
@@ -43,14 +44,14 @@ export async function openPopout(a) {
   d.head.innerHTML = `<title>grindcap</title><style>:root{${vars}}${CSS}</style>`;
   d.body.innerHTML = `
     <div class="top"><b>grindcap</b><span id="share" class="mute"></span></div>
-    <div class="top"><span id="timer" class="mute">No session</span><span id="lv" class="mute"></span></div>
+    <div class="top"><span id="timer" class="timer">No session</span><span id="lv" class="mute"></span></div>
     <div class="warn" id="alert" hidden></div>
     <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
-    <div class="mute" style="font-size:11px">dots: per reading · line: 5-min average · dashed: session</div>
     <div class="mute note" id="pot"></div>
     <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
+    <div id="pgs" class="note"></div>
     <div class="row">
       <button id="start" class="primary">Start</button><button id="end">End</button>
       <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
@@ -73,7 +74,8 @@ export function updatePopout() {
   const sharing = !!(S.cap && S.cap.live);
   $('share').innerHTML = sharing ? '<span class="ok">● sharing</span>' : '<span class="bad">● not sharing</span>';
   const running = api.running(), paused = isPaused(S.pauses);
-  $('timer').innerHTML = S.collect ? `Scanning ${S.collect.kind} pages` : running ? `${paused ? '<b class="bad">PAUSED</b>' : 'Session'} ${hms(activeMs(S.start.time, Date.now(), S.pauses))}` : S.end ? 'Session ended' : 'No session';
+  $('timer').innerHTML = S.collect ? `Scanning ${S.collect.kind} pages` : running ? `${paused ? '<span class="bad">PAUSED</span> ' : ''}${hms(activeMs(S.start.time, Date.now(), S.pauses))}` : S.end ? 'Session ended' : 'No session';
+  $('timer').classList.toggle('idle', !running || !!S.collect);
   const ser = liveSeries(S.live.rows, 5, S.pauses), last = ser.at(-1), r = S.live.rows.at(-1);
   $('lv').textContent = r ? `Lv ${r.level} · ${r.pct}%` : '';
   $('xph').textContent = fmt(last ? last.ema * 60 : null);
@@ -84,6 +86,7 @@ export function updatePopout() {
   $('pot').textContent = pot.line;
   $('pg').hidden = !pot.pts.length;
   if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
+  $('pgs').innerHTML = potionSummary(pot.pts);
   $('start').disabled = !sharing || !!S.collect || running;
   $('end').disabled = !sharing || !!S.collect || !running;
   $('pause').disabled = !running || !!S.collect;
@@ -111,7 +114,7 @@ export function updatePopout() {
       <span>EXP/hr</span><b>${fmt(res.exp_per_hr)}${res.pct_per_hr != null ? ` (${res.pct_per_hr.toFixed(1)}%/hr)` : ''}</b>
       <span>Mesos/hr</span><span>${fmt(res.mesos_per_hr)}</span>
       <span>Minutes</span><span>${res.minutes}${res.paused_minutes > 0.05 ? ` (+${res.paused_minutes} paused)` : ''}</span></div>
-      <div class="mute">Details and the review are in the browser tab.</div>`;
+`;
   }
   $('note').textContent = api.lastNote() || '';
 }

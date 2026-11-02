@@ -13,7 +13,7 @@ import * as store from './lib/store.js';
 import { readMap } from './lib/mapname.js';
 import { readQuickslot, matchByCount, describe, potionSeries, prices } from './lib/quickslot.js';
 import { renderReview } from './review.js';
-import { drawGraph, drawPotionGraph } from './graph.js';
+import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
 
 const $ = (id) => document.getElementById(id);
@@ -137,7 +137,7 @@ async function onTick() {
   if (!S.cap || !S.cap.live || S.busy) return;
   S.busy = true;
   try {
-    const every = +$('every').value * 1000, live = C().live;
+    const every = Math.max(60, +$('every').value) * 1000, live = C().live;   // at least a minute: shorter gaps are mostly noise
     if (S.collect) await pageTick(now).catch((e) => warn(`Page read failed: ${e.message}`));
     else if (liveActive() && now - (live.rows.at(-1)?.t || 0) >= every && now - (live.lastTry || 0) >= every) await liveRead(now);
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
@@ -662,7 +662,7 @@ function renderSession() {
   $('popout').hidden = popoutOpen();
   $('sessionLine').innerHTML = c
     ? `<b>${c.kind === 'start' ? 'Start' : 'End'}: scan your inventory</b> ` + COUNTED_TABS.map((t) => `<span class="chip ${c.seen.has(t) ? 'done' : ''}">${c.seen.has(t) ? '✓ ' : ''}${t}${c.pages[t] ? ' ' + c.pages[t].length : ''}</span>`).join('')
-    : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} <b>${hms(activeMs(C().start.time, Date.now(), C().pauses))}</b>${C().start.map ? ` · ${esc(C().start.map.name)}` : ''}`
+    : run ? `${paused ? '<b class="bad">PAUSED</b>' : '<span class="ok">Session running</span>'} <span class="timer">${hms(activeMs(C().start.time, Date.now(), C().pauses))}</span>${C().start.map ? ` · ${esc(C().start.map.name)}` : ''}`
     : '<span class="mute">No session running. Share the game window, then press Start.</span>';
 }
 
@@ -719,6 +719,7 @@ function renderGraph() {
   const pts = potPoints(v);
   $('potWrap').hidden = !pts.length;
   if (pts.length) drawPotionGraph($('potGraph'), pts);
+  $('potSum').innerHTML = potionSummary(pts);
 }
 
 /** Potion mesos/hr points for a session (live readings up to its end), like review.py _potions. */

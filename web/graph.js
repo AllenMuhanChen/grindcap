@@ -16,69 +16,93 @@ function fit(cv) {
 }
 const short = (v) => (v < 0 ? '-' + short(-v) : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e5 ? `${(v / 1000).toFixed(0)}k` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
 
-/** A value in a box with its top at `by`, right-aligned at xr. */
-function tag(g, text, xr, by, color, ink, bg) {
+/** Current values in boxes to the right of the plot: a dot on each line's end, a leader line from the dot
+ * to its box's left edge. Boxes sit at their line's height, pushed apart (never overlapping) and kept
+ * inside [top, bottom]. items: [{y, text, color}]; xEnd = where the lines end; xBox = boxes' left edge. */
+function rightLabels(g, items, xEnd, xBox, top, bottom, ink, bg) {
   g.font = TAG;
-  const w = g.measureText(text).width + 14, h = TAG_H;
-  g.fillStyle = bg; g.fillRect(xr - w, by, w, h);
-  g.strokeStyle = color; g.lineWidth = 1.5; g.strokeRect(xr - w + 0.75, by + 0.75, w - 1.5, h - 1.5);
-  g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, xr - w / 2, by + h / 2 + 1);
+  const h = TAG_H, gap = 4;
+  const boxes = items.map((it) => ({ ...it, w: g.measureText(it.text).width + 14, by: it.y - h / 2 })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < boxes.length; i++) boxes[i].by = Math.max(boxes[i].by, boxes[i - 1].by + h + gap);   // push down
+  if (boxes.length) {
+    const over = boxes.at(-1).by + h - bottom;
+    if (over > 0) for (const b of boxes) b.by -= over;                                                      // back up into view
+    boxes[0].by = Math.max(boxes[0].by, top);
+    for (let i = 1; i < boxes.length; i++) boxes[i].by = Math.max(boxes[i].by, boxes[i - 1].by + h + gap);
+  }
+  for (const b of boxes) {
+    const my = b.by + h / 2;
+    g.strokeStyle = b.color; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xEnd, b.y); g.lineTo(xBox, my); g.stroke();
+    g.fillStyle = b.color; g.beginPath(); g.arc(xEnd, b.y, 4, 0, 7); g.fill();
+    g.fillStyle = bg; g.fillRect(xBox, b.by, b.w, h);
+    g.strokeStyle = b.color; g.strokeRect(xBox + 0.75, b.by + 0.75, b.w - 1.5, h - 1.5);
+    g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.text, xBox + b.w / 2, my + 1);
+  }
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
-  return by;
+}
+const labelWidth = (g, texts) => { g.font = TAG; return Math.max(0, ...texts.map((t) => g.measureText(t).width + 14)); };
+
+/** Y limits from the smoothed and session lines: their range plus 25% (at least 5% of the top), not from 0
+ * (snapshot.y_range). floor = lowest allowed (null: may go negative). */
+function yRange(vals, floor = 0) {
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = Math.max((hi - lo) * 0.25, Math.max(Math.abs(hi), Math.abs(lo)) * 0.05, 1);
+  return [floor == null ? lo - pad : Math.max(floor, lo - pad), hi + pad];
 }
 
+function axes(g, x0, x1, y0, y1, lo, hi, t1, title, ink, Y) {
+  g.font = AXIS; g.textAlign = 'right'; g.textBaseline = 'middle';
+  for (const f of [0, 0.5, 1]) {
+    const v = lo + (hi - lo) * f;
+    g.strokeStyle = ink; g.globalAlpha = 0.2; g.beginPath(); g.moveTo(x0, Y(v)); g.lineTo(x1, Y(v)); g.stroke(); g.globalAlpha = 1;
+    g.fillStyle = ink; g.fillText(short(v), x0 - 4, Y(v));
+  }
+  if (lo < 0 && hi > 0) { g.strokeStyle = ink; g.globalAlpha = 0.6; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x1, Y(0)); g.stroke(); g.globalAlpha = 1; }
+  g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText(title, x0 + 4, 2);
+  g.textAlign = 'right'; g.textBaseline = 'bottom'; g.fillText(`${t1.toFixed(1)} min`, x1, H0(g));
+  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+}
+const H0 = (g) => g.canvas.clientHeight || g.canvas.height;
+
+/** EXP/hr: dots = each reading, solid = 5-min average (current value boxed on the right), dashed = session. */
 export function drawGraph(cv, ser, mult = 1, unit = 'EXP/min') {
-  const [g, W, H] = fit(cv), P = 62;
+  const [g, W, H] = fit(cv);
   const css = getComputedStyle(cv.ownerDocument.documentElement);
   const ink = css.getPropertyValue('--mute') || '#888', acc = css.getPropertyValue('--acc') || '#2f6fde';
   const text = css.getPropertyValue('--ink') || '#111', bg = css.getPropertyValue('--card') || '#fff';
   if (ser.length < 1) { g.fillStyle = ink; g.font = AXIS; g.fillText(`${unit} appears after two readings.`, 8, H / 2); return; }
   const pts = ser.map((p) => ({ min: p.min, rate: p.rate * mult, ema: p.ema * mult, cum: p.cum * mult }));
-  const xmax = Math.max(1, pts.at(-1).min), ys = pts.flatMap((p) => [p.ema, p.cum]);
-  const ymax = Math.max(...ys) * 1.15 || 1, ymin = Math.max(0, Math.min(...ys) * 0.85);
-  const X = (m) => P + (W - P - 8) * m / xmax, Y = (v) => H - 18 - (H - 26) * (v - ymin) / (ymax - ymin || 1);
-  g.strokeStyle = ink; g.globalAlpha = 0.3; g.beginPath(); g.moveTo(P, H - 18); g.lineTo(W - 8, H - 18); g.stroke(); g.globalAlpha = 1;
-  g.fillStyle = ink; g.font = AXIS;
-  g.fillText(short(ymax), 2, 14); g.fillText(short(ymin), 2, H - 20);
-  g.textAlign = 'right'; g.fillText(`${xmax.toFixed(1)} min`, W - 8, H - 3); g.textAlign = 'left';
+  const per = unit.includes('/') ? unit.slice(unit.indexOf('/')) : '';
+  const label = `${short(pts.at(-1).ema)}${per}`;
+  const x0 = 62, x1 = W - labelWidth(g, [label]) - 22, y0 = H - 20, y1 = 22, t1 = Math.max(1, pts.at(-1).min);
+  const [lo, hi] = yRange(pts.flatMap((p) => [p.ema, p.cum]));
+  const X = (m) => x0 + (x1 - x0) * m / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
+  axes(g, x0, x1, y0, y1, lo, hi, t1, unit, ink, Y);
   g.fillStyle = acc; g.globalAlpha = 0.45;
-  for (const p of pts) { const y = Math.min(H - 18, Math.max(2, Y(p.rate))); g.beginPath(); g.arc(X(p.min), y, 2.5, 0, 7); g.fill(); }
+  for (const p of pts) { g.beginPath(); g.arc(X(p.min), Y(p.rate), 2.5, 0, 7); g.fill(); }
   g.globalAlpha = 1; g.strokeStyle = acc; g.lineWidth = 2;
   g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(p.min), Y(p.ema)) : g.moveTo(X(p.min), Y(p.ema)))); g.stroke();
   g.setLineDash([5, 4]); g.lineWidth = 1.5; g.strokeStyle = ink;
   g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(p.min), Y(p.cum)) : g.moveTo(X(p.min), Y(p.cum)))); g.stroke();
   g.setLineDash([]);
-  // current EXP/hr (the 5-min average now) in a box at the end of its line, like gui.py
-  const last = pts.at(-1);
-  const ey = Y(last.ema), by = ey - TAG_H - 4 >= 2 ? ey - TAG_H - 4 : Math.min(ey + 4, H - 18 - TAG_H);   // above the line's end, below if no room
-  tag(g, `${short(last.ema)}${unit.includes('/') ? unit.slice(unit.indexOf('/')) : ''}`, W - 8, by, acc, text, bg);
+  rightLabels(g, [{ y: Y(pts.at(-1).ema), text: label, color: acc }], X(pts.at(-1).min), x1 + 14, y1, y0, text, bg);
 }
 
 /** Mesos/hr spent on HP (orange) and MP (blue) potions, like gui.py's potion graph: per-reading rate
- * (faint dots), 5-min average (solid, current value boxed at its end), session (dashed). Net: potions
- * gained count as negative, so the axis may go below 0. The y-axis fits the lines (snapshot.y_range). */
+ * (faint dots), 5-min average (solid, current value boxed on the right), session (dashed). Net: potions
+ * gained count as negative, so the axis may go below 0. */
 export function drawPotionGraph(cv, pts) {
   const [g, W, H] = fit(cv);
   const css = getComputedStyle(cv.ownerDocument.documentElement);
   const ink = css.getPropertyValue('--mute') || '#888', text = css.getPropertyValue('--ink') || '#111', bg = css.getPropertyValue('--card') || '#fff';
   pts = pts.filter((p) => p.ema_hp != null);
   if (!pts.length) { g.fillStyle = ink; g.font = AXIS; g.fillText('Potion mesos/hr appears after two quick slot readings.', 8, H / 2); return; }
-  const vals = pts.flatMap((p) => ['ema_hp', 'ema_mp', 'cum_hp', 'cum_mp'].map((k) => p[k])).filter((v) => v != null);
-  let lo = Math.min(...vals), hi = Math.max(...vals);
-  const pad = Math.max((hi - lo) * 0.25, Math.max(Math.abs(hi), Math.abs(lo)) * 0.05, 1);
-  lo -= pad; hi += pad;
-  const x0 = 58, x1 = W - 8, y0 = H - 22, y1 = 8, t1 = Math.max(pts.at(-1).t, 1);
+  const kinds = [['hp', HP, 'HP'], ['mp', MP, 'MP']];
+  const last = pts.at(-1), labels = kinds.map(([kind, , name]) => `${name} ${short(last[`ema_${kind}`])}/hr`);
+  const x0 = 58, x1 = W - labelWidth(g, labels) - 22, y0 = H - 20, y1 = 22, t1 = Math.max(last.t, 1);
+  const [lo, hi] = yRange(pts.flatMap((p) => ['ema_hp', 'ema_mp', 'cum_hp', 'cum_mp'].map((k) => p[k])).filter((v) => v != null), null);
   const X = (t) => x0 + (x1 - x0) * t / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
-  const k = short;
-  g.font = AXIS; g.textAlign = 'right'; g.textBaseline = 'middle';
-  for (const f of [0, 0.5, 1]) {
-    const v = lo + (hi - lo) * f;
-    g.strokeStyle = ink; g.globalAlpha = 0.2; g.beginPath(); g.moveTo(x0, Y(v)); g.lineTo(x1, Y(v)); g.stroke(); g.globalAlpha = 1;
-    g.fillStyle = ink; g.fillText(k(v), x0 - 4, Y(v));
-  }
-  if (lo < 0 && hi > 0) { g.strokeStyle = ink; g.globalAlpha = 0.6; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x1, Y(0)); g.stroke(); g.globalAlpha = 1; }
-  g.textAlign = 'left'; g.fillStyle = ink; g.fillText('potion mesos/hr', x0 + 4, y1 + 6); g.textAlign = 'right'; g.fillText(`${t1.toFixed(1)} min`, x1, H - 6);
-  const kinds = [['hp', '#eb6834', 'HP'], ['mp', '#2a78d6', 'MP']];
+  axes(g, x0, x1, y0, y1, lo, hi, t1, 'potion mesos/hr', ink, Y);
   for (const [kind, color] of kinds) {
     g.fillStyle = color; g.globalAlpha = 0.4;
     for (const p of pts) if (p[`raw_${kind}`] != null) { g.beginPath(); g.arc(X(p.t), Y(p[`raw_${kind}`]), 2.5, 0, 7); g.fill(); }
@@ -92,16 +116,15 @@ export function drawPotionGraph(cv, pts) {
     }
     g.setLineDash([]);
   }
-  // current 5-min value of each line in a box at its end, as near its line as it fits without overlapping
-  const ends = kinds.map(([kind, color, name]) => [Y(pts.at(-1)[`ema_${kind}`]), kind, color, name]).sort((x, y) => x[0] - y[0]);
-  const clear = (by, other) => other == null || by + TAG_H + 2 <= other || by >= other + TAG_H + 2;
-  let prev = null;
-  ends.forEach(([ey, kind, color, name], i) => {
-    const label = `${name} ${k(pts.at(-1)[`ema_${kind}`])}/hr`;
-    const tries = i === 0 ? [ey - TAG_H - 4, ey + 4] : [ey + 4, ey - TAG_H - 4];
-    let by = tries.find((t) => t >= 0 && t + TAG_H <= y0 && clear(t, prev));
-    if (by == null) by = prev != null && prev + 2 * TAG_H + 2 <= y0 ? prev + TAG_H + 2 : Math.max(0, (prev ?? ey) - TAG_H - 2);
-    prev = tag(g, label, x1, by, color, text, bg);
-  });
-  g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  rightLabels(g, kinds.map(([kind, color], i) => ({ y: Y(last[`ema_${kind}`]), text: labels[i], color })), X(last.t), x1 + 14, y1, y0, text, bg);
+}
+
+export const HP = '#eb6834', MP = '#2a78d6';
+
+/** One line under a potion graph: mesos/hr over the whole session and mesos spent so far, per kind. */
+export function potionSummary(pts) {
+  const p = (pts || []).filter((q) => q.cum_hp != null).at(-1);
+  if (!p) return '';
+  const f = (v) => (v == null ? '–' : Math.round(v).toLocaleString());
+  return `Session average: <b style="color:${HP}">HP ${f(p.cum_hp)}/hr</b> (${f(p.hp)} spent) · <b style="color:${MP}">MP ${f(p.cum_mp)}/hr</b> (${f(p.mp)} spent)`;
 }

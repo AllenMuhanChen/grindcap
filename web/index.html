@@ -50,7 +50,8 @@
   #control h1 { font-size: 22px; margin: 0; }
   #control .row { margin-top: 10px; }
   .bigrow button { font-size: 16px; padding: 10px 18px; }
-  .sessline { margin-top: 10px; font-size: 16px; }
+  .sessline { margin-top: 10px; font-size: 16px; } .timer { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: middle; margin: 0 6px; }
+  .potsum { font-size: 14px; margin-top: 4px; }
   #control .stats { margin: 10px 0 0; } #control .stats:empty { display: none; }
   #control .stats div { font-size: 18px; } #control .stats div > span:first-child { font-size: 12px; }
   .datarow { border-top: 1px solid var(--line); padding-top: 10px; }
@@ -85,7 +86,7 @@
     </div>
     <div class="row">
       <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
-      <span class="small mute">Character (read from the status bar at Start):</span>
+      <span class="small mute" title="Read from the status bar at Start">Character</span>
       <input id="charName" class="st" placeholder="name" title="Character name: read at Start; type to correct it">
       <select id="charJob" title="Class"></select>
     </div>
@@ -124,11 +125,10 @@
     <div id="result"></div>
     <div id="graphWrap" hidden>
       <canvas id="graph" width="940" height="170"></canvas>
-      <div class="mute small">EXP/hr. dots: per reading · line: 5-min average · dashed: session average · x: active minutes</div>
     </div>
     <div id="potWrap" hidden>
       <canvas id="potGraph" width="940" height="140" style="height:140px"></canvas>
-      <div class="mute small">Mesos/hr spent on potions at NPC price: <span style="color:#eb6834">HP</span>, <span style="color:#2a78d6">MP</span>. Potions gained count negative, so it can go below 0.</div>
+      <div id="potSum" class="potsum"></div>
     </div>
     <div id="review"></div>
   </section>
@@ -142,8 +142,8 @@
 
   <details>
     <summary>How scanning works, icons you named, capture details</summary>
-    <p class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP is read every
-      <select id="every"><option>10</option><option selected>15</option><option>30</option><option>60</option></select> s.
+    <p class="mute">Start reads your level and EXP, then takes your inventory: open it (I) and click through Equip, Use, Set-up and Etc, scrolling each to the bottom. A page is captured each time the view holds still; keep the mouse off the items (tooltips block the read). It finishes by itself 4 s after all four tabs have a page. While the session runs, EXP (and the quick slots) are read every
+      <select id="every"><option selected>60</option><option>120</option><option>300</option></select> s.
       End does the same inventory pass and saves the session. Paused time doesn't count towards the per-hour rates. Nothing is uploaded and nothing is sent to the game.</p>
     <div class="row"><span id="corrCount" class="mute"></span>
       <button id="corrDownload" disabled title="The icons you named, with their pictures: send this file to Allen">Download my corrections</button>
