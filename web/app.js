@@ -460,7 +460,29 @@ function defaultName(r) {
 }
 
 const nameOf = (id) => S.itemdb.name(id);
-const priceOf = (id) => S.itemdb.items[id]?.price ?? store.get('prices')?.[id] ?? null;   // kv prices: items from grindcap-gui with your own price
+// your prices (set on the review, kv "myPrices") win, then the item data's (your catalog price, else NPC), then
+// prices that came with grindcap-gui items that have no item-data id (kv "prices")
+const basePrice = (id) => S.itemdb.items[id]?.price ?? store.get('prices')?.[id] ?? null;
+const userPrice = (id) => store.get('myPrices')?.[id] ?? null;
+const priceOf = (id) => userPrice(id) ?? basePrice(id);
+let repriceTimer = null;
+/** A price you typed: every session is worked out again with it (the one shown at once, the others after). */
+function setPrice(id, v) {
+  const m = { ...(store.get('myPrices') || {}) };
+  if (v == null || Number.isNaN(v)) delete m[id]; else m[id] = v;
+  store.set('myPrices', m);
+  recompute(S.view);
+  clearTimeout(repriceTimer);
+  repriceTimer = setTimeout(async () => {
+    for (const r of await store.allSessions()) {
+      if (!r.start || !r.end || r.id === S.view.id) continue;
+      r.fixes = r.fixes || noFixes();
+      r.result = compare(withFixes(r.start, 'start', r.fixes, nameOf), withFixes(r.end, 'end', r.fixes, nameOf), priceOf, r.pauses || []);
+      await store.putSession(r);
+    }
+    renderNav(); if (tab === 'summary') renderSummary();
+  }, 800);
+}
 
 /** Apply a session's fixes, compare, save, redraw. Called after every edit on the review panel. */
 function recompute(v = S.view) {
@@ -545,7 +567,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['prices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -576,6 +598,7 @@ $('restoreFile').onchange = async (e) => {
     await store.putSession(r);
   }
   if (kv.prices) store.set('prices', { ...kv.prices, ...(store.get('prices') || {}) });
+  if (kv.myPrices) store.set('myPrices', { ...kv.myPrices, ...(store.get('myPrices') || {}) });   // a price set here wins
   // named icons: the backup's are added (a look named here wins)
   const keys = new Set(S.corrections.map((c) => c.key));
   for (const c of kv.corrections || []) if (!keys.has(c.key)) { S.corrections.push(c); S.cache.add(Float32Array.from(c.sig), c.id, c.name, [], { corrected: true }, c.crop); }
@@ -770,7 +793,7 @@ function renderView() {
     $('result').innerHTML = v.start ? `<p class="mute">Start: level ${v.start.level ?? '?'}, mesos ${fmt(v.start.mesos)}, ${Object.keys(v.start.items).length} kinds of items. Results appear after End.</p>`
       : '<p class="mute">Nothing here yet. Share the game window and press Start; finished sessions are kept and listed above.</p>';
   }
-  renderReview($('review'), { ...v, itemdb: S.itemdb, reviewVersion: S.ver }, { nameOf, priceOf, recompute: () => recompute(v), learn, maps: S.maps });
+  renderReview($('review'), { ...v, itemdb: S.itemdb, reviewVersion: S.ver }, { nameOf, priceOf, userPrice, basePrice, setPrice, recompute: () => recompute(v), learn, maps: S.maps });
 }
 
 async function renderStorage() {

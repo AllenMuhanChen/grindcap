@@ -201,7 +201,8 @@ web/app.js            Page = big control section (Share, Start/End/Pause/Discard
                       End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
                       minutes and liveSeries x/rates), Discard. Pages auto-captured (PageWatcher), auto-finish when
                       Equip/Use/Setup/Etc seen + 4 s idle. Page tab = inventory.pageTab: items decide, but a Cash/Deco button wins unless 70% of filled slots agree (cash items are not in the item data and false-match). Start/end snapshots, live rows, pauses in localStorage.
-web/review.js         Review panel: status inputs + meso field crop, "Not recognised" cards (slot picture, why, 6 closest
+web/review.js         Review panel: status inputs + meso field crop, price input per item row (kv "myPrices", global: wins over
+                      item-data/catalog/NPC price; app.setPrice recomputes the shown session at once, all saved ones after 0.8 s), "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.
 web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr, –/+ button = small mode

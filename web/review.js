@@ -87,7 +87,7 @@ export function renderReview(el, S, h) {
       : m ? `<span class="tag" title="score ${m.score}; next: ${esc(m.runnerUp)}">${m.ratio}× better than ${esc(m.runnerUp)}</span>` : '<span class="tag">re-checked look</span>';
     html += `<tr class="itemrow" data-id="${esc(r.id)}"><td>${pic ? `<img class="slot" src="${pic}" alt="">` : ''}</td>
       <td class="l">${esc(r.name)} ${fixedQty ? '<span class="tag">count fixed</span>' : ''}</td><td class="l">${how}</td>
-      <td>${fmt(r.a)}</td><td>${fmt(r.b)}</td><td>${r.change > 0 ? '+' : ''}${fmt(r.change)}</td><td>${fmt(r.price)}</td><td>${fmt(r.value)}</td></tr>`;
+      <td>${fmt(r.a)}</td><td>${fmt(r.b)}</td><td>${r.change > 0 ? '+' : ''}${fmt(r.change)}</td><td><input class="price" data-id="${esc(r.id)}" value="${h.userPrice(r.id) ?? ''}" placeholder="${h.basePrice(r.id) == null ? 'price?' : fmt(h.basePrice(r.id))}" title="Mesos each. Your price is used in every session; clear it to go back to ${h.basePrice(r.id) == null ? 'no price' : 'the NPC price ' + fmt(h.basePrice(r.id))}."></td><td>${fmt(r.value)}</td></tr>`;
     if (open.has(r.id)) {
       html += `<tr class="detail"><td colspan="8">${KINDS.filter((k) => eff[k]).map((k) => `<div class="col"><b>${k}</b><div class="slotgrid">${slots.filter((s) => s.kind === k).map((s) => `
         <div class="slotbox"><img class="slot" src="${s.crop || ''}" alt="">
@@ -125,6 +125,7 @@ function bind(el, S0, h0) {
       const id = b.dataset.id === 'ignore' ? 'ignore' : +b.dataset.id;
       S.fixes.looks[b.dataset.key] = id; h.learn(b.dataset.key, id, id === 'ignore' ? 'ignored' : 'picked a guess'); h.recompute(); return;
     }
+    if (e.target.closest('input')) return;              // typing a price shouldn't open the row
     const row = e.target.closest('tr.itemrow');
     if (row) { const id = row.dataset.id; open.has(id) ? open.delete(id) : open.add(id); S.reviewVersion++; h.recompute(); }
   });
@@ -140,6 +141,9 @@ function bind(el, S0, h0) {
       const v = t.value.trim();
       if (v === '') delete S.fixes.status[t.dataset.kind].map; else S.fixes.status[t.dataset.kind].map = v;
       h.recompute();
+    } else if (t.classList.contains('price')) {
+      const v = t.value.replace(/[^\d.]/g, '');
+      h.setPrice(t.dataset.id, v === '' ? null : +v);
     } else if (t.classList.contains('qty')) {
       S.fixes.qty[`${t.dataset.kind}|${t.dataset.ref}`] = Math.max(0, +t.value || 0);
       h.recompute();
