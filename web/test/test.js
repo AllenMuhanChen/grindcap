@@ -159,6 +159,32 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const tail = [[0, 44, 1000], [1, 44, 11000], [2, 44, 21000], [3, 45, 21000]].map(([t, level, exp]) => ({ t: t * m, level, exp }));
   if (plausibleRows(tail).length !== 3) fails.push('tail spike not held back');
 }
+// A 2560x1440 screen (the game stretched to 1440p): every reader on upscaled screenshots
+{
+  const up = async (name) => {
+    const im = new Image(); im.src = `../../tests/fixtures/${name}`; await im.decode();
+    const cv = new OffscreenCanvas(2560, 1440), g = cv.getContext('2d');
+    g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, 2560, 1440);
+    const d = g.getImageData(0, 0, 2560, 1440).data, m = mat(2560, 1440, 3);
+    for (let i = 0; i < 2560 * 1440; i++) { m.data[3 * i] = d[4 * i]; m.data[3 * i + 1] = d[4 * i + 1]; m.data[3 * i + 2] = d[4 * i + 2]; }
+    return m;
+  };
+  const panel = await loadImage('../data/quickslot_panel.png', true);
+  for (const name of ['etc_excavation.png', 'use_tab_tooltip.png', 'equip_burnt_land.png']) {
+    const fr = await up(name), want = expected[name], ctx = { expLabel: label };
+    const st = await readStatus(fr, ctx), inv = locateInventory(fr, title, ctx);
+    const got = { level: st.level, exp: st.exp, pct: st.pct };
+    if (inv) {
+      got.mesos = (await readMesosField(fr, inv.grid)).value; got.tab = detectTab(fr, inv.grid); got.covered = coveredSlots(fr, inv.grid);
+      got.nums = (await readPage(fr, inv.grid, digits, null, new LookCache())).map((row) => row.map((s) => (s.id && s.id !== '?' ? s.qty : 0)));
+    }
+    for (const k of ['level', 'exp', 'pct', 'mesos', 'tab', 'covered', 'nums']) if (JSON.stringify(got[k]) !== JSON.stringify(want[k])) fails.push(`1440p ${name} ${k}: got ${JSON.stringify(got[k])}, want ${JSON.stringify(want[k])}`);
+    const q = readQuickslot(fr, panel, digits).map((p) => p.count).join(',');
+    const ch = await readCharacter(fr);
+    log(`1440p ${name}: scale ${ctx.gameScale?.toFixed(3)}, quick slots ${q}, ${ch && ch.job}/${ch && ch.name}`);
+    if (!ch || ch.name !== 'ImmovableObj') fails.push(`1440p ${name} character: ${JSON.stringify(ch)}`);
+  }
+}
 // The pointing-hand pointer, on a page picture the browser version saved (screen pixels, 1920x1080 game)
 {
   const frame = await loadImage('../../tests/fixtures/cursor_page.png');

@@ -121,8 +121,10 @@ function prepCursor(c, k) {
 export function coveredSlots(frame, grid, frac = 0.04) {
   const out = [];
   grid.slotBoxes().forEach((row, r) => row.forEach(([x, y, w, h], c) => {
-    const img = crop(frame, x, y, w, h);
+    let img = crop(frame, x, y, w, h);
     if (!img.w || !img.h) return;
+    // the 6x6 patch size is in 1920x1080 pixels (44 px slots): bigger screens are brought down to that first
+    if (img.w > 48) img = resizeArea(img, Math.round(img.w * 44 / w), Math.round(img.h * 44 / w));
     const W = img.w, H = img.h, m = new Uint8Array(W * H);
     for (let i = 0; i < W * H; i++) m[i] = tooltipPx(img.data[3 * i], img.data[3 * i + 1], img.data[3 * i + 2]);
     // opening with a 6x6 kernel (anchor 3,3): erode, then dilate
