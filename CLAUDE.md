@@ -161,7 +161,9 @@ web/lib/inventory.js  No calibration: locateInventory finds the "ITEM INVENTORY"
                       slot 44 px, pitch 36 x 34 native px (rows are closer than columns), 5 x 6 slots.
                       Items keyed by item-data id; LookCache (24x24 colour signature, mean abs diff <= 6) replaces
                       the catalog, re-checking named look-alikes + neighbours like _identify_slot.
-web/lib/session.js    build_snapshot / compare / exp_gained / live_series equivalents.
+web/lib/session.js    build_snapshot / compare / exp_gained / live_series equivalents. liveSeries uses plausibleRows: level progress
+                      (level + exp/need) must rise; a reading above/below both neighbours is dropped, then any drop; the newest
+                      is held back while > 4x the rate so far (a level misread at level-up spiked EXP/hr to millions). expBetween: level down = null.
 web/lib/capture.js    getDisplayMedia (window), ImageCapture.grabFrame with video-element fallback, ticker in a
                       worker, stats (grabs while hidden, longest gap) to test background capture.
 web/data/cursors.json Mouse-pointer templates (pointing + open glove, screen px at 1920/1366) from

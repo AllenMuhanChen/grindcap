@@ -7,6 +7,8 @@ import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
 import { mat } from '../lib/img.js';
 import { readMap } from '../lib/mapname.js';
+import { liveSeries, plausibleRows } from '../lib/session.js';
+import { expToNext } from '../lib/gamedata.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount } from '../lib/quickslot.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
@@ -142,6 +144,20 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   if (same.some((p) => p.changed)) fails.push(`swap check: unchanged keys flagged ${JSON.stringify(same.filter((p) => p.changed).map((p) => p.key))}`);
   const moved = readQuickslot(fr2, panel, digits, null, {}, {}, null, { sigs: { Del: base.End, End: base.Del, PgUp: base.PgUp } });
   eq(moved.filter((p) => p.changed).map((p) => p.key).sort(), ['Del', 'End'], 'swap check: changed keys');
+}
+// Live EXP around a level-up: a reading misread one level too high (or a level-down) must not spike EXP/hr
+{
+  const N = expToNext(44), M = expToNext(45), m = 60000;
+  const rows = [[0, 44, N - 40000], [1, 44, N - 30000], [2, 44, N - 20000], [3, 46, 5000], [4, 45, 5000], [5, 45, 15000], [6, 44, 25000], [7, 45, 25000]]
+    .map(([t, level, exp]) => ({ t: t * m, level, exp }));
+  const ser = liveSeries(rows);
+  const maxRate = Math.max(...ser.map((p) => p.rate));
+  if (maxRate > 20000) fails.push(`level-up spike: max EXP/min ${maxRate}`);
+  if (Math.round(ser.at(-1).gained) !== 65000) fails.push(`level-up gained: ${ser.at(-1).gained}`);
+  log(`level-up series: kept ${plausibleRows(rows).map((r) => r.t / m).join(',')}, rates ${ser.map((p) => Math.round(p.rate)).join(',')}`);
+  // the newest reading alone jumps a whole level: held back until the next one
+  const tail = [[0, 44, 1000], [1, 44, 11000], [2, 44, 21000], [3, 45, 21000]].map(([t, level, exp]) => ({ t: t * m, level, exp }));
+  if (plausibleRows(tail).length !== 3) fails.push('tail spike not held back');
 }
 // The pointing-hand pointer, on a page picture the browser version saved (screen pixels, 1920x1080 game)
 {

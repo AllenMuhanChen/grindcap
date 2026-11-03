@@ -9,6 +9,7 @@ export const SKIP_TABS = ['Cash', 'Deco'];
 /** EXP from (level a, exp a) to (level b, exp b), adding whole levels in between. */
 export function expBetween(l0, e0, l1, e1) {
   if (e0 == null || e1 == null || l0 == null || l1 == null) return null;
+  if (l1 < l0) return null;                   // level went down: one of the two is a misread
   if (l1 === l0 && e1 < e0) l1 = l0 + 1;      // EXP went down: one level-up
   if (l1 === l0) return e1 - e0;
   let total = (expToNext(l0) || 0) - e0;
@@ -111,6 +112,7 @@ export function levelPct(l0, e0, l1, e1) {
 /** Live readings [{t (ms), level, exp}] -> per-reading EXP/min, a 5-minute EMA and the session average.
  * pct = level %/hr since the first reading; emaPct = the 5-min EXP/hr as % of the current level per hour. */
 export function liveSeries(rows, tauMin = 5, pauses = []) {
+  rows = plausibleRows(rows);
   const out = [];
   if (rows.length < 2) return out;
   const t0 = rows[0].t, act = (t) => activeMs(t0, t, pauses) / 60000;   // x = active minutes
@@ -126,6 +128,28 @@ export function liveSeries(rows, tauMin = 5, pauses = []) {
     const p = levelPct(rows[0].level, rows[0].exp, b.level, b.exp), need = expToNext(b.level);
     out.push({ min: act(b.t), rate, ema, cum: total / act(b.t), gained: total, level: b.level,
       pct: p == null ? null : p / (act(b.t) / 60), emaPct: need ? (ema * 60 / need) * 100 : null });
+  }
+  return out;
+}
+
+/** Readings that can be real. Level progress (level + EXP/needed) only goes up, so a reading above both
+ * neighbours or below both (a level or EXP misread around a level-up) is dropped, then any reading
+ * still below the one before it. The newest reading has no later neighbour: it is held back when it
+ * would be over 4x the rate so far, until the next reading shows whether it was real. */
+export function plausibleRows(rows) {
+  const f = (r) => { const n = expToNext(r.level); return n && r.exp != null ? r.level + r.exp / n : null; };
+  let xs = rows.filter((r) => f(r) != null);
+  xs = xs.filter((r, i) => {
+    if (i === 0 || i === xs.length - 1) return true;
+    const a = f(xs[i - 1]), x = f(r), b = f(xs[i + 1]);
+    return !((x > a && x > b) || (x < a && x < b)) || b < a;   // neighbours disagree too: decide below
+  });
+  const out = [];
+  for (const r of xs) if (!out.length || f(r) >= f(out.at(-1))) out.push(r);
+  if (out.length >= 3) {
+    const [a, b, c] = out.slice(-3), dt = (x, y) => Math.max(1, y.t - x.t);
+    const before = (f(b) - f(out[0])) / dt(out[0], b), now = (f(c) - f(b)) / dt(b, c);
+    if (before > 0 && now > 4 * before && now > 4 * (f(b) - f(a)) / dt(a, b)) out.pop();
   }
   return out;
 }
