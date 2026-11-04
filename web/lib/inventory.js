@@ -280,7 +280,10 @@ export async function readPage(frame, grid, digits, itemdb, cache, pageKey = '',
       const near = cache.near(sig);
       // A look you named yourself wins when it is clearly the same icon (the item data's icon may be
       // why it wasn't recognised); a merely similar one (another ore colour) still goes through the re-check.
-      let look = near.length && near[0].match && near[0].match.corrected && cache.dist(sig, near[0]) <= cache.threshold / 2 ? near[0] : null;
+      // An item with no icon in the item data (download failed) can't be re-checked: your naming wins within the full threshold.
+      const noIcon = (l) => itemdb && typeof l.id === 'number' && !itemdb.icons.has(l.id);
+      let look = near.length && near[0].match && near[0].match.corrected
+        && cache.dist(sig, near[0]) <= (noIcon(near[0]) ? cache.threshold : cache.threshold / 2) ? near[0] : null;
       if (!look && near.length) {
         // Seen a look like this before. Look-alikes (ores that differ only in colour) can be within
         // the threshold too, so the named ones and their neighbours are re-checked on this slot.

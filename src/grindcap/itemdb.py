@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 API = "https://maplestory.io/api"
+MEOWDB_ICONS = "https://cdn.meowdb.com/icons"   # fallback for icons maplestory.io fails to serve
 CATEGORIES = ("Etc", "Use", "Setup", "Equip")   # Equip: non-cash only; Cash/Deco tabs aren't counted
 MIN_PIXELS = 40                        # icons with fewer opaque pixels are placeholders
 
@@ -104,7 +105,12 @@ class ItemDB:
             try:
                 (self.icons_dir / f"{iid}.png").write_bytes(_get(f"{self.base}/item/{iid}/icon", 20))
             except RuntimeError as e:
-                progress(f"  skipped {iid}: {e}")
+                # maplestory.io errors on some icons (Skeledog's Bone 4000154): meowdb's copy, same item id
+                try:
+                    (self.icons_dir / f"{iid}.png").write_bytes(_get(f"{MEOWDB_ICONS}/{iid}.png", 20, tries=2))
+                    progress(f"  {iid} ({self.items[iid]['name']}): icon from meowdb")
+                except RuntimeError:
+                    progress(f"  skipped {iid} ({self.items[iid]['name']}): {e}")
             if n % 100 == 0:
                 progress(f"icons: {n}/{len(todo)}")
             time.sleep(delay)

@@ -85,6 +85,7 @@ export class ItemDB {
   rescore(patch, ignore, ids) {
     const out = [];
     for (const id of ids) {
+      if (!this.icons.has(id)) continue;                 // named in the item data but no icon (download failed)
       const { img, mask, msum } = this.icons.get(id);
       let best = null;
       for (let y = 0; y + img.h <= patch.h; y++) {

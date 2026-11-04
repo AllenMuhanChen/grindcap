@@ -48,17 +48,20 @@ def main() -> int:
             db = (it.get("db") or {}).get("id")
             if db is not None:
                 user_prices[str(db)] = {"price": it.get("price"), "npc_price": it.get("npc_price")}
-    exp_items, icons = {}, {}
+    exp_items, icons, no_icon = {}, {}, []
     for iid, it in items.items():
         p = itemdb / "icons" / f"{iid}.png"
-        if not p.exists():
-            continue
         up = user_prices.get(str(iid), {})
         price = up.get("price") if up.get("price") is not None else (up.get("npc_price") or it.get("price"))
         exp_items[iid] = {"name": it["name"], "category": it.get("category"), "price": price}
-        icons[iid] = base64.b64encode(p.read_bytes()).decode()
+        if p.exists():
+            icons[iid] = base64.b64encode(p.read_bytes()).decode()
+        else:   # maplestory.io had no icon (e.g. Skeledog's Bone 4000154): still searchable by name, never auto-matched
+            no_icon.append(it["name"])
     (out / "itemdb.json").write_text(json.dumps({"items": exp_items, "icons": icons}))
-    print(f"Items: {len(exp_items)} with icons -> {out / 'itemdb.json'}")
+    print(f"Items: {len(exp_items)} ({len(icons)} with icons) -> {out / 'itemdb.json'}")
+    if no_icon:
+        print(f"  {len(no_icon)} without an icon (name search only): {', '.join(sorted(no_icon)[:15])}{' ...' if len(no_icon) > 15 else ''}")
 
     # --- map names
     mp = itemdb / "maps.json"

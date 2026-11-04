@@ -212,6 +212,9 @@ web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/E
                       "corrections" ({sig 24x24, id|'ignore', name, how, crop}), seeded into LookCache on load (a corrected
                       look wins only within threshold/2, else the normal re-check), "Download my corrections" exports them.
 scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -> web/local/ (gitignored).
+                      Items without an icon (maplestory.io /icon errors, e.g. Skeledog's Bone 4000154) are exported too: name
+                      search only, never auto-matched; a look you name as one wins within the full LookCache threshold.
+                      ItemDB.download falls back to cdn.meowdb.com/icons/<id>.png when maplestory.io fails an icon.
 scripts/export_web_backup.py  grindcap-gui sessions (sessions.list_sessions + load_snapshot, fixes applied, ids no longer in
                       the catalog dropped like compare) -> a grindcap-backup file for Restore: items keyed by catalog db id
                       (else "gui:item-NNN" with the catalog price in kv "prices"), sessions.json name/map, pauses, checked
