@@ -5,7 +5,7 @@ import { drawGraph, drawPotionGraph, potionSummary, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
-const FULL = [380, 560], SMALL = [260, 150];
+const FULL = [380, 560], SMALL = [260, 175];
 let small = (() => { try { return localStorage.getItem('grindcap.popSmall') === '1'; } catch { return false; } })();
 const fmt = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocaleString());
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
@@ -28,6 +28,7 @@ const CSS = `
   .note { font-size: 12px; margin-top: 6px; }
   .timer { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; } .timer.idle { font-size: 14px; font-weight: 400; color: var(--mute); }
   .mode { padding: 0 9px; font-size: 16px; line-height: 20px; margin-left: 6px; }
+  .mscan { font-size: 14px; margin-top: 3px; }
   .mpot { font-size: 15px; font-weight: 600; margin-top: 2px; } body.small { padding: 6px 10px; } body.small .top b { display: none; }
   .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
   .scan .help { font-size: 14px; }
@@ -54,6 +55,7 @@ export async function openPopout(a) {
       <div class="timer" id="mtimer"></div>
       <div><span class="big" id="mxph">–</span> <span class="mute">EXP/hr</span> <span id="mpph" class="pct"></span></div>
       <div class="mpot" id="mpot"></div>
+      <div id="mscan" class="mscan" hidden></div>
     </div>
     <div id="full">
     <div class="top"><span id="timer" class="timer">No session</span><span id="lv" class="mute"></span></div>
@@ -113,6 +115,12 @@ export function updatePopout() {
     $('mtimer').classList.toggle('idle', $('timer').classList.contains('idle'));
     $('mxph').textContent = $('xph').textContent; $('mpph').textContent = $('pph').textContent;
     const lp = pot.pts.at(-1);
+    const cs = S.collect, ms = $('mscan');
+    ms.hidden = !cs;
+    if (cs) {
+      const miss = COUNTED_TABS.filter((t) => !cs.seen.has(t));
+      ms.innerHTML = `${cs.kind === 'start' ? 'Start' : 'End'} scan: ` + (miss.length ? `still to do <b>${miss.join(', ')}</b>` : '<span class="ok">all tabs read, finishing</span>');
+    }
     $('mpot').innerHTML = lp ? `<span style="color:${HP}">HP ${fmt(lp.ema_hp)}/hr</span> · <span style="color:${MP}">MP ${fmt(lp.ema_mp)}/hr</span>` : '';
   }
   $('start').disabled = !sharing || !!S.collect || running;

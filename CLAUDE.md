@@ -212,7 +212,7 @@ web/review.js         Review panel: status inputs + meso field crop, price input
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.
 web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr, –/+ button = small mode
-                      (timer, EXP/hr + %/hr, current HP/MP mesos/hr; resizeTo 260x150; localStorage grindcap.popSmall),
+                      (timer, EXP/hr + %/hr, current HP/MP mesos/hr; resizeTo 260x175; scan line with the tabs still to do while scanning; localStorage grindcap.popSmall),
                       (5-min EMA), graph (web/graph.js), Start/End/Finish/Live, tab checklist + finish countdown, result.
                       Corrections: naming a look on the review panel (learn() in app.js) is kept in localStorage
                       "corrections" ({sig 24x24, id|'ignore', name, how, crop}), seeded into LookCache on load (a corrected

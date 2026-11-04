@@ -350,7 +350,12 @@ async function pageTick(now) {
   if (S.collect !== c) return;
   if (!c.map && c.lastNew) await tryMap(frame, now);   // after the first page, so the map never holds up the scan
   const inv = locateInventory(frame, S.title, S.ctx);
-  if (!inv) { if (now - c.lastWarn > 3000) { warn('Inventory not found: open it (I) and keep it fully on screen.'); c.lastWarn = now; } return; }
+  if (!inv) {
+    // every tab already read: closing the inventory is fine, the scan finishes on its own
+    if (COUNTED_TABS.every((t) => c.seen.has(t))) return maybeFinish(now);
+    if (now - c.lastWarn > 3000) { warn('Inventory not found: open it (I) and keep it fully on screen.'); c.lastWarn = now; }
+    return;
+  }
   const sig = PageWatcher.signature(frame, inv.grid);
   if (!c.watcher.feed(sig)) return maybeFinish(now);
   if (coveredSlots(frame, inv.grid).length) {          // a tooltip is over the items: try again without it
