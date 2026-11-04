@@ -115,10 +115,11 @@ export function readQuickslot(frame, tmpl, digits, itemdb = null, names = {}, ca
       if (base && sigDiff(sig, base) > SIG_CHANGE) {                   // a different item is on this key now
         changed = true;
         delete cache[key];
-        name = useIcons ? identify(patch, ignore, itemdb, key, cache, potionIds(itemdb, candidates)) : null;
+        name = useIcons ? identify(patch, ignore, itemdb, key, cache, candidates) : null;
       } else if (name == null && useIcons) name = identify(patch, ignore, itemdb, key, cache, candidates);
     }
-    out.push({ key, count: n, name, sig, changed });
+    const why = name == null && cache[key] ? cache[key][2] : undefined;
+    out.push({ key, count: n, name, sig, changed, ...(why ? { why } : {}) });
   });
   return out;
 }
@@ -154,21 +155,26 @@ function potionIds(itemdb, candidates) {
   return [...new Set([...ids, ...(candidates || [])])];
 }
 
+/** The item on a quick slot among `candidates` (always the potion table's items + your Use items: a potion
+ * never seen in a snapshot must still be found). A name is cached per key; a miss isn't (it is tried again
+ * next reading), and cache[key][2] says why it missed. */
 function identify(patch, ignore, itemdb, key, cache, candidates) {
   const sig = resizeArea(patch, 8, 8).data;
   const hit = cache[key];
-  if (hit) { let d = 0; for (let i = 0; i < sig.length; i++) d += Math.abs(hit[0][i] - sig[i]); if (d / sig.length < 12) return hit[1]; }
-  const ids = candidates && candidates.length ? candidates
-    : itemdb.rank(patch, null).filter(([, i]) => itemdb.items[i]?.category === 'Use').slice(0, 20).map(([, i]) => i);
+  if (hit && hit[1] != null) { let d = 0; for (let i = 0; i < sig.length; i++) d += Math.abs(hit[0][i] - sig[i]); if (d / sig.length < 12) return hit[1]; }
+  const ids = potionIds(itemdb, candidates && candidates.length ? candidates
+    : itemdb.rank(patch, null).filter(([, i]) => itemdb.items[i]?.category === 'Use').slice(0, 20).map(([, i]) => i));
   const ranked = itemdb.rescore(patch, ignore, ids);
-  let name = null;
+  let name = null, why = ranked.length ? null : 'no candidate icons';
   if (ranked.length && ranked[0][0] <= itemdb.maxScore) {
     const [s0, best] = ranked[0];
     name = itemdb.items[best].name;
     const other = ranked.slice(1).find(([, i]) => itemdb.items[i].name !== name);
-    if (other && s0 > 0 && other[0] / s0 < 1.1) name = null;           // two different items fit about equally
-  }
-  cache[key] = [sig, name];
+    if (other && s0 > 0 && other[0] / s0 < 1.1) {                      // two different items fit about equally
+      why = `${name} or ${itemdb.items[other[1]].name}?`; name = null;
+    }
+  } else if (ranked.length) why = `closest ${itemdb.items[ranked[0][1]].name}, too different`;
+  cache[key] = [sig, name, why];
   return name;
 }
 
@@ -220,7 +226,7 @@ export function matchByCount(potions, items, itemdb = null, near = 5) {
 /** One line saying what the last quick slot reading found. */
 export function describe(potions, table) {
   if (potions == null) return 'Potions: quick slots not found';
-  const parts = potions.map((p) => `${p.key} ${p.name || 'unknown item'} ${p.count}${p.name in table ? '' : ' (not counted)'}`);
+  const parts = potions.map((p) => `${p.key} ${p.name || `unknown item${p.why ? ` (${p.why})` : ''}`} ${p.count}${p.name in table ? '' : ' (not counted)'}`);
   return 'Potions: ' + (parts.length ? parts.join(' · ') : 'none on the quick slots');
 }
 
