@@ -187,6 +187,9 @@ web/lib/quickslot.js  quickslot.py: findPanel (coarse /4 search then refine, las
                       sigDiff > SIG_CHANGE 18 (same item same session <= 7, other items >= 24 on fixtures) = item changed ->
                       identify among potion-table Use items + useIds, qsNames[key] updated. Rows keep the name they were read
                       with and potPoints passes no keyNames, so the old potion's series stops and the new one's starts.
+                      quickslot.trackKeys keeps names steady: a name told once is kept for the key (the 8x8 icon cache includes the
+                      digits, so a later count could miss); a "changed" slot that can't be named and whose count didn't rise keeps
+                      its name; Start merges icon names under matchByCount's. potionSeries fills unnamed saved rows the same way.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

@@ -11,7 +11,7 @@ import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
 import { readMap } from './lib/mapname.js';
-import { readQuickslot, matchByCount, describe, potionSeries, prices } from './lib/quickslot.js';
+import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys } from './lib/quickslot.js';
 import { renderReview } from './review.js';
 import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
@@ -181,18 +181,12 @@ function readPotions(frame, names = {}, cur = null) {
 }
 
 /** A key's icon changed: you swapped potions. Each reading keeps the name it was read with, and the
- * series is per item, so the old potion's use stops there and the new one's starts. A swap the item
- * data can't name is left unnamed for that reading (not counted) and checked again next time. */
+ * series is per item, so the old potion's use stops there and the new one's starts (quickslot.trackKeys). */
 function keepTrack(cur, out) {
-  cur.qsSigs = cur.qsSigs || {};
-  for (const p of out) {
-    if (!p.sig) continue;
-    if (!cur.qsSigs[p.key]) cur.qsSigs[p.key] = p.sig;
-    else if (p.changed && p.name) {
-      const was = cur.qsNames[p.key];
-      cur.qsNames[p.key] = p.name; cur.qsSigs[p.key] = p.sig;
-      if (was !== p.name) snapNote(`Quick slot ${p.key}: now ${p.name}${was ? ` (was ${was})` : ''}`);
-    } else if (p.changed) warn(`Quick slot ${p.key}: the item changed and couldn't be named; not counted until it is.`);
+  const prev = cur.lastPot ?? cur.potions?.at(-1)?.potions ?? null;
+  for (const n of trackKeys(cur, out, prev)) {
+    if (n.kind === 'now') snapNote(`Quick slot ${n.key}: now ${n.name}${n.was ? ` (was ${n.was})` : ''}`);
+    else warn(`Quick slot ${n.key}: the item changed and couldn't be named; not counted until it is.`);
   }
   if (cur === C()) { store.set('qsNames', cur.qsNames); store.set('qsSigs', cur.qsSigs); }
 }
@@ -418,7 +412,8 @@ async function finishCollect() {
     const useIds = new Set(store.get('useIds') || []);
     for (const id of Object.keys(snap.items)) if (!isNaN(+id) && S.itemdb.items[id]?.category === 'Use') useIds.add(+id);
     store.set('useIds', [...useIds]);
-    cur.qsNames = c.potions ? matchByCount(c.potions, snap.items, S.itemdb) : {};
+    // the inventory count names a key; the icon guess fills keys it couldn't (kept for the whole session)
+    cur.qsNames = c.potions ? { ...Object.fromEntries(c.potions.filter((p) => p.name).map((p) => [p.key, p.name])), ...matchByCount(c.potions, snap.items, S.itemdb) } : {};
     cur.qsSigs = c.potionSigs || {}; store.set('qsSigs', cur.qsSigs);
     cur.potions = c.potions ? [{ time: snap.time / 1000, potions: c.potions.map((p) => ({ ...p, name: cur.qsNames[p.key] ?? p.name })) }] : [];
     cur.lastPot = cur.potions[0]?.potions;

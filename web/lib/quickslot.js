@@ -172,6 +172,32 @@ function identify(patch, ignore, itemdb, key, cache, candidates) {
   return name;
 }
 
+/** Keeps each key's name steady across readings (mutates `out` names and `st` = {qsNames, qsSigs}).
+ * prev = the last reading [{key, count, name}] or null. Returns [{key, kind: 'now'|'unnamed', name, was}].
+ * - A name told once (icon) is kept for the key: the icon guess is only re-run when the slot's picture
+ *   changes, and the picture includes the number, so a later count could miss on its own.
+ * - A "changed" slot that can't be named and whose count didn't go up is the same potion (cursor, a
+ *   use flash): it keeps its name. One whose count went up and can't be named is left unnamed. */
+export function trackKeys(st, out, prev = null) {
+  st.qsSigs = st.qsSigs || {}; st.qsNames = st.qsNames || {};
+  const notes = [], before = Object.fromEntries((prev || []).map((p) => [p.key, p]));
+  for (const p of out) {
+    const was = st.qsNames[p.key] ?? before[p.key]?.name ?? null;
+    if (!p.sig) { if (p.name == null && !p.changed) p.name = was; continue; }
+    if (!st.qsSigs[p.key]) st.qsSigs[p.key] = p.sig;
+    if (p.changed && p.name) {
+      st.qsNames[p.key] = p.name; st.qsSigs[p.key] = p.sig;
+      if (was !== p.name) notes.push({ key: p.key, kind: 'now', name: p.name, was });
+    } else if (p.changed) {
+      const last = before[p.key];
+      if (was && last && p.count <= last.count) p.name = was;          // same potion, the picture just looked off
+      else notes.push({ key: p.key, kind: 'unnamed', name: null, was });
+    } else if (p.name && !st.qsNames[p.key]) st.qsNames[p.key] = p.name;
+    else if (p.name == null && was) p.name = was;
+  }
+  return notes;
+}
+
 /** Name each quick slot from the start inventory: a quick slot's number is that item's inventory total.
  * items = snapshot.items {id: {qty, name}}; only Use items count. Several with that count: the icon guess
  * decides if it is one of them; no exact count: the closest within `near` if only one is that close. */
@@ -224,6 +250,13 @@ export function potionSeries(start, rows, table, tauMin = 5, keyNames = {}) {
     .map((r) => ({ ...r, potions: r.potions.map((p) => ({ ...p, name: keyNames[p.key] ?? p.name })) }))
     .sort((a, b) => a.time - b.time);
   if (!rows.length) return [];
+  // a reading whose icon wasn't told (older sessions): the key's previous name, if the count didn't go up
+  const seen = {};
+  for (const r of rows) for (const p of r.potions) {
+    const b = seen[p.key];
+    if (p.name == null && b && b.name != null && p.count <= b.count) p.name = b.name;
+    seen[p.key] = p;
+  }
   const names = [...new Set(rows.flatMap((r) => r.potions.map((p) => p.name)).filter((n) => n in table))].sort();
   const usedSoFar = {};
   for (const n of names) {

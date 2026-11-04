@@ -9,7 +9,7 @@ import { mat } from '../lib/img.js';
 import { readMap } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
-import { readQuickslot, potionSeries, prices, describe, matchByCount } from '../lib/quickslot.js';
+import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
 const expected = await (await fetch('./expected.json')).json();
@@ -144,6 +144,21 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   if (same.some((p) => p.changed)) fails.push(`swap check: unchanged keys flagged ${JSON.stringify(same.filter((p) => p.changed).map((p) => p.key))}`);
   const moved = readQuickslot(fr2, panel, digits, null, {}, {}, null, { sigs: { Del: base.End, End: base.Del, PgUp: base.PgUp } });
   eq(moved.filter((p) => p.changed).map((p) => p.key).sort(), ['Del', 'End'], 'swap check: changed keys');
+  // names stay put: an icon miss on one reading, or a false "changed" whose count didn't go up, keeps the name
+  {
+    const sg = [[1, 2, 3]], st = { qsNames: {}, qsSigs: {} };
+    trackKeys(st, [{ key: 'Del', count: 150, name: 'Orange Potion', sig: sg }], null);
+    const r2 = [{ key: 'Del', count: 148, name: null, sig: sg }];
+    trackKeys(st, r2, [{ key: 'Del', count: 150, name: 'Orange Potion' }]);
+    const r3 = [{ key: 'Del', count: 140, name: null, sig: sg, changed: true }];
+    const n3 = trackKeys(st, r3, r2);
+    const r4 = [{ key: 'Del', count: 300, name: null, sig: sg, changed: true }];
+    const n4 = trackKeys(st, r4, r3);
+    const r5 = [{ key: 'Del', count: 300, name: 'White Potion', sig: [[9, 9, 9]], changed: true }];
+    const n5 = trackKeys(st, r5, r4);
+    eq([r2[0].name, r3[0].name, n3.length, r4[0].name, n4[0].kind, n5[0].name, st.qsNames.Del],
+      ['Orange Potion', 'Orange Potion', 0, null, 'unnamed', 'White Potion', 'White Potion'], 'quick slot names kept');
+  }
 }
 // Live EXP around a level-up: a reading misread one level too high (or a level-down) must not spike EXP/hr
 {
