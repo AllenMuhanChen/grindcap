@@ -5,13 +5,15 @@ import { drawGraph, drawPotionGraph, potionSummary, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
-const FULL = [380, 560], SMALL = [260, 175];
+const FULL = [380, 560];
+// compact window: sized to its content (measured after each render, last size remembered for the next open)
+let SMALL = (() => { try { return JSON.parse(localStorage.getItem('grindcap.popSmallSize')) || [250, 140]; } catch { return [250, 140]; } })();
 let small = (() => { try { return localStorage.getItem('grindcap.popSmall') === '1'; } catch { return false; } })();
 const fmt = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocaleString());
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
 const CSS = `
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; } html { background: var(--bg); }
   body { margin: 0; padding: 10px; font: 13px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
   .top { display: flex; justify-content: space-between; align-items: baseline; }
   .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -27,7 +29,9 @@ const CSS = `
   .kv { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-variant-numeric: tabular-nums; }
   .note { font-size: 12px; margin-top: 6px; }
   .timer { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; } .timer.idle { font-size: 14px; font-weight: 400; color: var(--mute); }
-  .mode { padding: 0 9px; font-size: 16px; line-height: 20px; margin-left: 6px; }
+  .mode { padding: 2px 10px; font-size: 13px; font-weight: 650; margin-left: 6px; border: 1.5px solid var(--acc); color: var(--acc); }
+  .mode:hover { background: var(--acc); color: #fff; }
+  body.small { display: inline-block; white-space: nowrap; min-width: 0; } body.small .warn { white-space: normal; max-width: 300px; }
   .mscan { font-size: 14px; margin-top: 3px; }
   .mpot { font-size: 15px; font-weight: 600; margin-top: 2px; } body.small { padding: 6px 10px; } body.small .top b { display: none; }
   .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
@@ -49,7 +53,7 @@ export async function openPopout(a) {
   const vars = ['--bg', '--card', '--ink', '--mute', '--line', '--acc', '--ok', '--bad'].map((v) => `${v}:${root.getPropertyValue(v)}`).join(';');
   d.head.innerHTML = `<title>grindcap</title><style>:root{${vars}}${CSS}</style>`;
   d.body.innerHTML = `
-    <div class="top"><b>grindcap</b><span><span id="share" class="mute"></span> <button id="mode" class="mode" title="Small window: timer, EXP/hr and potion cost only">–</button></span></div>
+    <div class="top"><b>grindcap</b><span><span id="share" class="mute"></span> <button id="mode" class="mode">Compact</button></span></div>
     <div class="warn" id="alert" hidden></div>
     <div id="mini" hidden>
       <div class="timer" id="mtimer"></div>
@@ -76,9 +80,11 @@ export async function openPopout(a) {
   d.getElementById('mode').onclick = () => {
     small = !small;
     try { localStorage.setItem('grindcap.popSmall', small ? '1' : '0'); } catch { /* private window */ }
-    try { pip.resizeTo(...(small ? SMALL : FULL)); } catch { /* the browser may refuse: the layout still changes */ }
     updatePopout();
+    if (!small) { try { pip.resizeTo(...FULL); } catch { /* the browser may refuse: the layout still changes */ } }
   };
+  // resizing needs a click in the window: any click there also re-fits the compact view
+  d.addEventListener('pointerup', () => setTimeout(fitSmall, 0));
   d.getElementById('start').onclick = () => api.start(pip.confirm.bind(pip));
   d.getElementById('end').onclick = () => api.end();
   d.getElementById('finish').onclick = () => api.finish();
@@ -109,7 +115,7 @@ export function updatePopout() {
   $('pgs').innerHTML = potionSummary(pot.pts);
   d.body.classList.toggle('small', small);
   $('mini').hidden = !small; $('full').hidden = small;
-  $('mode').textContent = small ? '+' : '–'; $('mode').title = small ? 'Full window' : 'Small window: timer, EXP/hr and potion cost only';
+  $('mode').textContent = small ? 'Full view' : 'Compact'; $('mode').title = small ? 'Show the graphs, buttons and results' : 'Just the timer, EXP/hr, potion cost and scan progress';
   if (small) {
     $('mtimer').innerHTML = $('timer').innerHTML;
     $('mtimer').classList.toggle('idle', $('timer').classList.contains('idle'));
@@ -153,6 +159,19 @@ export function updatePopout() {
 `;
   }
   $('note').textContent = api.lastNote() || '';
+  if (small) fitSmall();
+}
+
+/** Compact view: the window just around its content. The browser may refuse a resize that doesn't
+ * follow a click; the size is remembered so the next pop-out opens at it. */
+function fitSmall() {
+  if (!pip || pip.closed || !small) return;
+  const b = pip.document.body, r = b.getBoundingClientRect();
+  const w = Math.ceil(r.width), h = Math.ceil(r.height);
+  if (w < 50 || h < 30) return;
+  if (SMALL[0] !== w || SMALL[1] !== h) { SMALL = [w, h]; try { localStorage.setItem('grindcap.popSmallSize', JSON.stringify(SMALL)); } catch { /* private */ } }
+  if (Math.abs(pip.innerWidth - w) <= 1 && Math.abs(pip.innerHeight - h) <= 1) return;
+  try { pip.resizeTo(w + (pip.outerWidth - pip.innerWidth), h + (pip.outerHeight - pip.innerHeight)); } catch { /* needs a click first */ }
 }
 
 export const popoutOpen = () => !!(pip && !pip.closed);
