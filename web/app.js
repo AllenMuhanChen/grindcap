@@ -462,7 +462,7 @@ function defaultName(r) {
 const nameOf = (id) => S.itemdb.name(id);
 // your prices (set on the review, kv "myPrices") win, then the item data's (your catalog price, else NPC), then
 // prices that came with grindcap-gui items that have no item-data id (kv "prices")
-const basePrice = (id) => S.itemdb.items[id]?.price ?? store.get('prices')?.[id] ?? null;
+const basePrice = (id) => S.itemdb.items[id]?.price ?? store.get('npcPrices')?.[id] ?? store.get('prices')?.[id] ?? null;
 const userPrice = (id) => store.get('myPrices')?.[id] ?? null;
 const priceOf = (id) => userPrice(id) ?? basePrice(id);
 let repriceTimer = null;
@@ -472,6 +472,9 @@ function setPrice(id, v) {
   if (v == null || Number.isNaN(v)) delete m[id]; else m[id] = v;
   store.set('myPrices', m);
   recompute(S.view);
+  repriceAll();
+}
+function repriceAll() {
   clearTimeout(repriceTimer);
   repriceTimer = setTimeout(async () => {
     for (const r of await store.allSessions()) {
@@ -482,6 +485,28 @@ function setPrice(id, v) {
     }
     renderNav(); if (tab === 'summary') renderSummary();
   }, 800);
+}
+
+/** NPC prices the item data didn't have (older exports only had prices for items the Python app had
+ * named): asked from maplestory.io for the items in the shown session, kept in kv "npcPrices" (null =
+ * the item has none), then every session is worked out again. Offline or blocked: nothing changes. */
+const priceAsked = new Set();
+async function fillPrices(v) {
+  const ids = [...new Set([v.start, v.end].filter(Boolean).flatMap((sn) => Object.keys(sn.items || {})))]
+    .filter((id) => /^\d+$/.test(id) && basePrice(id) == null && !(id in (store.get('npcPrices') || {})) && !priceAsked.has(id));
+  if (!ids.length) return;
+  ids.forEach((id) => priceAsked.add(id));
+  let got = 0;
+  for (const id of ids) {
+    try {
+      const r = await fetch(`https://maplestory.io/api/MCW/1/item/${id}`);
+      if (!r.ok) continue;
+      const price = (await r.json())?.metaInfo?.price ?? null;
+      store.set('npcPrices', { ...(store.get('npcPrices') || {}), [id]: price });
+      if (price != null) got++;
+    } catch { /* offline / blocked: try again next page load */ }
+  }
+  if (got) { recompute(S.view); repriceAll(); }
 }
 
 /** Apply a session's fixes, compare, save, redraw. Called after every edit on the review panel. */
@@ -567,7 +592,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -598,6 +623,7 @@ $('restoreFile').onchange = async (e) => {
     await store.putSession(r);
   }
   if (kv.prices) store.set('prices', { ...kv.prices, ...(store.get('prices') || {}) });
+  if (kv.npcPrices) store.set('npcPrices', { ...kv.npcPrices, ...(store.get('npcPrices') || {}) });
   if (kv.myPrices) store.set('myPrices', { ...kv.myPrices, ...(store.get('myPrices') || {}) });   // a price set here wins
   // named icons: the backup's are added (a look named here wins)
   const keys = new Set(S.corrections.map((c) => c.key));
@@ -778,6 +804,7 @@ function potPoints(v) {
 
 function renderView() {
   const v = S.view, r = v.result;
+  fillPrices(v);
   renderGraph();
   if (r) {
     const k = [

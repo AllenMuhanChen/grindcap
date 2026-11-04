@@ -8,7 +8,7 @@ Reads what the Python app already has on this PC and writes web/local/ (not in g
   web/local/quickslot.json  quickslot settings from config.yaml (enabled, slots, prices)
   web/local/digits.json   your teach-digits examples (<catalog_dir>/digits.npz), added to the built-in ones
 
-Run from the repo root:  python scripts/export_web_data.py
+Run from the repo root:  python scripts/export_web_data.py   (--no-prices: don't fetch missing NPC prices)
 If the item data hasn't been downloaded yet, run `grindcap itemdb` (or take one snapshot) first.
 """
 from __future__ import annotations
@@ -22,6 +22,43 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+
+
+def fetch_prices(items: dict, items_path: Path, cfg) -> None:
+    """NPC sell price for every item that doesn't have one yet. The Python app only fetched prices for
+    items it had identified, so most items had none. Saved into items.json (no-price items as null, so
+    they aren't asked again). About 2,500 requests the first time, a couple of minutes; later runs are instant."""
+    from concurrent.futures import ThreadPoolExecutor
+    from grindcap.itemdb import _get
+
+    opt = cfg["inventory"].get("itemdb") or {}
+    base = f"https://maplestory.io/api/{opt.get('region', 'MCW')}/{opt.get('version', '1')}"
+    todo = [iid for iid, it in items.items() if "price" not in it]
+    if not todo:
+        return
+    print(f"Fetching NPC prices for {len(todo)} items from maplestory.io (once; --no-prices skips)...")
+
+    def one(iid):
+        try:
+            meta = json.loads(_get(f"{base}/item/{iid}", 20, tries=2)).get("metaInfo") or {}
+            return iid, meta.get("price"), True
+        except Exception:
+            return iid, None, False
+
+    done = failed = 0
+    with ThreadPoolExecutor(8) as ex:
+        for n, (iid, price, ok) in enumerate(ex.map(one, todo), 1):
+            if ok:
+                items[iid]["price"] = price
+                done += 1
+            else:
+                failed += 1
+            if n % 250 == 0:
+                print(f"  prices {n}/{len(todo)}")
+                items_path.write_text(json.dumps(items, indent=1))
+    items_path.write_text(json.dumps(items, indent=1))
+    have = sum(1 for it in items.values() if it.get("price"))
+    print(f"Prices: {done} fetched, {failed} failed (run again to retry them); {have} of {len(items)} items have an NPC price.")
 
 
 def main() -> int:
@@ -41,6 +78,8 @@ def main() -> int:
         print(f"No item data in {itemdb}. Run `grindcap itemdb` first, then run this again.")
         return 1
     items = json.loads(items_path.read_text())
+    if "--no-prices" not in sys.argv:
+        fetch_prices(items, items_path, cfg)
     user_prices = {}
     cat_path = data / "catalog.json"
     if cat_path.exists():

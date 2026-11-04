@@ -221,6 +221,9 @@ scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -
                       Items without an icon (maplestory.io /icon errors, e.g. Skeledog's Bone 4000154) are exported too: name
                       search only, never auto-matched; a look you name as one wins within the full LookCache threshold.
                       ItemDB.download falls back to cdn.meowdb.com/icons/<id>.png when maplestory.io fails an icon.
+                      NPC prices: ItemDB.price was only fetched for items the Python app identified, so most items had none;
+                      export_web_data.fetch_prices fetches every missing one (8 threads, saved to items.json, --no-prices skips).
+                      app.fillPrices asks maplestory.io in the browser for items in the shown session still without one (kv npcPrices).
 scripts/export_web_backup.py  grindcap-gui sessions (sessions.list_sessions + load_snapshot, fixes applied, ids no longer in
                       the catalog dropped like compare) -> a grindcap-backup file for Restore: items keyed by catalog db id
                       (else "gui:item-NNN" with the catalog price in kv "prices"), sessions.json name/map, pauses, checked
