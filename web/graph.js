@@ -47,15 +47,28 @@ const labelWidth = (g, texts) => { g.font = TAG; return Math.max(0, ...texts.map
 function yRange(vals, floor = 0) {
   let lo = Math.min(...vals), hi = Math.max(...vals);
   const pad = Math.max((hi - lo) * 0.25, Math.max(Math.abs(hi), Math.abs(lo)) * 0.05, 1);
-  return [floor == null ? lo - pad : Math.max(floor, lo - pad), hi + pad];
+  return nice(floor == null ? lo - pad : Math.max(floor, lo - pad), hi + pad);
+}
+/** Limits widened to whole steps of a round size (1, 2 or 5 x 10^k: 5k, 10k, 20k..., about 3-5 steps), so the grid lines
+ * sit at round values. Returns [lo, hi, step]. */
+export function nice(lo, hi) {
+  const raw = (hi - lo) / 4, p = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * p).find((st) => st >= raw);
+  return [Math.floor(lo / step + 1e-9) * step, Math.ceil(hi / step - 1e-9) * step, step];
 }
 
-function axes(g, x0, x1, y0, y1, lo, hi, t1, title, ink, Y) {
+/** A grid label in the unit of the axis' biggest value, with just enough decimals to show the step. */
+export function tick(v, step, top) {
+  const [d, u] = top >= 1e6 && step >= 1e5 ? [1e6, 'M'] : step >= 1000 ? [1000, 'k'] : [1, ''];
+  const dec = Math.max(0, Math.min(3, Math.ceil(-Math.log10(step / d) - 1e-9)));
+  const st = step / d, need = Math.abs(st - Math.round(st * 10 ** dec) / 10 ** dec) > 1e-9 ? dec + 1 : dec;
+  return Math.abs(v) < step * 1e-6 ? '0' : `${(v / d).toFixed(need)}${u}`;
+}
+function axes(g, x0, x1, y0, y1, lo, hi, step, t1, title, ink, Y) {
   g.font = AXIS; g.textAlign = 'right'; g.textBaseline = 'middle';
-  for (const f of [0, 0.5, 1]) {
-    const v = lo + (hi - lo) * f;
+  for (let k = 0, v = lo; v <= hi + step * 1e-6; v = lo + ++k * step) {
     g.strokeStyle = ink; g.globalAlpha = 0.2; g.beginPath(); g.moveTo(x0, Y(v)); g.lineTo(x1, Y(v)); g.stroke(); g.globalAlpha = 1;
-    g.fillStyle = ink; g.fillText(short(v), x0 - 4, Y(v));
+    g.fillStyle = ink; g.fillText(tick(v, step, Math.max(Math.abs(lo), Math.abs(hi))), x0 - 4, Y(v));
   }
   if (lo < 0 && hi > 0) { g.strokeStyle = ink; g.globalAlpha = 0.6; g.beginPath(); g.moveTo(x0, Y(0)); g.lineTo(x1, Y(0)); g.stroke(); g.globalAlpha = 1; }
   g.textAlign = 'left'; g.textBaseline = 'top'; g.fillText(title, x0 + 4, 2);
@@ -75,9 +88,9 @@ export function drawGraph(cv, ser, mult = 1, unit = 'EXP/min') {
   const per = unit.includes('/') ? unit.slice(unit.indexOf('/')) : '';
   const label = `${short(pts.at(-1).ema)}${per}`;
   const x0 = 62, x1 = W - labelWidth(g, [label]) - 22, y0 = H - 20, y1 = 22, t1 = Math.max(1, pts.at(-1).min);
-  const [lo, hi] = yRange(pts.flatMap((p) => [p.ema, p.cum]));
+  const [lo, hi, step] = yRange(pts.flatMap((p) => [p.ema, p.cum]));
   const X = (m) => x0 + (x1 - x0) * m / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
-  axes(g, x0, x1, y0, y1, lo, hi, t1, unit, ink, Y);
+  axes(g, x0, x1, y0, y1, lo, hi, step, t1, unit, ink, Y);
   g.fillStyle = acc; g.globalAlpha = 0.45;
   for (const p of pts) { g.beginPath(); g.arc(X(p.min), Y(p.rate), 2.5, 0, 7); g.fill(); }
   g.globalAlpha = 1; g.strokeStyle = acc; g.lineWidth = 2;
@@ -100,9 +113,9 @@ export function drawPotionGraph(cv, pts) {
   const kinds = [['hp', HP, 'HP'], ['mp', MP, 'MP']];
   const last = pts.at(-1), labels = kinds.map(([kind, , name]) => `${name} ${short(last[`ema_${kind}`])}/hr`);
   const x0 = 58, x1 = W - labelWidth(g, labels) - 22, y0 = H - 20, y1 = 22, t1 = Math.max(last.t, 1);
-  const [lo, hi] = yRange(pts.flatMap((p) => ['ema_hp', 'ema_mp', 'cum_hp', 'cum_mp'].map((k) => p[k])).filter((v) => v != null), null);
+  const [lo, hi, step] = yRange(pts.flatMap((p) => ['ema_hp', 'ema_mp', 'cum_hp', 'cum_mp'].map((k) => p[k])).filter((v) => v != null), null);
   const X = (t) => x0 + (x1 - x0) * t / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
-  axes(g, x0, x1, y0, y1, lo, hi, t1, 'potion mesos/hr', ink, Y);
+  axes(g, x0, x1, y0, y1, lo, hi, step, t1, 'potion mesos/hr', ink, Y);
   for (const [kind, color] of kinds) {
     g.fillStyle = color; g.globalAlpha = 0.4;
     for (const p of pts) if (p[`raw_${kind}`] != null) { g.beginPath(); g.arc(X(p.t), Y(p[`raw_${kind}`]), 2.5, 0, 7); g.fill(); }
