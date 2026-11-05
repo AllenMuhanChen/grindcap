@@ -33,17 +33,30 @@ def fetch_prices(items: dict, items_path: Path, cfg) -> None:
 
     opt = cfg["inventory"].get("itemdb") or {}
     base = f"https://maplestory.io/api/{opt.get('region', 'MCW')}/{opt.get('version', '1')}"
-    todo = [iid for iid, it in items.items() if "price" not in it]
+    # never asked, or Classic World's data had no price (seen on equips): asked again once with GMS v83 as fallback
+    todo = [iid for iid, it in items.items() if "price" not in it or (it["price"] is None and not it.get("price_gms"))]
     if not todo:
         return
     print(f"Fetching NPC prices for {len(todo)} items from maplestory.io (once; --no-prices skips)...")
 
+    def ask(url):
+        meta = json.loads(_get(url, 20, tries=2)).get("metaInfo") or {}
+        return meta.get("price") or None
+
     def one(iid):
         try:
-            meta = json.loads(_get(f"{base}/item/{iid}", 20, tries=2)).get("metaInfo") or {}
-            return iid, meta.get("price"), True
+            price = ask(f"{base}/item/{iid}") if items[iid].get("price") is None and "price" not in items[iid] else None
         except Exception:
-            return iid, None, False
+            price = None
+            if "price" not in items[iid]:
+                return iid, None, False
+        if price is None:                      # same item id in the GMS v83 data
+            items[iid]["price_gms"] = True
+            try:
+                price = ask(f"https://maplestory.io/api/GMS/83/item/{iid}")
+            except Exception:
+                pass
+        return iid, price, True
 
     done = failed = 0
     with ThreadPoolExecutor(8) as ex:

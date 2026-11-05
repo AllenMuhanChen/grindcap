@@ -499,9 +499,10 @@ async function fillPrices(v) {
   let got = 0;
   for (const id of ids) {
     try {
-      const r = await fetch(`https://maplestory.io/api/MCW/1/item/${id}`);
-      if (!r.ok) continue;
-      const price = (await r.json())?.metaInfo?.price ?? null;
+      const ask = async (region) => { const r = await fetch(`https://maplestory.io/api/${region}/item/${id}`); return r.ok ? (await r.json())?.metaInfo?.price || null : undefined; };
+      let price = await ask('MCW/1');
+      if (price === undefined) continue;
+      if (price == null) price = (await ask('GMS/83')) ?? null;     // Classic World's data lacks some equip prices
       store.set('npcPrices', { ...(store.get('npcPrices') || {}), [id]: price });
       if (price != null) got++;
     } catch { /* offline / blocked: try again next page load */ }
