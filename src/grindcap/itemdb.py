@@ -100,20 +100,7 @@ class ItemDB:
                 start += page
             progress(f"{cat}: {sum(1 for v in self.items.values() if v['category'] == cat)} items")
         self.items_path.write_text(json.dumps(self.items, indent=1))
-        todo = [i for i in self.items if not (self.icons_dir / f"{i}.png").exists()]
-        for n, iid in enumerate(todo, 1):
-            try:
-                (self.icons_dir / f"{iid}.png").write_bytes(_get(f"{self.base}/item/{iid}/icon", 20))
-            except RuntimeError as e:
-                # maplestory.io errors on some icons (Skeledog's Bone 4000154): meowdb's copy, same item id
-                try:
-                    (self.icons_dir / f"{iid}.png").write_bytes(_get(f"{MEOWDB_ICONS}/{iid}.png", 20, tries=2))
-                    progress(f"  {iid} ({self.items[iid]['name']}): icon from meowdb")
-                except RuntimeError:
-                    progress(f"  skipped {iid} ({self.items[iid]['name']}): {e}")
-            if n % 100 == 0:
-                progress(f"icons: {n}/{len(todo)}")
-            time.sleep(delay)
+        self.fill_icons(progress, delay)
         self._icons = None
         try:
             from .mapname import download_maps
@@ -122,6 +109,61 @@ class ItemDB:
         except Exception as e:
             progress(f"  couldn't get map names: {e}")
         progress(f"Item data ready: {len(self.items)} items in {self.folder}")
+
+    def fetch_icon(self, iid: int) -> tuple[bytes, str]:
+        """PNG bytes of an item's icon and where they came from. maplestory.io's /icon endpoint errors on some
+        items (Skeledog's Bone 4000154), but the item's own JSON still carries the icon as base64
+        (metaInfo.icon); then the same name in GMS v83's data; then meowdb's copy."""
+        import base64
+
+        try:
+            return _get(f"{self.base}/item/{iid}/icon", 20), "icon"
+        except RuntimeError as e:
+            first = e
+        def from_json(url):
+            meta = json.loads(_get(url, 20, tries=2)).get("metaInfo") or {}
+            b64 = meta.get("icon") or meta.get("iconRaw")
+            if not b64:
+                raise RuntimeError("no icon in the item data")
+            return base64.b64decode(b64)
+        try:
+            return from_json(f"{self.base}/item/{iid}"), "item data"
+        except (RuntimeError, ValueError):
+            pass
+        name = self.items.get(iid, {}).get("name")
+        if name:
+            try:
+                from urllib.parse import quote
+                q = quote(name)
+                for it in json.loads(_get(f"{API}/GMS/83/item?searchFor={q}", 20, tries=2)):
+                    if it.get("name") == name:
+                        return from_json(f"{API}/GMS/83/item/{it['id']}"), f"GMS v83 item {it['id']}"
+            except (RuntimeError, ValueError):
+                pass
+        try:
+            return _get(f"{MEOWDB_ICONS}/{iid}.png", 20, tries=2), "meowdb"
+        except RuntimeError:
+            raise first
+
+    def fill_icons(self, progress=print, delay: float = 0.05) -> int:
+        """Download every missing icon (also the ones that failed before). Returns how many are still missing."""
+        self.icons_dir.mkdir(parents=True, exist_ok=True)
+        todo = [i for i in self.items if not (self.icons_dir / f"{i}.png").exists()]
+        missing = 0
+        for n, iid in enumerate(todo, 1):
+            try:
+                data, src = self.fetch_icon(iid)
+                (self.icons_dir / f"{iid}.png").write_bytes(data)
+                if src != "icon":
+                    progress(f"  {iid} ({self.items[iid]['name']}): icon from {src}")
+            except RuntimeError as e:
+                missing += 1
+                progress(f"  no icon for {iid} ({self.items[iid]['name']}): {e}")
+            if n % 100 == 0:
+                progress(f"icons: {n}/{len(todo)}")
+            time.sleep(delay)
+        self._icons = None
+        return missing
 
     def price(self, item_id: int) -> int | None:
         """NPC sell price (fetched once per item, then cached)."""
