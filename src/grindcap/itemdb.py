@@ -86,18 +86,30 @@ class ItemDB:
         self.folder.mkdir(parents=True, exist_ok=True)
         self.icons_dir.mkdir(exist_ok=True)
         for cat in categories:
-            start = 0
-            while True:
-                url = f"{self.base}/item?overallCategoryFilter={cat}&startPosition={start}&count={page}"
-                batch = json.loads(_get(url))
+            before = sum(1 for v in self.items.values() if v.get("category") == cat)
+            # the whole category in one request first: paging by startPosition skipped items (Skeledog's Bone
+            # 4000154 was missing from a paged list); pages only if the big request fails. Existing entries
+            # (prices) are kept, new ones added.
+            try:
+                batches = [json.loads(_get(f"{self.base}/item?overallCategoryFilter={cat}&count=20000", 120))]
+            except RuntimeError:
+                batches, start = [], 0
+                while True:
+                    b = json.loads(_get(f"{self.base}/item?overallCategoryFilter={cat}&startPosition={start}&count={page}"))
+                    batches.append(b)
+                    if len(b) < page:
+                        break
+                    start += page
+            for batch in batches:
                 for it in batch:
                     if it.get("isCash"):
                         continue
-                    self.items[int(it["id"])] = {"name": it["name"], "category": cat,
-                                                 "sub": (it.get("typeInfo") or {}).get("subCategory")}
-                if len(batch) < page:
-                    break
-                start += page
+                    iid = int(it["id"])
+                    e = self.items.setdefault(iid, {})
+                    e.update({"name": it["name"], "category": cat, "sub": (it.get("typeInfo") or {}).get("subCategory")})
+            after = sum(1 for v in self.items.values() if v.get("category") == cat)
+            if after > before and before:
+                progress(f"  {cat}: {after - before} items that weren't in your list before")
             progress(f"{cat}: {sum(1 for v in self.items.values() if v['category'] == cat)} items")
         self.items_path.write_text(json.dumps(self.items, indent=1))
         self.fill_icons(progress, delay)

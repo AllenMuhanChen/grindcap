@@ -148,9 +148,20 @@ function bind(el, S0, h0) {
       S.fixes.qty[`${t.dataset.kind}|${t.dataset.ref}`] = Math.max(0, +t.value || 0);
       h.recompute();
     } else if (t.classList.contains('search')) {
-      const name = t.value.trim().toLowerCase();
-      const id = Object.keys(S.itemdb.items).find((k) => (S.itemdb.items[k].name || '').toLowerCase() === name);
-      if (id) { S.fixes.looks[t.dataset.key] = +id; h.learn(t.dataset.key, +id, 'typed the name'); h.recompute(); } else t.style.outline = '2px solid var(--bad)';
+      // case, spaces and punctuation don't matter (’ vs ', "skeledogs bone"); a part of a name that fits one item works too
+      const norm = (x) => (x || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '');
+      const want = norm(t.value), items = S.itemdb.items;
+      let ids = want ? Object.keys(items).filter((k) => norm(items[k].name) === want) : [];
+      if (!ids.length && want.length >= 4) ids = Object.keys(items).filter((k) => norm(items[k].name).includes(want));
+      const names = [...new Set(ids.map((k) => items[k].name))];
+      if (names.length === 1) {
+        const id = +ids.find((k) => h.icons?.has?.(+k)) || +ids[0];
+        t.value = names[0]; t.style.outline = '';
+        S.fixes.looks[t.dataset.key] = id; h.learn(t.dataset.key, id, 'typed the name'); h.recompute();
+      } else {
+        t.style.outline = '2px solid var(--bad)';
+        t.title = names.length ? `Several items fit: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ', ...' : ''}` : 'No item with that name in the item data';
+      }
     }
   });
 }

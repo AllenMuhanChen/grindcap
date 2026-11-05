@@ -90,13 +90,16 @@ def main() -> int:
     if not items_path.exists():
         print(f"No item data in {itemdb}. Run `grindcap itemdb` first, then run this again.")
         return 1
-    if "--no-icons" not in sys.argv:          # icons that failed to download before (tried again each run)
+    if "--no-icons" not in sys.argv:          # --no-icons: skip refreshing the item list and icons
         from grindcap.itemdb import ItemDB
         opt = cfg["inventory"].get("itemdb") or {}
         db = ItemDB(itemdb, opt.get("region", "MCW"), str(opt.get("version", "1")))
-        if any(not (itemdb / "icons" / f"{i}.png").exists() for i in db.items):
-            print("Fetching missing icons...")
-            db.fill_icons()
+        try:                                   # item list refreshed (adds items an older download missed), then icons
+            db.download()
+        except Exception as e:
+            print(f"Couldn't refresh the item list ({e}); using the one on disk.")
+            if any(not (itemdb / "icons" / f"{i}.png").exists() for i in db.items):
+                db.fill_icons()
     items = json.loads(items_path.read_text())
     if "--no-prices" not in sys.argv:
         fetch_prices(items, items_path, cfg)
