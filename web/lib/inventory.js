@@ -281,9 +281,21 @@ export async function readPage(frame, grid, digits, itemdb, cache, pageKey = '',
       // A look you named yourself wins when it is clearly the same icon (the item data's icon may be
       // why it wasn't recognised); a merely similar one (another ore colour) still goes through the re-check.
       // An item with no icon in the item data (download failed) can't be re-checked: your naming wins within the full threshold.
+      // Further away (up to the full threshold) your naming still wins unless the item data clearly says it's
+      // something else (a look-alike ore of another colour): the item data's own icon may look nothing like
+      // the game's (Skeledog's Bone matched Diamond vs Broken Mirror Glass), so it can't be the judge.
       const noIcon = (l) => itemdb && typeof l.id === 'number' && !itemdb.icons.has(l.id);
-      let look = near.length && near[0].match && near[0].match.corrected
-        && cache.dist(sig, near[0]) <= (noIcon(near[0]) ? cache.threshold : cache.threshold / 2) ? near[0] : null;
+      const corr = near.length && near[0].match && near[0].match.corrected ? near[0] : null;
+      let look = corr && (cache.dist(sig, corr) <= cache.threshold / 2 || noIcon(corr)) ? corr : null;
+      if (!look && corr) {
+        let m = null;
+        if (patch) {
+          let ignore = null;
+          if (num.text) { const [ox, oy] = digits.lastOffset; ignore = digits.digitMask(num, patch.h, patch.w, -4 - ox, -4 - oy); }
+          m = itemdb.identify(patch, ignore);
+        }
+        if (!(m && m.id && m.id !== corr.id)) look = corr;
+      }
       if (!look && near.length) {
         // Seen a look like this before. Look-alikes (ores that differ only in colour) can be within
         // the threshold too, so the named ones and their neighbours are re-checked on this slot.
