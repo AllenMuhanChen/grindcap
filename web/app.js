@@ -10,7 +10,7 @@ import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
-import { readMap } from './lib/mapname.js';
+import { readMap, snapScore } from './lib/mapname.js';
 import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys } from './lib/quickslot.js';
 import { renderReview } from './review.js';
 import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
@@ -93,6 +93,7 @@ async function init() {
     }
     await store.reindex();
   }
+  await resnapMaps();
   showTab(tab);
   recompute(C());
   // an ended session from the older single-session version goes into the list
@@ -435,6 +436,36 @@ async function finishCollect() {
     snapNote(`Session saved as "${cur.name}". Results and review below.`);
     render();
   }
+}
+
+/** The map name as read (snapshot.map.raw) matched again against the current map list: older readings that
+ * didn't snap (an older list, or "<Tomb>" read as "(Tomb)") are fixed without you doing anything. A map you
+ * typed on the review (fixes.status) still wins. A default session name that starts with the old map follows. */
+function resnap(snap) {
+  const m = snap?.map;
+  if (!m || !m.raw || !S.maps.length) return null;
+  const r = snapScore(m.raw[0] || '', m.raw[1] || '', S.maps);
+  if (!r || (r[1] === m.street && r[2] === m.name && m.matched)) return null;
+  const old = m.name;
+  snap.map = { ...m, street: r[1], name: r[2], matched: true };
+  return old;
+}
+async function resnapMaps() {
+  if (!S.maps.length) return;
+  const fix = (r) => {
+    const olds = [resnap(r.start), resnap(r.end)].filter((x) => x != null);
+    if (!olds.length) return false;
+    for (const o of olds) if (o && r.name && r.name.startsWith(o + ' · ')) r.name = (r.start?.map?.name || r.end?.map?.name) + r.name.slice(o.length);
+    return true;
+  };
+  let n = 0;
+  for (const r of await store.allSessions()) {
+    if (!fix(r)) continue;
+    r.meta = meta(r); await store.putSession(r); n++;
+  }
+  const c = C();
+  if (fix(c)) { store.set('start', c.start); if (c.end) store.set('end', c.end); if (c.name) store.set('name', c.name); }
+  if (n) snapNote(`Map names matched again in ${n} saved session${n > 1 ? 's' : ''}.`);
 }
 
 /** Map and level as fixed on the review (for the summary list). */
