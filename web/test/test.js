@@ -6,7 +6,7 @@ import { locateInventory, detectTab, coveredSlots, readPage, LookCache, findCurs
 import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
 import { mat } from '../lib/img.js';
-import { readMap } from '../lib/mapname.js';
+import { readMap, snapScore } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
@@ -159,6 +159,15 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
     eq([r2[0].name, r3[0].name, n3.length, r4[0].name, n4[0].kind, n5[0].name, st.qsNames.Del],
       ['Orange Potion', 'Orange Potion', 0, null, 'unnamed', 'White Potion', 'White Potion'], 'quick slot names kept');
   }
+}
+// map names with <...> and a numeral: punctuation ignored, a lone "|" is the numeral I
+{
+  const maps = ['Excavation Site I', 'Excavation Site II', 'Excavation Site III', 'Excavation Site <Camp>', 'Remains <Tomb> I', 'Remains <Tomb> II',
+    'Remains <Tomb> III', 'Remains <Tomb> IV', 'Remains <Cliff>'].map((name) => ({ streetName: 'Victoria Road', name }));
+  const got = [['Victoria Road', 'Remains (Tomb) |'], ['Victoria Road', 'Remains <Tomb> Il'], ['Victorla Road', 'Remalns «Tomb» lV'], ['', 'Remains Tomb I'], ['Victoria Road', 'Remains <Cliff>']]
+    .map(([a, b]) => snapScore(a, b, maps)?.[2]);
+  const want = ['Remains <Tomb> I', 'Remains <Tomb> II', 'Remains <Tomb> IV', 'Remains <Tomb> I', 'Remains <Cliff>'];
+  if (JSON.stringify(got) !== JSON.stringify(want)) fails.push(`map names with <> and numerals: got ${JSON.stringify(got)}`);
 }
 // Live EXP around a level-up: a reading misread one level too high (or a level-down) must not spike EXP/hr
 {

@@ -26,7 +26,9 @@ function rightEdge(frame, x0, y, maxW) {
   return x0 + off.length;
 }
 
-const clean = (t) => t.trim().replace(/[|/\\_]+\s*$/, '').trim();
+const clean = (t) => t.trim().replace(/[|/\\_]+\s*$/, '').trim();   // the window border OCRs as a trailing "|"
+/** Compared without case or punctuation: "<Tomb>" OCRs as "(Tomb)", "«Tomb»", "Tomb". */
+const key = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const inv = (m) => mat(m.w, m.h, 1, m.data.map((v) => 255 - v));
 
 /** A few readings of one line: the plain one and the white letters only (the minimap's picture can
@@ -77,16 +79,16 @@ export function numerals(name) {
 export function snapScore(street, name, maps, cutoff = 0.75) {
   if (!maps || !maps.length) return null;
   name = numerals(name);
-  const key = `${street} | ${name}`.toLowerCase();
+  const want = `${key(street)} | ${key(name)}`;
   let best = null, br = 0;
   for (const m of maps) {
-    const r = ratio(key, `${m.streetName || ''} | ${m.name || ''}`.toLowerCase());
+    const r = ratio(want, `${key(m.streetName || '')} | ${key(m.name || '')}`);
     if (r > br) { best = m; br = r; }
   }
   if (!best || br < cutoff) {
     // the street line may be cut off or misread: the map name alone
     let hit = null, hr = 0;
-    for (const m of maps) { const r = ratio(name.toLowerCase(), (m.name || '').toLowerCase()); if (r > hr) { hr = r; hit = m; } }
+    for (const m of maps) { const r = ratio(key(name), key(m.name || '')); if (r > hr) { hr = r; hit = m; } }
     if (!hit || hr < cutoff) return null;
     best = hit; br = hr;
   }

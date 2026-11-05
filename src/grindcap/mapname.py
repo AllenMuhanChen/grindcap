@@ -120,21 +120,22 @@ def snap_score(street: str, name: str, maps: list[dict], cutoff: float = 0.75):
     if not maps:
         return None
     name = _numerals(name)
-    key = f"{street} | {name}".lower()
+    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()   # "<Tomb>" OCRs as "(Tomb)", "Tomb"
+    key = f"{norm(street)} | {norm(name)}"
     best, br = None, 0.0
     for m in maps:
-        k = f"{m.get('streetName') or ''} | {m.get('name') or ''}".lower()
+        k = f"{norm(m.get('streetName') or '')} | {norm(m.get('name') or '')}"
         r = difflib.SequenceMatcher(None, key, k).ratio()
         if r > br:
             best, br = m, r
     if best is None or br < cutoff:
         # the street line may be cut off or misread: try the map name alone
-        names = [(m.get("name") or "").lower() for m in maps]
-        hit = difflib.get_close_matches(name.lower(), names, n=1, cutoff=cutoff)
+        names = [norm(m.get("name") or "") for m in maps]
+        hit = difflib.get_close_matches(norm(name), names, n=1, cutoff=cutoff)
         if not hit:
             return None
         best = maps[names.index(hit[0])]
-        br = difflib.SequenceMatcher(None, name.lower(), hit[0]).ratio()
+        br = difflib.SequenceMatcher(None, norm(name), hit[0]).ratio()
     return br, (best.get("streetName") or "", best.get("name") or "")
 
 
