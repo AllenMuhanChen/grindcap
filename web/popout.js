@@ -5,7 +5,7 @@ import { drawGraph, drawPotionGraph, potionSummary, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
-const FULL = [380, 560];
+const FULL = [380, 680];
 // compact window: sized to its content (measured after each render, last size remembered for the next open)
 let SMALL = (() => { try { return JSON.parse(localStorage.getItem('grindcap.popSmallSize')) || [250, 140]; } catch { return [250, 140]; } })();
 let small = (() => { try { return localStorage.getItem('grindcap.popSmall') === '1'; } catch { return false; } })();
@@ -68,6 +68,7 @@ export async function openPopout(a) {
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
     <div id="inv"></div>
+    <canvas id="ig" width="720" height="180" style="height:120px" hidden></canvas>
     <div class="mute note" id="pot"></div>
     <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
     <div id="pgs" class="note"></div>
@@ -116,6 +117,8 @@ export function updatePopout() {
   if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
   $('pgs').innerHTML = potionSummary(pot.pts);
   const inv = api.inv ? api.inv() : null;
+  $('ig').hidden = !inv;
+  if (inv && api.invSeries) drawGraph($('ig'), api.invSeries().map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.mesos ?? p.est })), 1, 'Net mesos/hr', 'Net mesos/hr appears once the inventory is opened 5+ min after Start.', null);
   $('inv').innerHTML = inv && inv.net_per_hr != null ? `<b>${fmt(inv.net_per_hr)}</b> <span class="mute">net mesos/hr (inventory${inv.not_seen.length ? `; not read: ${inv.not_seen.join(', ')}` : ''})</span>` : '';
   d.body.classList.toggle('small', small);
   $('mini').hidden = !small; $('full').hidden = small;

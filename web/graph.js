@@ -78,17 +78,18 @@ function axes(g, x0, x1, y0, y1, lo, hi, step, t1, title, ink, Y) {
 const H0 = (g) => g.canvas.clientHeight || g.canvas.height;
 
 /** EXP/hr: dots = each reading, solid = 5-min average (current value boxed on the right), dashed = session. */
-export function drawGraph(cv, ser, mult = 1, unit = 'EXP/min') {
+/** floor: lowest y the axis may start at (0 for EXP; null lets it go negative, e.g. net mesos/hr). */
+export function drawGraph(cv, ser, mult = 1, unit = 'EXP/min', empty = null, floor = 0) {
   const [g, W, H] = fit(cv);
   const css = getComputedStyle(cv.ownerDocument.documentElement);
   const ink = css.getPropertyValue('--mute') || '#888', acc = css.getPropertyValue('--acc') || '#2f6fde';
   const text = css.getPropertyValue('--ink') || '#111', bg = css.getPropertyValue('--card') || '#fff';
-  if (ser.length < 1) { g.fillStyle = ink; g.font = AXIS; g.fillText(`${unit} appears after two readings.`, 8, H / 2); return; }
+  if (ser.length < 1) { g.fillStyle = ink; g.font = AXIS; g.fillText(empty ?? `${unit} appears after two readings.`, 8, H / 2); return; }
   const pts = ser.map((p) => ({ min: p.min, rate: p.rate * mult, ema: p.ema * mult, cum: p.cum * mult }));
   const per = unit.includes('/') ? unit.slice(unit.indexOf('/')) : '';
   const label = `${short(pts.at(-1).ema)}${per}`;
   const x0 = 62, x1 = W - labelWidth(g, [label]) - 22, y0 = H - 20, y1 = 22, t1 = Math.max(1, pts.at(-1).min);
-  const [lo, hi, step] = yRange(pts.flatMap((p) => [p.ema, p.cum]));
+  const [lo, hi, step] = yRange(pts.flatMap((p) => [p.ema, p.cum, ...(floor == null ? [p.rate] : [])]), floor);
   const X = (m) => x0 + (x1 - x0) * m / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
   axes(g, x0, x1, y0, y1, lo, hi, step, t1, unit, ink, Y);
   g.fillStyle = acc; g.globalAlpha = 0.45;

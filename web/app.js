@@ -111,7 +111,7 @@ async function init() {
 const popoutApi = {
   state: () => ({ ...S, ...C() }), start: startSession, end: endSession, finish: finishCollect, pause: togglePause, discard,
   running: () => running(), lastNote: () => S.lastNote, alert: () => alertNow(),
-  inv: () => (running() && S.trackInv ? invEstimate(C()) : null),
+  inv: () => (running() && S.trackInv ? invEstimate(C()) : null), invSeries: () => invSeries(C()),
   potions: () => ({ pts: potPoints(C()), line: running() && S.trackPotions && C().lastPot !== undefined ? describe(C().lastPot, S.qsTable) : '' }),
 };
 const showPopout = () => openPopout(popoutApi).then(render).catch((e) => note(`pop-out: ${e.message}`));
@@ -1076,14 +1076,27 @@ function renderGraph() {
   if (pts.length) drawPotionGraph($('potGraph'), pts);
   $('potSum').innerHTML = potionSummary(pts);
   const reads = v.inv?.reads || [];
-  const iser = v.start && reads.length ? estimateSeries(withFixes(v.start, 'start', v.fixes, nameOf), reads, priceOf, v.pauses, COUNTED_TABS, v.fixes, potionCost(v)[0], { potionNames: potionCost(v)[1] }) : [];
-  $('invWrap').hidden = !iser.length;
-  if (iser.length) {
-    drawGraph($('invGraph'), iser.map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.est })), 1, 'Net mesos/hr (inventory)');
+  const iser = invSeries(v);
+  $('invWrap').hidden = !reads.length;
+  if (reads.length) {
+    drawInvGraph($('invGraph'), iser);
     const e = invEstimate(v, reads.at(-1).t), tabsRead = [...new Set(reads.map((r) => r.tab).filter(Boolean))];
     $('invSum').innerHTML = `${reads.length} inventory read${reads.length > 1 ? 's' : ''} while grinding (${tabsRead.join(', ') || 'meso field only'}). `
       + `Last estimate <b>${fmt(e?.net_per_hr)}</b>/hr${v.result ? `; End result ${fmt(v.result.net_per_hr)}/hr` : ''}. ${esc(invLine(e))}`;
   }
+}
+
+/** Net mesos/hr (inventory) after each read of a session, for the graphs. */
+function invSeries(v) {
+  const reads = v.inv?.reads || [];
+  if (!v.start || !reads.length) return [];
+  const [pot, potionNames] = potionCost(v);
+  return estimateSeries(withFixes(v.start, 'start', v.fixes, nameOf), reads, priceOf, v.pauses, COUNTED_TABS, v.fixes, pot, { potionNames });
+}
+/** Line + dots = net estimate after each read; dashed = the meso field alone (mesos picked up, no items). */
+function drawInvGraph(cv, ser) {
+  if (!ser.length) return drawGraph(cv, [], 1, 'Net mesos/hr', 'Net mesos/hr appears once the inventory is opened 5+ min after Start.');
+  drawGraph(cv, ser.map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.mesos ?? p.est })), 1, 'Net mesos/hr', null, null);
 }
 
 /** Potion mesos/hr points for a session (live readings up to its end), like review.py _potions. */

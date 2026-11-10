@@ -208,7 +208,9 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
                       With quick slot readings, potions (qsNames) come from the quick slot cost/hr (fresh every minute) and are
                       left out of the Use tab's change. alignPage ties (a tab of identical stacks) go to the most same-count
                       slots. fixes.looks apply. Rows not scrolled to keep their last-seen counts. Shown: liveStats row +
-                      #invLine (per-part rate + age), pop-out (full + compact), review graph #invGraph (estimate after each read)
+                      #invLine (per-part rate + age), graph app.drawInvGraph (net estimate after each read, dashed = meso field
+                      alone, y axis may go below 0: drawGraph floor null) in the view (#invGraph, shown whenever reads exist) and
+                      the pop-out (canvas ig),
                       with the End result for comparison.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =

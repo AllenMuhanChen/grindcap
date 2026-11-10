@@ -136,12 +136,12 @@ export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), c
   return { net_per_hr: net == null ? null : Math.round(net), mesos, tabs, not_seen: notSeen, too_early: early, min_minutes: minMin, unpriced: [...unpriced], potion_fallback: potionFallback };
 }
 
-/** The estimate after each read: [{min (active minutes), est}] for a graph. */
+/** The estimate after each read: [{min (active minutes), est, mesos (meso field alone, /hr)}] for a graph. */
 export function estimateSeries(start, reads, priceOf, pauses = [], counted, fixes = null, potionCostPerHr = null, opts = {}) {
   const out = [];
   for (let i = 0; i < (reads || []).length; i++) {
     const t = reads[i].t, e = estimate(start, reads.slice(0, i + 1), priceOf, pauses, t, counted, fixes, potionCostPerHr, opts);
-    if (e.net_per_hr != null) out.push({ min: activeMs(start.time, t, pauses) / 6e4, est: e.net_per_hr });
+    if (e.net_per_hr != null) out.push({ min: activeMs(start.time, t, pauses) / 6e4, est: e.net_per_hr, mesos: e.mesos?.per_hr ?? null });
   }
   return out;
 }
