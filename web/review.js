@@ -43,16 +43,15 @@ export function renderReview(el, S, h) {
     return list.map((p) => `<div class="shot"><img class="meso" src="${p.img}" alt="meso field"><span class="small ${p.value === snap.mesos ? '' : 'mute'}">read ${p.value == null ? 'nothing' : fmt(p.value)}${p.pages.length ? ` · ${esc(p.pages.join(', '))}` : ''}${p.value === snap.mesos && list.length > 1 ? ' · used' : ''}</span></div>`).join('');
   };
   let html = `<h3>Status read from the screen</h3>
-    <table><tr><th>Snapshot</th><th class="l">Map</th><th>Level</th><th>EXP</th><th class="l">EXP as captured</th><th>Mesos</th><th class="l">Meso field as captured</th></tr>
+    <table><tr><th>Snapshot</th><th class="l">Map</th><th>Level</th><th class="l">EXP <span class="mute small">(as captured)</span></th><th class="l">Mesos <span class="mute small">(meso field as captured)</span></th></tr>
     ${KINDS.filter((k) => snaps[k]).map((k) => `<tr><td>${k} <span class="mute">${esc(snaps[k].when)}</span>
       ${snaps[k].exp_checked ? '' : '<span class="bad" title="EXP did not fit the EXP table">EXP unchecked</span>'}
       ${snaps[k].mesos_changed ? `<span class="bad" title="different totals on different pages; ${k === 'end' ? 'the first (when End was pressed)' : 'the last (when the start scan finished)'} is used">mesos changed during the scan</span>`
         : snaps[k].mesos_checked ? '' : `<span class="bad" title="pages read: ${esc((snaps[k].mesos_reads || []).join(', '))}">mesos unchecked</span>`}</td>
       <td class="l">${mapCell(k)}</td>
-      <td>${field(k, 'level')}</td><td>${field(k, 'exp')}</td>
-      <td class="l">${snaps[k].exp_picture ? `<img class="meso" src="${snaps[k].exp_picture}" alt="EXP">` : '<span class="mute">–</span>'}</td>
-      <td>${field(k, 'mesos')}</td>
-      <td class="l">${mesoPics(snaps[k])}</td></tr>`).join('')}
+      <td>${field(k, 'level')}</td>
+      <td class="l">${field(k, 'exp')}${snaps[k].exp_picture ? `<br><img class="meso" src="${snaps[k].exp_picture}" alt="EXP">` : ''}</td>
+      <td class="l">${field(k, 'mesos')}${mesoPics(snaps[k])}</td></tr>`).join('')}
     </table><p class="mute">Type a value to correct a misread; clear it to go back to what was read.</p>`;
   // ---- character stats (stat window, optional)
   {
