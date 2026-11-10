@@ -245,9 +245,16 @@ $('trackInv').onchange = (e) => { S.trackInv = e.target.checked; store.set('trac
 /** Live net mesos/hr from the inventory reads of a session (null if it has none). */
 function invEstimate(v, now = Date.now()) {
   if (!v.start || !v.inv?.reads?.length) return null;
-  const pts = potPoints(v).filter((p) => p.cum_hp != null).at(-1);
-  const pot = pts ? (pts.cum_hp || 0) + (pts.cum_mp || 0) : null;
-  return estimate(withFixes(v.start, 'start', v.fixes, nameOf), v.inv.reads, priceOf, v.pauses, now, COUNTED_TABS, v.fixes, pot);
+  const [pot, potionNames] = potionCost(v);
+  return estimate(withFixes(v.start, 'start', v.fixes, nameOf), v.inv.reads, priceOf, v.pauses, now, COUNTED_TABS, v.fixes, pot, { potionNames });
+}
+/** Quick slot potion spend (mesos/hr, session average so far) and the potions' names; [null, []] without readings. */
+function potionCost(v) {
+  const p = potPoints(v).filter((q) => q.cum_hp != null).at(-1);
+  if (!p) return [null, []];
+  const names = new Set(Object.values(v.qsNames || {}));
+  for (const r of v.potions || []) for (const q of r.potions || []) if (q.name) names.add(q.name);
+  return [(p.cum_hp || 0) + (p.cum_mp || 0), [...names]];
 }
 const ago = (m) => (m < 1 ? 'just now' : `${Math.round(m)} min ago`);
 /** One line: where the estimate comes from and how old each part is. */
@@ -255,11 +262,12 @@ function invLine(e) {
   if (!e) return '';
   const sg = (v) => `${v >= 0 ? '+' : ''}${fmt(v)}`;
   const parts = [];
-  if (e.mesos) parts.push(`mesos ${sg(e.mesos.per_hr)}/hr (${ago(e.mesos.age_min)})`);
-  for (const t of e.tabs) parts.push(`${t.tab} ${sg(t.per_hr)}/hr (${ago(t.age_min)})`);
-  if (e.potion_fallback != null) parts.push(`Use ${sg(e.potion_fallback)}/hr (quick slot potions; tab not read yet)`);
-  const ns = e.not_seen.filter((t) => !(t === 'Use' && e.potion_fallback != null));
-  return parts.join(' · ') + (ns.length ? ` · not read since Start: ${ns.join(', ')} (count 0)` : '') + (e.unpriced.length ? ` · no price: ${e.unpriced.join(', ')}` : '');
+  if (e.mesos) parts.push(e.mesos.early ? `mesos: read too soon after Start` : `mesos ${sg(e.mesos.per_hr)}/hr (${ago(e.mesos.age_min)})`);
+  for (const t of e.tabs) parts.push(`${t.tab}${t.tab === 'Use' && e.potion_fallback != null ? ' (no potions)' : ''} ${sg(t.per_hr)}/hr (${ago(t.age_min)})`);
+  if (e.potion_fallback != null) parts.push(`potions ${sg(e.potion_fallback)}/hr (quick slots)`);
+  const ns = e.not_seen.filter((t) => !e.too_early.includes(t));
+  return parts.join(' · ') + (e.too_early.length ? ` · read too soon after Start, open again after ${e.min_minutes} min: ${e.too_early.join(', ')}` : '')
+    + (ns.length ? ` · not read since Start: ${ns.join(', ')} (count 0)` : '') + (e.unpriced.length ? ` · no price: ${e.unpriced.join(', ')}` : '');
 }
 
 $('trackPot').onchange = (e) => { S.trackPotions = e.target.checked; store.set('trackPotions', S.trackPotions); render(); };
@@ -1068,7 +1076,7 @@ function renderGraph() {
   if (pts.length) drawPotionGraph($('potGraph'), pts);
   $('potSum').innerHTML = potionSummary(pts);
   const reads = v.inv?.reads || [];
-  const iser = v.start && reads.length ? estimateSeries(withFixes(v.start, 'start', v.fixes, nameOf), reads, priceOf, v.pauses, COUNTED_TABS, v.fixes) : [];
+  const iser = v.start && reads.length ? estimateSeries(withFixes(v.start, 'start', v.fixes, nameOf), reads, priceOf, v.pauses, COUNTED_TABS, v.fixes, potionCost(v)[0], { potionNames: potionCost(v)[1] }) : [];
   $('invWrap').hidden = !iser.length;
   if (iser.length) {
     drawGraph($('invGraph'), iser.map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.est })), 1, 'Net mesos/hr (inventory)');

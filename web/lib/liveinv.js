@@ -18,18 +18,19 @@ export function liteRows(page) {
  * (an empty tab at Start) -> 0. Returns null when no offset fits (items were moved around). */
 export function alignPage(known, page) {
   const maxOff = Math.max(0, known.length - page.length);
-  let best = null, bestSame = -1, anyCompared = false;
+  let best = null, bestScore = -1, anyCompared = false;
   for (let off = 0; off <= maxOff; off++) {
-    let same = 0, diff = 0;
+    let same = 0, diff = 0, exact = 0;   // exact: same id and count (most stacks don't change): breaks ties
     for (let r = 0; r < page.length && off + r < known.length; r++) {
       for (let c = 0; c < page[r].length; c++) {
         const a = known[off + r]?.[c]?.id, b = page[r][c]?.id;
         if (!a || !b || a === UNKNOWN || b === UNKNOWN) continue;
-        if (a === b) same++; else diff++;
+        if (a === b) { same++; if (known[off + r][c].qty === page[r][c].qty) exact++; } else diff++;
       }
     }
     if (same + diff) anyCompared = true;
-    if (same + diff && diff <= Math.floor((same + diff) / 5) && same > bestSame) { best = off; bestSame = same; }
+    const score = same * 1000 + exact;   // a tab full of one item (ore stacks) matches at every offset by id alone
+    if (same + diff && diff <= Math.floor((same + diff) / 5) && score > bestScore) { best = off; bestScore = score; }
   }
   return best ?? (anyCompared ? null : 0);
 }
@@ -81,10 +82,16 @@ export function replay(start, reads, fixes = null) {
 }
 
 /** The live estimate at time `now` (ms). priceOf(id) -> mesos or null. counted = tabs that count (Equip, Use,
- * Setup, Etc). potionCostPerHr (optional): quick slot potion spend, stands in for the Use tab until it is read.
+ * Setup, Etc). potionCostPerHr (optional): quick slot potion spend/hr. With it, the potions on the quick slots
+ * (opts.potionNames) are counted from the quick slots (read every minute) and left out of the Use tab's change,
+ * which would otherwise hold the potion use of whenever Use was last read; Use not read -> just the potion cost.
+ * opts.minMinutes (5): a part (meso field or a tab) last read sooner than this after Start isn't counted: a few
+ * potions or mesos over a few seconds make a huge per-hour rate (the inventory is still open right after the
+ * Start scan, so the first reads come seconds after Start).
  * Returns {net_per_hr, mesos: {...}|null, tabs: [{tab, seen, t, age_min, minutes, value, per_hr, items}],
  * not_seen: [tab], unpriced: [name], potion_fallback} — net_per_hr null until anything was read. */
-export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), counted = ['Equip', 'Use', 'Setup', 'Etc'], fixes = null, potionCostPerHr = null) {
+export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), counted = ['Equip', 'Use', 'Setup', 'Etc'], fixes = null, potionCostPerHr = null, opts = {}) {
+  const minMin = opts.minMinutes ?? 5, potNames = new Set(potionCostPerHr != null ? opts.potionNames || [] : []);
   const st = replay(start, reads, fixes);
   const hrs = (t) => activeMs(start.time, t, pauses) / 3.6e6;
   const rate = (v, t) => { const h = hrs(t); return h > 0 ? v / h : null; };
@@ -96,26 +103,27 @@ export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), c
   let mesos = null;
   if (st.mesos && start.mesos != null) {
     const change = st.mesos.value - start.mesos;
-    mesos = { start: start.mesos, now: st.mesos.value, change, t: st.mesos.t, minutes: hrs(st.mesos.t) * 60, age_min: (now - st.mesos.t) / 6e4, per_hr: rate(change, st.mesos.t) };
+    const minutes = hrs(st.mesos.t) * 60, early = minutes < minMin;
+    mesos = { start: start.mesos, now: st.mesos.value, change, t: st.mesos.t, minutes, early, age_min: (now - st.mesos.t) / 6e4, per_hr: early ? null : rate(change, st.mesos.t) };
     add(mesos.per_hr);
   }
 
   const tabs = [], notSeen = [];
   let potionFallback = null;
+  const early = [];
   for (const tab of counted) {
+    if (tab === 'Use' && potionCostPerHr != null) { potionFallback = -potionCostPerHr; add(potionFallback); }
     const s = st.tabs[tab];
-    if (!s || s.t == null) {
-      notSeen.push(tab);                     // not read since Start (or not in the Start scan): counts nothing
-      if (tab === 'Use' && potionCostPerHr != null) { potionFallback = -potionCostPerHr; add(potionFallback); }
-      continue;
-    }
+    if (!s || s.t == null) { notSeen.push(tab); continue; }   // not read since Start (or not in the Start scan): counts nothing
+    if (hrs(s.t) * 60 < minMin) { notSeen.push(tab); early.push(tab); continue; }
     const before = counts((start.tabs?.[tab] || []).map((r) => r.map((x) => fix(x) || {}))), after = counts(s.rows);
     const items = [];
     let value = 0;
     for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
       const a = before[id]?.qty || 0, b = after[id]?.qty || 0;
-      if (a === b) continue;
-      const p = priceOf(id), name = (after[id] || before[id]).name || id;
+      const name = (after[id] || before[id]).name || id;
+      if (a === b || potNames.has(name)) continue;     // quick slot potions: counted from the quick slots
+      const p = priceOf(id);
       if (p == null) { unpriced.add(name); items.push({ id, name, change: b - a, value: null }); continue; }
       value += (b - a) * p;
       items.push({ id, name, change: b - a, value: (b - a) * p });
@@ -125,14 +133,14 @@ export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), c
     tabs.push({ tab, seen: true, t: s.t, age_min: (now - s.t) / 6e4, minutes: hrs(s.t) * 60, value, per_hr: per, items, reads: s.reads, skipped: s.skipped });
     add(per);
   }
-  return { net_per_hr: net == null ? null : Math.round(net), mesos, tabs, not_seen: notSeen, unpriced: [...unpriced], potion_fallback: potionFallback };
+  return { net_per_hr: net == null ? null : Math.round(net), mesos, tabs, not_seen: notSeen, too_early: early, min_minutes: minMin, unpriced: [...unpriced], potion_fallback: potionFallback };
 }
 
 /** The estimate after each read: [{min (active minutes), est}] for a graph. */
-export function estimateSeries(start, reads, priceOf, pauses = [], counted, fixes = null) {
+export function estimateSeries(start, reads, priceOf, pauses = [], counted, fixes = null, potionCostPerHr = null, opts = {}) {
   const out = [];
   for (let i = 0; i < (reads || []).length; i++) {
-    const t = reads[i].t, e = estimate(start, reads.slice(0, i + 1), priceOf, pauses, t, counted, fixes);
+    const t = reads[i].t, e = estimate(start, reads.slice(0, i + 1), priceOf, pauses, t, counted, fixes, potionCostPerHr, opts);
     if (e.net_per_hr != null) out.push({ min: activeMs(start.time, t, pauses) / 6e4, est: e.net_per_hr });
   }
   return out;

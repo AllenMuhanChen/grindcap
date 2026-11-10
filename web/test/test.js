@@ -265,6 +265,17 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const lk = [row({ ...S(1, 10), look: 'L1' })], lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];
   const e3 = estimate({ time: t0, mesos: 0, tabs: { Etc: lk } }, [{ t: t0 + 60 * min, tab: 'Etc', rows: lp, mesos: 0 }], (id) => (id === 7 ? 1 : null), [], t0 + 60 * min, ['Etc'], { looks: { L9: 7 } });
   eq(e3.tabs[0].items.map((x) => [x.id, x.change]), [['7', 30]], 'fixes on live reads');
+  // reads seconds after Start (inventory still open after the Start scan): not turned into a per-hour rate
+  const e4 = estimate(start, [{ t: t0 + 20000, tab: 'Use', rows: [row(S(20, 99))], mesos: 1100 }], price, [], t0 + 20000, ['Use', 'Etc']);
+  eq([e4.net_per_hr, e4.too_early, e4.mesos.early], [null, ['Use'], true], 'too soon after Start');
+  // quick slot potions: counted from the quick slots, left out of the Use tab (Red Potion used, Scroll gained)
+  const st5 = { time: t0, mesos: 0, tabs: { Use: [row({ id: 20, qty: 100, name: 'Red Potion' }, { id: 21, qty: 0, name: 'Scroll' })] } };
+  const r5 = [{ t: t0 + 60 * min, tab: 'Use', rows: [row({ id: 20, qty: 40, name: 'Red Potion' }, { id: 21, qty: 1, name: 'Scroll' })], mesos: 0 }];
+  const e5 = estimate(st5, r5, (id) => ({ 20: 50, 21: 700 }[id]), [], t0 + 60 * min, ['Use'], null, 2500, { potionNames: ['Red Potion'] });
+  eq([e5.tabs[0].per_hr, e5.potion_fallback, e5.net_per_hr], [700, -2500, -1800], 'potions from the quick slots');
+  // a tab of identical ore stacks: the offset with the same counts wins
+  const ore = [row(S(5, 100), S(5, 100)), row(S(5, 100), S(5, 100)), row(S(5, 37), S(5, 12))];
+  eq(alignPage(ore, [row(S(5, 100), S(5, 100)), row(S(5, 37), S(5, 12))]), 1, 'identical stacks: counts break the tie');
 }
 // Stat window
 await statsTests(log, fails);
