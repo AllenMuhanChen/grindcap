@@ -9,6 +9,7 @@ import { mat } from '../lib/img.js';
 import { readMap, snapScore } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
+import { alignPage, estimate, estimateSeries } from '../lib/liveinv.js';
 import { cleanTag, ensureTag, editTags, renameIn, rangeIds } from '../lib/tags.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
 
@@ -230,6 +231,39 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   eq(renameIn(['x', 'y'], 'X', 'y'), ['y'], 'rename merges');
   eq(rangeIds(['1', '2', '3', '4'], '3', '1'), ['1', '2', '3'], 'range upward');
   eq(rangeIds(['1', '2'], '1', '9'), [], 'range off the list');
+}
+// Live mesos/hr from inventory reads while grinding: each tab at its own last-read time, scrolled pages aligned
+{
+  const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fails.push(`liveinv ${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
+  const S = (id, qty) => ({ id, qty, name: `item ${id}` }), E = {};
+  const row = (...x) => [...x, ...Array(5 - x.length).fill(E)];
+  // Etc tab: 8 rows at Start; a later page shows rows 2..7 with grown stacks and a new item in an empty slot
+  const etc = [row(S(1, 10), S(2, 5)), row(S(3, 1)), row(S(4, 7), S(5, 2)), row(S(6, 3)), row(S(7, 9)), row(S(8, 1)), row(S(9, 4)), row()];
+  const page = etc.slice(2).map((r) => r.map((s) => ({ ...s })));
+  page[0][0] = S(4, 17); page[5][0] = S(10, 2);           // +10 of item 4, 2 of a new item 10 in the empty row
+  eq(alignPage(etc, page), 2, 'scrolled page offset');
+  eq(alignPage([row(S(1, 1), S(2, 1))], [row(S(3, 1), S(4, 1))]), null, 'items moved: no offset');
+  eq(alignPage([row()], [row(S(3, 1))]), 0, 'empty tab at Start');
+  const t0 = 1_000_000, min = 60000;
+  const start = { time: t0, mesos: 1000, tabs: { Etc: etc, Use: [row(S(20, 100))] } };
+  const price = (id) => ({ 4: 10, 10: 100, 20: 50 }[id] ?? null);
+  const reads = [
+    { t: t0 + 30 * min, tab: 'Etc', rows: page, mesos: 11000 },          // 30 min: +100 + 200 items, +10,000 mesos
+    { t: t0 + 60 * min, tab: 'Use', rows: [row(S(20, 80))], mesos: 21000 }, // 60 min: -20 potions, +20,000 mesos
+  ];
+  const e = estimate(start, reads, price, [], t0 + 60 * min, ['Equip', 'Use', 'Setup', 'Etc']);
+  eq(e.mesos.per_hr, 20000, 'mesos rate over its own window');
+  eq(e.tabs.map((x) => [x.tab, Math.round(x.per_hr)]), [['Use', -1000], ['Etc', 600]], 'tab rates over each tab\'s window');
+  eq(e.net_per_hr, 19600, 'net = mesos + tabs');
+  eq(e.not_seen, ['Equip', 'Setup'], 'tabs not read since Start');
+  // only the Etc read: Use stands in from the quick slot potion cost; with a 30-min pause the window halves
+  const e2 = estimate(start, reads.slice(0, 1), price, [[t0, t0 + 15 * min]], t0 + 30 * min, ['Use', 'Etc'], null, 500);
+  eq([e2.potion_fallback, Math.round(e2.mesos.per_hr), e2.net_per_hr], [-500, 40000, 40700], 'potion fallback + pauses');
+  eq(estimateSeries(start, reads, price, []).map((p) => p.est), [20600, 19600], 'series');
+  // a look you named on the review applies to live reads too ('ignore' = not counted)
+  const lk = [row({ ...S(1, 10), look: 'L1' })], lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];
+  const e3 = estimate({ time: t0, mesos: 0, tabs: { Etc: lk } }, [{ t: t0 + 60 * min, tab: 'Etc', rows: lp, mesos: 0 }], (id) => (id === 7 ? 1 : null), [], t0 + 60 * min, ['Etc'], { looks: { L9: 7 } });
+  eq(e3.tabs[0].items.map((x) => [x.id, x.change]), [['7', 30]], 'fixes on live reads');
 }
 log(fails.length ? `FAIL\n${fails.join('\n')}` : 'ALL OK');
 window.__result = { results, fails };

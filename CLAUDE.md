@@ -195,6 +195,17 @@ web/lib/quickslot.js  quickslot.py: findPanel (coarse /4 search then refine, las
                       identify always searches the potion table's items too (an Orange Potion never seen in a snapshot wasn't in
                       useIds, so it could never be named); misses aren't cached (one miss used to stick for the page load); the
                       miss reason ("A or B?", "closest X, too different") shows in the describe line.
+web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (checkbox "Live mesos from inventory", kv trackInv).
+                      app.invTick polls every 2 s while running (not paused/scanning): inventory open + view still for one poll
+                      + (view changed or 15 s since the last read: a stack count barely moves the signature) -> readPage + meso
+                      field -> session.inv.reads [{t, tab, rows (liteRows, no pictures), mesos}] (kv invLive, record.inv, backup).
+                      Tooltip/pointer over the grid: silently tried later. replay: start snapshot's tab rows, each read written
+                      over the rows it shows at alignPage's offset (ids only, counts ignored, empty slots neutral, <= 1/5
+                      disagree, else skipped). estimate: meso field and each tab -> rate over ITS OWN window (start -> last read
+                      of it, paused time out); a tab not read since Start counts 0 and is listed (Use falls back to the quick slot
+                      potion cost/hr); fixes.looks apply. Rows not scrolled to keep their last-seen counts. Shown: liveStats row +
+                      #invLine (per-part rate + age), pop-out (full + compact), review graph #invGraph (estimate after each read)
+                      with the End result for comparison.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

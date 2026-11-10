@@ -95,6 +95,7 @@
     </div>
     <div class="row">
       <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
+      <label class="small" title="While a session runs, opening the inventory reads the page on screen and the meso field again: a live net mesos/hr including drops, each tab counted from when you last looked at it"><input type="checkbox" id="trackInv"> Live mesos from inventory</label>
       <span class="small mute" title="Read from the status bar at Start">Character</span>
       <input id="charName" class="st" placeholder="name" title="Character name: read at Start; type to correct it">
       <select id="charJob" title="Class"></select>
@@ -105,6 +106,7 @@
     <div class="stats" id="liveStats"></div>
     <div id="liveNote" class="bad small"></div>
     <div id="potLine" class="mute small"></div>
+    <div id="invLine" class="mute small"></div>
     <div id="lastNote" class="mute small"></div>
     <div class="row datarow">
       <b class="small">Your data</b>
@@ -144,6 +146,10 @@
     <div id="potWrap" hidden>
       <canvas id="potGraph" width="940" height="140" style="height:140px"></canvas>
       <div id="potSum" class="potsum"></div>
+    </div>
+    <div id="invWrap" hidden>
+      <canvas id="invGraph" width="940" height="140" style="height:140px"></canvas>
+      <div id="invSum" class="potsum"></div>
     </div>
     <div id="review"></div>
   </section>

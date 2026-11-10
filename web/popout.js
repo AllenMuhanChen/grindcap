@@ -59,6 +59,7 @@ export async function openPopout(a) {
       <div class="timer" id="mtimer"></div>
       <div><span class="big" id="mxph">–</span> <span class="mute">EXP/hr</span> <span id="mpph" class="pct"></span></div>
       <div class="mpot" id="mpot"></div>
+      <div class="mpot" id="minv"></div>
       <div id="mscan" class="mscan" hidden></div>
     </div>
     <div id="full">
@@ -66,6 +67,7 @@ export async function openPopout(a) {
     <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
+    <div id="inv"></div>
     <div class="mute note" id="pot"></div>
     <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
     <div id="pgs" class="note"></div>
@@ -113,6 +115,8 @@ export function updatePopout() {
   $('pg').hidden = !pot.pts.length;
   if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
   $('pgs').innerHTML = potionSummary(pot.pts);
+  const inv = api.inv ? api.inv() : null;
+  $('inv').innerHTML = inv && inv.net_per_hr != null ? `<b>${fmt(inv.net_per_hr)}</b> <span class="mute">net mesos/hr (inventory${inv.not_seen.length ? `; not read: ${inv.not_seen.join(', ')}` : ''})</span>` : '';
   d.body.classList.toggle('small', small);
   $('mini').hidden = !small; $('full').hidden = small;
   $('mode').textContent = small ? 'Full view' : 'Compact'; $('mode').title = small ? 'Show the graphs, buttons and results' : 'Just the timer, EXP/hr, potion cost and scan progress';
@@ -127,6 +131,7 @@ export function updatePopout() {
       const miss = COUNTED_TABS.filter((t) => !cs.seen.has(t));
       ms.innerHTML = `${cs.kind === 'start' ? 'Start' : 'End'} scan: ` + (miss.length ? `still to do <b>${miss.join(', ')}</b>` : '<span class="ok">all tabs read, finishing</span>');
     }
+    $('minv').innerHTML = inv && inv.net_per_hr != null ? `${fmt(inv.net_per_hr)} <span class="mute">net mesos/hr</span>` : '';
     $('mpot').innerHTML = lp ? `<span style="color:${HP}">HP ${fmt(lp.ema_hp)}/hr</span> · <span style="color:${MP}">MP ${fmt(lp.ema_mp)}/hr</span>` : '';
   }
   $('start').disabled = !sharing || !!S.collect || running;

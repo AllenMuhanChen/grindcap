@@ -15,6 +15,7 @@ import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys 
 import { renderReview } from './review.js';
 import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
+import { liteRows, estimate, estimateSeries, sameRead } from './lib/liveinv.js';
 import { cleanTag, ensureTag, editTags, renameIn, rangeIds, sameTag, tagHue } from './lib/tags.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +24,7 @@ const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLo
 const pctTxt = (v) => (v == null ? '' : ` <span class="mute">(${v.toFixed(1)}%/hr)</span>`);
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null, tags: [] });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null, tags: [], inv: { reads: [] } });
 
 await store.openStore();
 
@@ -35,7 +36,7 @@ const S = {
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
-    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'), tags: store.get('sessTags') || [],
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'), tags: store.get('sessTags') || [], inv: store.get('invLive') || { reads: [] },
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -50,7 +51,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
-  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null); store.set('sessTags', []);
+  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null); store.set('sessTags', []); store.set('invLive', S.cur.inv);
   S.view = S.cur;
 }
 
@@ -68,6 +69,7 @@ async function init() {
   S.qsTable = prices(S.qs.prices);
   S.trackPotions = store.get('trackPotions') ?? S.qs.enabled;
   $('trackPot').checked = S.trackPotions;
+  $('trackInv').checked = S.trackInv;
   try { const r = await fetch('./local/maps.json'); S.maps = r.ok ? await r.json() : []; } catch { S.maps = []; }
   const builtin = await (await fetch('./data/stack_digits.json')).json();
   let taught = null;
@@ -106,6 +108,7 @@ async function init() {
 const popoutApi = {
   state: () => ({ ...S, ...C() }), start: startSession, end: endSession, finish: finishCollect, pause: togglePause, discard,
   running: () => running(), lastNote: () => S.lastNote, alert: () => alertNow(),
+  inv: () => (running() && S.trackInv ? invEstimate(C()) : null),
   potions: () => ({ pts: potPoints(C()), line: running() && S.trackPotions && C().lastPot !== undefined ? describe(C().lastPot, S.qsTable) : '' }),
 };
 const showPopout = () => openPopout(popoutApi).then(render).catch((e) => note(`pop-out: ${e.message}`));
@@ -143,6 +146,7 @@ async function onTick() {
     const every = Math.max(60, +$('every').value) * 1000, live = C().live;   // at least a minute: shorter gaps are mostly noise
     if (S.collect) await pageTick(now).catch((e) => warn(`Page read failed: ${e.message}`));
     else if (liveActive() && now - (live.rows.at(-1)?.t || 0) >= every && now - (live.lastTry || 0) >= every) await liveRead(now);
+    else if (liveActive() && S.trackInv && now - (S.invWatch.lastTry || 0) >= INV_POLL) await invTick(now).catch((e) => { S.invWatch.why = `inventory read failed: ${e.message}`; });
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
   } finally { S.busy = false; }
 }
@@ -193,6 +197,68 @@ function keepTrack(cur, out) {
   }
   if (cur === C()) { store.set('qsNames', cur.qsNames); store.set('qsSigs', cur.qsSigs); }
 }
+// ------------------------------------------------------------------ inventory while grinding
+
+// Open the inventory during a running session and the page on screen + the meso field are read again
+// (lib/liveinv.js): each tab's last-seen state gives a live net mesos/hr incl. drops. Polled every
+// INV_POLL ms; a page is read when it has held still for one poll and differs from the last read, or
+// INV_REREAD ms have passed (a stack number changing barely moves the page signature).
+const INV_POLL = 2000, INV_REREAD = 15000;
+S.invWatch = { sig: null, readSig: null, lastRead: 0, lastTry: 0, open: false, why: '' };
+S.trackInv = store.get('trackInv') ?? true;
+async function invTick(now) {
+  const w = S.invWatch, cur = C();
+  w.lastTry = now;
+  const frame = await S.cap.grab();
+  if (!frame) return;
+  const inv = locateInventory(frame, S.title, S.ctx);
+  w.open = !!inv;
+  if (!inv) { w.sig = null; return; }
+  const sig = PageWatcher.signature(frame, inv.grid), pw = new PageWatcher();
+  const still = pw.same(sig, w.sig);
+  w.sig = sig;
+  if (!still || (pw.same(sig, w.readSig) && now - w.lastRead < INV_REREAD)) return;
+  // while grinding nothing is asked of you: a page under a tooltip or the pointer is just tried again later
+  if (coveredSlots(frame, inv.grid).length) { w.why = 'a tooltip covers the items'; return; }
+  if (findCursor(frame, inv.grid, S.cursors, S.ctx.gameScale)) { w.why = 'the mouse pointer is over the items'; return; }
+  const button = detectTab(frame, inv.grid);
+  const page = await readPage(frame, inv.grid, S.digits, S.itemdb, S.cache, 'live');
+  if (C() !== cur || !liveActive()) return;               // ended / discarded / paused meanwhile
+  const tab = pageTab(page, S.itemdb, button);
+  const m = await readMesosField(frame, inv.grid);
+  w.readSig = sig; w.lastRead = now; w.why = '';
+  const rd = { t: now, mesos: m.value ?? null };
+  if (tab && !SKIP_TABS.includes(tab)) { rd.tab = tab; rd.rows = liteRows(page); }
+  else if (rd.mesos == null) { w.why = tab ? `${tab} tab (not counted)` : 'could not tell which tab is open'; return; }
+  const reads = cur.inv.reads, last = reads.at(-1);
+  if (sameRead(last, rd)) last.t = now;                   // nothing changed: the same state, confirmed later
+  else reads.push(rd);
+  store.set('invLive', cur.inv);
+  renderTop();
+  if (S.view === cur) renderGraph();
+}
+$('trackInv').onchange = (e) => { S.trackInv = e.target.checked; store.set('trackInv', S.trackInv); render(); };
+
+/** Live net mesos/hr from the inventory reads of a session (null if it has none). */
+function invEstimate(v, now = Date.now()) {
+  if (!v.start || !v.inv?.reads?.length) return null;
+  const pts = potPoints(v).filter((p) => p.cum_hp != null).at(-1);
+  const pot = pts ? (pts.cum_hp || 0) + (pts.cum_mp || 0) : null;
+  return estimate(withFixes(v.start, 'start', v.fixes, nameOf), v.inv.reads, priceOf, v.pauses, now, COUNTED_TABS, v.fixes, pot);
+}
+const ago = (m) => (m < 1 ? 'just now' : `${Math.round(m)} min ago`);
+/** One line: where the estimate comes from and how old each part is. */
+function invLine(e) {
+  if (!e) return '';
+  const sg = (v) => `${v >= 0 ? '+' : ''}${fmt(v)}`;
+  const parts = [];
+  if (e.mesos) parts.push(`mesos ${sg(e.mesos.per_hr)}/hr (${ago(e.mesos.age_min)})`);
+  for (const t of e.tabs) parts.push(`${t.tab} ${sg(t.per_hr)}/hr (${ago(t.age_min)})`);
+  if (e.potion_fallback != null) parts.push(`Use ${sg(e.potion_fallback)}/hr (quick slot potions; tab not read yet)`);
+  const ns = e.not_seen.filter((t) => !(t === 'Use' && e.potion_fallback != null));
+  return parts.join(' · ') + (ns.length ? ` · not read since Start: ${ns.join(', ')} (count 0)` : '') + (e.unpriced.length ? ` · no price: ${e.unpriced.join(', ')}` : '');
+}
+
 $('trackPot').onchange = (e) => { S.trackPotions = e.target.checked; store.set('trackPotions', S.trackPotions); render(); };
 
 const running = () => !!(C().start && !C().end);
@@ -416,6 +482,7 @@ async function finishCollect() {
   if (c.kind === 'start') {
     cur.start = snap; cur.id = snap.time; store.set('start', snap);
     cur.pauses = []; store.set('pauses', cur.pauses); store.set('live', cur.live);
+    cur.inv = { reads: [] }; store.set('invLive', cur.inv); S.invWatch.readSig = null;
     // quick slot number = that item's inventory total: names each key for the session
     const useIds = new Set(store.get('useIds') || []);
     for (const id of Object.keys(snap.items)) if (!isNaN(+id) && S.itemdb.items[id]?.category === 'Use') useIds.add(+id);
@@ -475,7 +542,7 @@ function meta(v) {
   const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
   return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null };
 }
-const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], saved: v.saved || Date.now() });
+const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], inv: v.inv || { reads: [] }, saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
 
 /** Put the ended current session in the saved list. */
@@ -591,7 +658,7 @@ async function showSession(id) {
   else {
     const r = await store.getSession(+id);
     if (!r) return;
-    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || []; r.potions = r.potions || []; r.qsNames = r.qsNames || {}; r.tags = r.tags || [];
+    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || []; r.potions = r.potions || []; r.qsNames = r.qsNames || {}; r.tags = r.tags || []; r.inv = r.inv || { reads: [] };
     S.view = r;
   }
   S.ver++;
@@ -626,7 +693,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds', 'tagList', 'sessTags'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -671,9 +738,9 @@ $('restoreFile').onchange = async (e) => {
   for (const t of [...(kv.tagList || []), ...b.sessions.flatMap((r) => r.tags || [])]) tl = ensureTag(tl, t)[0];
   store.set('tagList', tl);
   if (runThere && !runHere) {
-    for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'sessTags']) store.set(k, kv[k] ?? null);
+    for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'sessTags', 'invLive']) store.set(k, kv[k] ?? null);
     Object.assign(S.cur, { id: kv.start.time, name: kv.name, start: kv.start, end: null, live: kv.live || { rows: [], fails: 0 }, pauses: kv.pauses || [],
-      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, tags: kv.sessTags || [], result: null });
+      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, tags: kv.sessTags || [], inv: kv.invLive || { reads: [] }, result: null });
   }
   snapNote(`Restored: ${add.length} session(s) added, ${newer.length} updated.`);
   recompute(S.view); renderStorage(); renderSummary();
@@ -919,15 +986,21 @@ function renderSession() {
 
 function renderTop() {
   const live = C().live, rows = live.rows, ser = liveSeries(rows, 5, C().pauses), last = rows.at(-1), s = ser.at(-1);
+  const invEst = running() && S.trackInv ? invEstimate(C()) : null;
   $('liveStats').innerHTML = running() || S.collect ? [
     ['Level', last ? `${last.level} · ${last.pct}%` : '–'],
     ['EXP/hr (5-min)', `<b>${fmt(s ? s.ema * 60 : null)}</b>${pctTxt(s?.emaPct)}`],
     ['EXP/hr (session)', `${fmt(s ? s.cum * 60 : null)}${pctTxt(s?.pct)}`],
     ['EXP gained', fmt(s?.gained)],
+    ['Net mesos/hr (inventory)', `<b>${fmt(invEst?.net_per_hr)}</b>`],
     ['Readings', `${rows.length}${live.fails ? ` (${live.fails} failed)` : ''}`],
   ].map(([k, v]) => `<div><span>${k}</span>${v}</div>`).join('') : '';
   $('liveNote').textContent = running() ? live.why || '' : '';
   $('potLine').textContent = running() && S.trackPotions && C().lastPot !== undefined ? describe(C().lastPot, S.qsTable) : '';
+  const w = S.invWatch;
+  $('invLine').textContent = !running() || !S.trackInv ? ''
+    : invEst ? `Inventory: ${invLine(invEst)}${w.why ? ` · last try: ${w.why}` : ''}`
+    : `Inventory: open it (I) now and then while you grind for a live net mesos/hr; each tab counts from when you last looked at it.${w.why ? ` (last try: ${w.why})` : ''}`;
 }
 
 function renderCapture() {
@@ -972,6 +1045,15 @@ function renderGraph() {
   $('potWrap').hidden = !pts.length;
   if (pts.length) drawPotionGraph($('potGraph'), pts);
   $('potSum').innerHTML = potionSummary(pts);
+  const reads = v.inv?.reads || [];
+  const iser = v.start && reads.length ? estimateSeries(withFixes(v.start, 'start', v.fixes, nameOf), reads, priceOf, v.pauses, COUNTED_TABS, v.fixes) : [];
+  $('invWrap').hidden = !iser.length;
+  if (iser.length) {
+    drawGraph($('invGraph'), iser.map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.est })), 1, 'Net mesos/hr (inventory)');
+    const e = invEstimate(v, reads.at(-1).t), tabsRead = [...new Set(reads.map((r) => r.tab).filter(Boolean))];
+    $('invSum').innerHTML = `${reads.length} inventory read${reads.length > 1 ? 's' : ''} while grinding (${tabsRead.join(', ') || 'meso field only'}). `
+      + `Last estimate <b>${fmt(e?.net_per_hr)}</b>/hr${v.result ? `; End result ${fmt(v.result.net_per_hr)}/hr` : ''}. ${esc(invLine(e))}`;
+  }
 }
 
 /** Potion mesos/hr points for a session (live readings up to its end), like review.py _potions. */
