@@ -4,6 +4,7 @@
 import { loadImage, crop as cropMat, toImageData } from './lib/img.js';
 import { ocrReady } from './lib/ocr.js';
 import { readStatus, readMesosField, readCharacter, JOBS } from './lib/statusbar.js';
+import { readStats, flat as statFlat } from './lib/stats.js';
 import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
@@ -70,6 +71,8 @@ async function init() {
   S.trackPotions = store.get('trackPotions') ?? S.qs.enabled;
   $('trackPot').checked = S.trackPotions;
   $('trackInv').checked = S.trackInv;
+  S.readStats = store.get('readStats') ?? true;
+  $('readStats').checked = S.readStats;
   try { const r = await fetch('./local/maps.json'); S.maps = r.ok ? await r.json() : []; } catch { S.maps = []; }
   const builtin = await (await fetch('./data/stack_digits.json')).json();
   let taught = null;
@@ -260,6 +263,7 @@ function invLine(e) {
 }
 
 $('trackPot').onchange = (e) => { S.trackPotions = e.target.checked; store.set('trackPotions', S.trackPotions); render(); };
+$('readStats').onchange = (e) => { S.readStats = e.target.checked; store.set('readStats', S.readStats); render(); };
 
 const running = () => !!(C().start && !C().end);
 const liveActive = () => running() && !S.collect && !isPaused(C().pauses);
@@ -410,6 +414,23 @@ async function tryMap(frame, now) {
   render();
 }
 
+/** The stat window (S), if it is open during the scan. Runs on its own OCR worker beside the page reads
+ * (a full-frame pass takes a few seconds), every 6 s, at most 10 tries; a reading whose stats add up is kept,
+ * else the one with the most fields. Optional: nothing is asked for when the window isn't open. */
+async function tryStats(frame, c, now) {
+  if (!S.readStats || c.statsBusy || (c.stats && c.stats.ok) || now - (c.lastStatsTry || 0) < 6000 || (c.statsTries || 0) >= 10) return;
+  c.statsBusy = true; c.lastStatsTry = now; c.statsTries = (c.statsTries || 0) + 1;
+  try {
+    const r = await readStats(frame, S.ctx.gameScale);
+    if (S.collect !== c || !r) return;
+    const n = (x) => Object.keys(statFlat(x.values)).length;
+    if (c.stats && !r.ok && n(r) <= n(c.stats)) return;
+    c.stats = { values: r.values, lines: r.lines, ok: r.ok, why: r.why, box: r.box, picture: picture(frame, ...r.box, 'image/png'), time: Date.now() };
+    const f = statFlat(r.values);
+    snapNote(`${c.kind}: stat window read: ${['str', 'dex', 'int', 'luk'].map((k) => `${k.toUpperCase()} ${f[k] ?? '?'}`).join(', ')}${r.ok ? '' : ` (${r.why}; check it in the review)`}`);
+  } catch (e) { note(`stat window read failed: ${e.message}`); } finally { c.statsBusy = false; }
+}
+
 async function pageTick(now) {
   const c = S.collect;
   if (c.reading) return;
@@ -418,6 +439,7 @@ async function pageTick(now) {
   if (!c.status.checked && (c.statusTries || 0) < 30 && now - (c.lastStatusTry || 0) > 2500) await statusRead(frame, c, c.t, true);
   if (S.collect !== c) return;
   if (!c.map && c.lastNew) await tryMap(frame, now);   // after the first page, so the map never holds up the scan
+  tryStats(frame, c, now);
   const inv = locateInventory(frame, S.title, S.ctx);
   if (!inv) {
     // every tab already read: closing the inventory is fine, the scan finishes on its own
@@ -465,7 +487,7 @@ async function pageTick(now) {
 
 function maybeFinish(now) {
   const c = S.collect;
-  if (COUNTED_TABS.every((t) => c.seen.has(t)) && c.lastNew && now - c.lastNew > 4000 && (c.status.checked || (c.statusTries || 0) >= 3)) finishCollect();
+  if (COUNTED_TABS.every((t) => c.seen.has(t)) && c.lastNew && now - c.lastNew > 4000 && (c.status.checked || (c.statusTries || 0) >= 3) && !c.statsBusy) finishCollect();   // a stat window read under way is waited for
 }
 
 async function finishCollect() {
@@ -475,7 +497,7 @@ async function finishCollect() {
   const used = new Set(Object.values(c.pages).flat(Infinity).map((sl) => sl && sl.look).filter(Boolean));
   const looks = Object.fromEntries(S.cache.looks.filter((l) => used.has(l.key)).map((l) => [l.key, { id: l.id, name: l.name, match: l.match, crop: l.crop, sig: Array.from(l.sig, Math.round) }]));
   const snap = buildSnapshot(time, c.status, c.pages, c.mesos,
-    { pictures: c.pictures, map: c.map || null, map_picture: c.mapPic || null, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
+    { pictures: c.pictures, stats: c.stats || null, map: c.map || null, map_picture: c.mapPic || null, meso_pictures: c.mesoPics, meso_picture: c.mesoPics.find((p) => p.value != null)?.img || c.mesoPics[0]?.img || null, exp_picture: c.expPic, looks },
     c.kind === 'end' ? 'first' : 'last');
   S.collect = null;
   if (!c.status.checked) warn(`${c.kind}: EXP was never read from the status bar. Type it in on the review below (the picture shows what was captured).`);
@@ -540,7 +562,7 @@ async function resnapMaps() {
 /** Map and level as fixed on the review (for the summary list). */
 function meta(v) {
   const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
-  return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null };
+  return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null, stats: a?.statValues || b?.statValues || null };
 }
 const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], inv: v.inv || { reads: [] }, saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
@@ -693,7 +715,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));

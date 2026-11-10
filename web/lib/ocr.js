@@ -11,6 +11,7 @@ const CDN = {
 };
 
 let ready = null;
+const extra = {};   // other workers by name (the stat window reader runs beside the scan, not in its way)
 
 async function localVendor() {
   const base = new URL('../vendor/tesseract/', import.meta.url).href;
@@ -49,3 +50,25 @@ export async function ocr(m, psm, whitelist) {
 }
 
 export function ocrReady() { ready = ready || start(); return ready; }
+
+/** OCR with word boxes: [{text, conf, x0, y0, x1, y1}] (mat pixels). psm 11 = sparse text anywhere. */
+export async function ocrWords(m, psm = 11, whitelist = '', worker = null) {
+  let t;
+  if (worker) t = await (extra[worker] = extra[worker] || start());
+  else t = await (ready = ready || start());
+  const key = `${psm}|${whitelist}`;
+  if (t.params !== key) {
+    await t.worker.setParameters({ tessedit_pageseg_mode: String(psm), tessedit_char_whitelist: whitelist });
+    t.params = key;
+  }
+  const cv = new OffscreenCanvas(m.w, m.h);
+  cv.getContext('2d').putImageData(toImageData(m), 0, 0);
+  const blob = await cv.convertToBlob({ type: 'image/png' });
+  const r = await t.worker.recognize(blob, {}, { text: true, blocks: true });
+  const words = [];
+  for (const b of r.data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) for (const w of l.words || []) {
+    words.push({ text: w.text, conf: w.confidence, ...w.bbox });
+  }
+  if (!words.length && r.data.words) for (const w of r.data.words) words.push({ text: w.text, conf: w.confidence, ...w.bbox });
+  return { text: (r.data.text || '').trim(), words };
+}

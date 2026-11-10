@@ -220,6 +220,18 @@ web/app.js            Page = big control section (Share, Start/End/Pause/Discard
                       End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
                       minutes and liveSeries x/rates), Discard. Pages auto-captured (PageWatcher), auto-finish when
                       Equip/Use/Setup/Etc seen + 4 s idle. Page tab = inventory.pageTab: items decide, but a Cash/Deco button wins unless 70% of filled slots agree (cash items are not in the item data and false-match). Start/end snapshots, live rows, pauses in localStorage.
+web/lib/stats.js      Stat window (S), optional ("Read stat window" checkbox, kv readStats, default on). No template of the real window
+                      yet: ocrWords (psm 11, word boxes, own Tesseract worker "stats" so it runs beside the page reads) on the whole
+                      frame finds STR/DEX/INT/LUK stacked in one column (3 of 4), then the area around it is read again at 3x;
+                      parseWords splits each line into LABEL value fields by label name (FIELDS: level, exp, hp/mp cur/max,
+                      ap, fame, str/dex/int/luk total (base+bonus), attack min~max, wdef, magic, mdef, accuracy, avoid, hands,
+                      speed, jump), so layout doesn't matter. ok = all 4 main stats read and every base+bonus adds up.
+                      app.tryStats: during Start/End scans every 6 s, max 10 tries, not awaited (~3-6 s per try); auto-finish waits
+                      for one under way. Saved as snapshot.stats {values, lines, ok, why, box, picture}; fixes.status[kind].stats
+                      {field: n}; withFixes -> statValues (stats.flat + fixes); record meta.stats (start, else end) for the Summary.
+                      Review: "Character stats" table (start/end inputs, base+bonus shown) + the window pictures. Tested only on a
+                      synthetic window drawn over game_frame.png (web/test/stats_test.js; PAGE=stats_only.html node web/test/run.mjs
+                      runs just that). Python app: no stat window.
 web/lib/tags.js       Session tags (user-made): kv "tagList" = your tags in order (case-insensitive, first spelling kept), record.tags
                       (running session: kv "sessTags"), in the light index and the backup. Review: chips with × + "+ add tag" box
                       (datalist; a new name makes the tag). Summary: Tags column + Tag filter (incl. "(no tags)"), "Your tags" manager

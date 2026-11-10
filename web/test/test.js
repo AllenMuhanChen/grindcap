@@ -11,6 +11,7 @@ import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
 import { alignPage, estimate, estimateSeries } from '../lib/liveinv.js';
 import { cleanTag, ensureTag, editTags, renameIn, rangeIds } from '../lib/tags.js';
+import { statsTests } from './stats_test.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
@@ -265,5 +266,7 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const e3 = estimate({ time: t0, mesos: 0, tabs: { Etc: lk } }, [{ t: t0 + 60 * min, tab: 'Etc', rows: lp, mesos: 0 }], (id) => (id === 7 ? 1 : null), [], t0 + 60 * min, ['Etc'], { looks: { L9: 7 } });
   eq(e3.tabs[0].items.map((x) => [x.id, x.change]), [['7', 30]], 'fixes on live reads');
 }
+// Stat window
+await statsTests(log, fails);
 log(fails.length ? `FAIL\n${fails.join('\n')}` : 'ALL OK');
 window.__result = { results, fails };

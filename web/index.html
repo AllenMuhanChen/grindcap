@@ -44,7 +44,7 @@
   .slotbox { display: grid; gap: 3px; justify-items: start; width: 150px; } .slotbox input { width: 140px; }
   .pages { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 10px; }
   .pages img { height: 180px; border: 1px solid var(--line); border-radius: 4px; } figure { margin: 0; } figcaption { font-size: 12px; color: var(--mute); }
-  input.st { width: 110px; } input.price { width: 90px; text-align: right; font: inherit; }
+  input.st { width: 110px; } input.statfix { width: 70px; text-align: right; } table.stats { width: auto; } table.stats td { white-space: nowrap; } input.price { width: 90px; text-align: right; font: inherit; }
   .shot { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
   #control { border: 2px solid var(--acc); padding: 16px 18px; }
   #control h1 { font-size: 22px; margin: 0; }
@@ -96,6 +96,7 @@
     <div class="row">
       <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
       <label class="small" title="While a session runs, opening the inventory reads the page on screen and the meso field again: a live net mesos/hr including drops, each tab counted from when you last looked at it"><input type="checkbox" id="trackInv"> Live mesos from inventory</label>
+      <label class="small" title="If the stat window (S) is open during the Start or End scan, its numbers are saved with the session (shown in the review)"><input type="checkbox" id="readStats"> Read stat window (S) during scans</label>
       <span class="small mute" title="Read from the status bar at Start">Character</span>
       <input id="charName" class="st" placeholder="name" title="Character name: read at Start; type to correct it">
       <select id="charJob" title="Class"></select>

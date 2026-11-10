@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><pre id="log"></pre>
+<script type="module">
+import { statsTests } from './stats_test.js';
+const fails = [], log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
+await statsTests(log, fails);
+log(fails.length ? `FAIL\n${fails.join('\n')}` : 'ALL OK');
+window.__result = { fails };
+</script>

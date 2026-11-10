@@ -3,6 +3,11 @@
 // with the item data's closest guesses, every item with its slot pictures, and the captured pages.
 // Corrections go into S.fixes and are applied by session.withFixes; nothing here changes what was read.
 import { withFixes } from './lib/session.js';
+import { flat as statFlat } from './lib/stats.js';
+
+const STAT_ROWS = [['level', 'Level'], ['ap', 'AP left'], ['str', 'STR'], ['dex', 'DEX'], ['int', 'INT'], ['luk', 'LUK'], ['hp', 'Max HP'], ['mp', 'Max MP'],
+  ['attack_min', 'Attack (min)'], ['attack_max', 'Attack (max)'], ['wdef', 'Weapon def'], ['magic', 'Magic'], ['mdef', 'Magic def'], ['accuracy', 'Accuracy'],
+  ['avoid', 'Avoid'], ['hands', 'Hands'], ['speed', 'Speed %'], ['jump', 'Jump %'], ['fame', 'Fame']];
 
 const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const fmt = (v) => (v == null ? '–' : Number(v).toLocaleString());
@@ -49,6 +54,23 @@ export function renderReview(el, S, h) {
       <td>${field(k, 'mesos')}</td>
       <td class="l">${mesoPics(snaps[k])}</td></tr>`).join('')}
     </table><p class="mute">Type a value to correct a misread; clear it to go back to what was read.</p>`;
+  // ---- character stats (stat window, optional)
+  {
+    const ks = KINDS.filter((k) => snaps[k]);
+    const read = Object.fromEntries(ks.map((k) => [k, statFlat(snaps[k].stats?.values)]));
+    const cell = (kind, key) => {
+      const st = snaps[kind].stats, v = read[kind][key], fix = S.fixes.status[kind]?.stats?.[key];
+      const parts = st?.values?.[key];
+      const how = parts && parts.base != null ? ` (${parts.base}+${parts.bonus})` : '';
+      return `<input class="statfix" data-kind="${kind}" data-k="${key}" value="${esc(fix ?? '')}" placeholder="${esc(v ?? '–')}" title="${v == null ? 'not read' : `read: ${esc(parts?.raw || v)}`}${fix != null ? ' (you fixed it)' : ''}">${how ? `<span class="mute small">${how}</span>` : ''}`;
+    };
+    const any = ks.some((k) => snaps[k].stats);
+    html += `<h3>Character stats <span class="mute small">from the stat window (S), if it was open during a scan</span></h3>`;
+    html += `<table class="stats"><tr><th class="l">Stat</th>${ks.map((k) => `<th>${k}${snaps[k].stats && !snaps[k].stats.ok ? ` <span class="bad" title="${esc(snaps[k].stats.why)}">check</span>` : ''}</th>`).join('')}</tr>
+      ${STAT_ROWS.map(([key, name]) => `<tr><td class="l">${name}</td>${ks.map((k) => `<td>${cell(k, key)}</td>`).join('')}</tr>`).join('')}</table>`;
+    html += any ? `<div class="pages">${ks.filter((k) => snaps[k].stats?.picture).map((k) => `<figure><a href="${snaps[k].stats.picture}" target="_blank"><img src="${snaps[k].stats.picture}" alt="stat window"></a><figcaption>${k}: stat window as captured</figcaption></figure>`).join('')}</div>`
+      : '<p class="mute">No stat window read in this session. Open it (S) during the Start or End scan to save your stats with the session, or type them in above.</p>';
+  }
   html += '<p class="mute small">Naming an icon here also teaches this browser: later scans name it by itself (export or clear them under "icons you named" at the bottom of the page).</p>';
 
   // ---- unrecognised icons
@@ -136,6 +158,11 @@ function bind(el, S0, h0) {
     if (t.classList.contains('st')) {
       const v = t.value.replace(/[^\d]/g, '');
       if (v === '') delete S.fixes.status[t.dataset.kind][t.dataset.k]; else S.fixes.status[t.dataset.kind][t.dataset.k] = +v;
+      h.recompute();
+    } else if (t.classList.contains('statfix')) {
+      const v = t.value.replace(/[^\d]/g, ''), st = S.fixes.status[t.dataset.kind];
+      st.stats = st.stats || {};
+      if (v === '') delete st.stats[t.dataset.k]; else st.stats[t.dataset.k] = +v;
       h.recompute();
     } else if (t.classList.contains('mapfix')) {
       const v = t.value.trim();

@@ -2,6 +2,7 @@
 // live readings. Follows src/grindcap/snapshot.py (build_snapshot, exp_gained, compare, live_series).
 import { expToNext } from './gamedata.js';
 import { mergePages, totals } from './inventory.js';
+import { withStatFixes } from './stats.js';
 
 export const COUNTED_TABS = ['Equip', 'Use', 'Setup', 'Etc'];
 export const SKIP_TABS = ['Cash', 'Deco'];
@@ -40,7 +41,8 @@ export function buildSnapshot(time, status, pages, mesosReads, extra = {}, pick 
 }
 
 /** A snapshot with your corrections applied. fixes = {looks: {lookKey: itemId}, qty: {"<kind>|<ref>": n},
- * status: {start|end: {level, exp, mesos}}}; kind = "start" or "end". nameOf(id) names an item id. */
+ * status: {start|end: {level, exp, mesos, map, stats: {field: n}}}}; statValues = the stat window's
+ * numbers (stats.flat) with your fixes, or null; kind = "start" or "end". nameOf(id) names an item id. */
 export function withFixes(snap, kind, fixes, nameOf) {
   if (!snap) return snap;
   const st = (fixes.status || {})[kind] || {};
@@ -56,7 +58,7 @@ export function withFixes(snap, kind, fixes, nameOf) {
   }
   const pick = (k) => (st[k] != null && st[k] !== '' ? Number(st[k]) : snap[k]);
   const map = st.map ? { ...(snap.map || {}), name: st.map, fixed: true } : snap.map;
-  return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos'), map };
+  return { ...snap, tabs, items: totals(tabs), level: pick('level'), exp: pick('exp'), mesos: pick('mesos'), map, statValues: withStatFixes(snap.stats, st.stats) };
 }
 
 /** Milliseconds between a and b that weren't paused. pauses: [[t0, t1|null], ...] (null = still paused). */
