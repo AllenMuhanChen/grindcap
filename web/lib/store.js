@@ -38,7 +38,7 @@ export function set(k, v) {
   if (db) tx('kv', 'readwrite').put(v, k).onerror = (e) => console.warn('save failed', k, e.target.error);
 }
 
-const light = (r) => ({ id: r.id, name: r.name, character: r.character || null,
+const light = (r) => ({ id: r.id, name: r.name, character: r.character || null, tags: r.tags || [],
   map: r.meta?.map ?? r.start?.map?.name ?? null, level: r.meta?.level ?? r.start?.level ?? null, level_end: r.meta?.level_end ?? r.end?.level ?? null, start_time: r.start?.time, end_time: r.end?.time,
   result: r.result && { minutes: r.result.minutes, exp_per_hr: r.result.exp_per_hr, net_per_hr: r.result.net_per_hr, mesos_per_hr: r.result.mesos_per_hr, revenue_per_hr: r.result.revenue_per_hr, cost_per_hr: r.result.cost_per_hr, pct_per_hr: r.result.pct_per_hr ?? null } });
 

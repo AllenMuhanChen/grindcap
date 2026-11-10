@@ -9,6 +9,7 @@ import { mat } from '../lib/img.js';
 import { readMap, snapScore } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
+import { cleanTag, ensureTag, editTags, renameIn, rangeIds } from '../lib/tags.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
 
 const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
@@ -216,6 +217,19 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const cur = findCursor(frame, grid, cursors, 1920 / 1366);
   if (!cur || cur.name !== 'point') fails.push(`cursor_page.png: got ${JSON.stringify(cur)}, want the pointing hand`);
   log(`cursor_page.png: ${JSON.stringify(cur)}`);
+}
+// Session tags
+{
+  const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fails.push(`tags ${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
+  eq(cleanTag('  bought   pots '), 'bought pots', 'clean');
+  eq(ensureTag(['Party'], 'party'), [['Party'], 'Party'], 'same tag ignoring case');
+  eq(ensureTag(['Party'], 'solo'), [['Party', 'solo'], 'solo'], 'new tag');
+  eq(ensureTag(['Party'], '  '), [['Party'], null], 'blank');
+  eq(editTags(['b'], { add: ['A', 'a', 'c'] }, ['a', 'b']), ['A', 'b', 'c'], 'add, list order');
+  eq(editTags(['a', 'b'], { remove: ['B'] }), ['a'], 'remove');
+  eq(renameIn(['x', 'y'], 'X', 'y'), ['y'], 'rename merges');
+  eq(rangeIds(['1', '2', '3', '4'], '3', '1'), ['1', '2', '3'], 'range upward');
+  eq(rangeIds(['1', '2'], '1', '9'), [], 'range off the list');
 }
 log(fails.length ? `FAIL\n${fails.join('\n')}` : 'ALL OK');
 window.__result = { results, fails };

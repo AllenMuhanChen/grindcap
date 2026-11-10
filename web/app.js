@@ -15,6 +15,7 @@ import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys 
 import { renderReview } from './review.js';
 import { drawGraph, drawPotionGraph, potionSummary } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
+import { cleanTag, ensureTag, editTags, renameIn, rangeIds, sameTag, tagHue } from './lib/tags.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -22,7 +23,7 @@ const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLo
 const pctTxt = (v) => (v == null ? '' : ` <span class="mute">(${v.toFixed(1)}%/hr)</span>`);
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null, tags: [] });
 
 await store.openStore();
 
@@ -34,7 +35,7 @@ const S = {
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
-    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'),
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'), tags: store.get('sessTags') || [],
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -49,7 +50,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
-  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null);
+  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null); store.set('sessTags', []);
   S.view = S.cur;
 }
 
@@ -82,6 +83,7 @@ async function init() {
   } catch {
     $('data').innerHTML = '<span class="bad">No item data: run <code>python scripts/export_web_data.py</code> (grindcap-web.bat does it). Items will show as "?".</span>';
   }
+  if (store.listSessions().some((x) => !('tags' in x))) await store.reindex();   // index from before tags
   if (store.listSessions().some((x) => !('level' in x) || (x.result && !('pct_per_hr' in x.result)))) {   // saved before these columns
     for (const r of await store.allSessions()) {
       if (r.start && r.end && !(r.result && 'pct_per_hr' in r.result)) {
@@ -473,7 +475,7 @@ function meta(v) {
   const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
   return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null };
 }
-const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, saved: v.saved || Date.now() });
+const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
 
 /** Put the ended current session in the saved list. */
@@ -589,7 +591,7 @@ async function showSession(id) {
   else {
     const r = await store.getSession(+id);
     if (!r) return;
-    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || []; r.potions = r.potions || []; r.qsNames = r.qsNames || {};
+    r.fixes = r.fixes || noFixes(); r.live = r.live || { rows: [] }; r.pauses = r.pauses || []; r.potions = r.potions || []; r.qsNames = r.qsNames || {}; r.tags = r.tags || [];
     S.view = r;
   }
   S.ver++;
@@ -624,7 +626,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'useIds', 'tagList', 'sessTags'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -665,10 +667,13 @@ $('restoreFile').onchange = async (e) => {
   store.set('characters', S.chars);
   if (!S.char && kv.char) { S.char = kv.char; store.set('char', S.char); }
   store.set('useIds', [...new Set([...(store.get('useIds') || []), ...(kv.useIds || [])])]);
+  let tl = tagList();                                // tags: yours first, then the backup's, then any only seen on its sessions
+  for (const t of [...(kv.tagList || []), ...b.sessions.flatMap((r) => r.tags || [])]) tl = ensureTag(tl, t)[0];
+  store.set('tagList', tl);
   if (runThere && !runHere) {
-    for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character']) store.set(k, kv[k] ?? null);
+    for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'sessTags']) store.set(k, kv[k] ?? null);
     Object.assign(S.cur, { id: kv.start.time, name: kv.name, start: kv.start, end: null, live: kv.live || { rows: [], fails: 0 }, pauses: kv.pauses || [],
-      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, result: null });
+      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, tags: kv.sessTags || [], result: null });
   }
   snapNote(`Restored: ${add.length} session(s) added, ${newer.length} updated.`);
   recompute(S.view); renderStorage(); renderSummary();
@@ -685,38 +690,181 @@ function showTab(t) {
 }
 $('tabReview').onclick = () => showTab('review');
 $('tabSummary').onclick = () => showTab('summary');
-$('sumChar').onchange = $('sumMap').onchange = () => renderSummary();
+$('sumChar').onchange = $('sumMap').onchange = $('sumTag').onchange = () => renderSummary();
 let sumSort = store.get('sumSort') || { k: 'id', dir: -1 };
 
-/** One row per saved session; filter by character and map, sort by clicking a column (newest first by default). */
+// ------------------------------------------------------------------ tags
+
+const tagList = () => store.get('tagList') || [];
+/** The tag as stored in your list, made first if it's new. null = blank. */
+function makeTag(name) {
+  const [l, n] = ensureTag(tagList(), name);
+  if (l !== tagList()) store.set('tagList', l);
+  return n;
+}
+const tagChip = (t, extra = '') => `<span class="ttag" style="--h:${tagHue(tagList(), t)}">${esc(t)}${extra}</span>`;
+let tagOptsHtml = '';
+function renderTagOpts() {
+  const h = tagList().map((t) => `<option value="${esc(t)}">`).join('');
+  if (h !== tagOptsHtml) $('tagOpts').innerHTML = tagOptsHtml = h;   // untouched while you type in a tag box
+}
+/** Tags of the shown session (review): chips with ×, the box after them adds one (a new name makes the tag). */
+function renderViewTags() {
+  const v = S.view;
+  $('tagAdd').disabled = !v.start;
+  $('sessTags').innerHTML = (v.tags || []).map((t) => tagChip(t, ` <button class="x" data-rm="${esc(t)}" title="Take this tag off">×</button>`)).join('');
+  for (const bt of $('sessTags').querySelectorAll('[data-rm]')) bt.onclick = () => setViewTags({ remove: [bt.dataset.rm] });
+  renderTagOpts();
+}
+function setViewTags(change) {
+  const v = S.view;
+  if (!v.start) return;
+  v.tags = editTags(v.tags, change, tagList());
+  if (v === S.cur) store.set('sessTags', v.tags);
+  if (isSaved(v)) store.putSession(record(v)).then(() => { renderNav(); if (tab === 'summary') renderSummary(); });
+  renderViewTags();
+}
+$('tagAdd').onchange = () => {
+  const n = makeTag($('tagAdd').value);
+  $('tagAdd').value = '';
+  if (n) setViewTags({ add: [n] });
+};
+/** Change the tags of saved sessions (by id) and keep the shown/running copies in step. */
+async function tagSessions(ids, change) {
+  const list = tagList();
+  for (const id of ids) {
+    const r = await store.getSession(+id);
+    if (!r) continue;
+    r.tags = editTags(r.tags, change, list);
+    await store.putSession(r);
+    for (const v of [S.view, S.cur]) if (v && v.id === r.id) v.tags = r.tags;
+  }
+  if (ids.includes(String(S.cur.id))) store.set('sessTags', S.cur.tags);
+  renderViewTags(); renderSummary();
+}
+/** Rename (to = name) or delete (to = null) a tag everywhere: your list, every saved session, the running one. */
+async function retag(from, to) {
+  let list = tagList().filter((t) => !sameTag(t, from));
+  if (to) { const i = tagList().findIndex((t) => sameTag(t, from)); if (!list.some((t) => sameTag(t, to))) list.splice(i, 0, cleanTag(to)); }
+  store.set('tagList', list);
+  const fix = (tags) => (to ? renameIn(tags, from, to) : editTags(tags, { remove: [from] }));
+  for (const r of await store.allSessions()) {
+    if (!(r.tags || []).some((t) => sameTag(t, from))) continue;
+    r.tags = fix(r.tags); await store.putSession(r);
+  }
+  for (const v of new Set([S.view, S.cur])) v.tags = fix(v.tags);
+  store.set('sessTags', S.cur.tags);
+  if ($('sumTag').value && sameTag($('sumTag').value, from)) $('sumTag').value = to || '';
+  renderViewTags(); renderSummary();
+}
+$('tagNew').onchange = () => { makeTag($('tagNew').value); $('tagNew').value = ''; renderTagOpts(); renderSummary(); };
+
+// Summary selection: drag down/up the rows to select a run of sessions (dragging from a selected row
+// unselects), shift-click to extend from the last row, ctrl-click or the box to toggle one, plain click opens.
+const sel = new Set();
+let order = [], drag = null, anchor = null;
+function paintSel() {
+  for (const tr of $('summary').querySelectorAll('tr[data-id]')) {
+    const on = sel.has(tr.dataset.id);
+    tr.classList.toggle('picked', on);
+    tr.querySelector('input').checked = on;
+  }
+  const all = $('summary').querySelector('#selAll');
+  if (all) { all.checked = order.length > 0 && sel.size === order.length; all.indeterminate = sel.size > 0 && sel.size < order.length; }
+  $('bulk').hidden = !sel.size;
+  if (!sel.size) return;
+  const list = tagList(), rows = store.listSessions().filter((x) => sel.has(String(x.id)));
+  const on = list.filter((t) => rows.some((x) => (x.tags || []).some((y) => sameTag(y, t))));
+  $('bulkCount').textContent = `${sel.size} selected`;
+  $('bulkAdd').innerHTML = list.length ? list.map((t) => `<button class="tbtn" data-add="${esc(t)}" style="--h:${tagHue(list, t)}" title="Put this tag on the ${sel.size} selected">+ ${esc(t)}</button>`).join('') : '<span class="mute small">no tags yet: type one</span>';
+  $('bulkRm').innerHTML = on.length ? '<span class="small mute">Take off:</span> ' + on.map((t) => {
+    const n = rows.filter((x) => (x.tags || []).some((y) => sameTag(y, t))).length;
+    return `<button class="tbtn" data-rm="${esc(t)}" style="--h:${tagHue(list, t)}" title="Take this tag off the selected sessions">− ${esc(t)} <span class="mute">${n}</span></button>`;
+  }).join('') : '';
+  for (const bt of $('bulkAdd').querySelectorAll('[data-add]')) bt.onclick = () => tagSessions([...sel], { add: [bt.dataset.add] });
+  for (const bt of $('bulkRm').querySelectorAll('[data-rm]')) bt.onclick = () => tagSessions([...sel], { remove: [bt.dataset.rm] });
+}
+$('bulkNew').onchange = () => { const n = makeTag($('bulkNew').value); $('bulkNew').value = ''; if (n && sel.size) tagSessions([...sel], { add: [n] }); };
+$('bulkClear').onclick = () => { sel.clear(); paintSel(); };
+$('summary').addEventListener('pointerdown', (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (!tr || e.button !== 0) return;
+  e.preventDefault();                                   // no text selection while dragging
+  const id = tr.dataset.id;
+  drag = { from: id, base: new Set(sel), on: !sel.has(id), moved: false, box: !!e.target.closest('td.sel'), shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
+});
+$('summary').addEventListener('pointerover', (e) => {
+  const tr = e.target.closest('tr[data-id]');
+  if (!drag || !tr || (!drag.moved && tr.dataset.id === drag.from)) return;
+  drag.moved = true;
+  sel.clear(); drag.base.forEach((x) => sel.add(x));
+  for (const x of rangeIds(order, drag.from, tr.dataset.id)) if (drag.on) sel.add(x); else sel.delete(x);
+  paintSel();
+});
+document.addEventListener('pointerup', (e) => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.moved) { anchor = d.from; return; }
+  if (!e.target.closest || e.target.closest('tr[data-id]')?.dataset.id !== d.from) return;
+  if (d.shift && anchor) { for (const x of rangeIds(order, anchor, d.from)) sel.add(x); paintSel(); return; }
+  if (d.box || d.ctrl || sel.size) {                    // while picking, a click picks instead of opening
+    if (sel.has(d.from)) sel.delete(d.from); else sel.add(d.from);
+    anchor = d.from; paintSel(); return;
+  }
+  showSession(d.from); showTab('review');
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sel.size && tab === 'summary') { sel.clear(); paintSel(); } });
+
+/** One row per saved session; filter by character, map and tag, sort by clicking a column (newest first by default). */
 function renderSummary() {
-  const list = store.listSessions();
-  const fill = (sel, vals) => { const pick = sel.value; sel.innerHTML = '<option value="">all</option>' + vals.map((n) => `<option ${n === pick ? 'selected' : ''}>${esc(n)}</option>`).join(''); return sel.value; };
+  const list = store.listSessions(), tl = tagList();
+  const fill = (sel, vals, extra = '') => { const pick = sel.value; sel.innerHTML = '<option value="">all</option>' + extra + vals.map((n) => `<option ${n === pick ? 'selected' : ''}>${esc(n)}</option>`).join(''); if (pick === '#none') sel.value = pick; return sel.value; };
   const pc = fill($('sumChar'), [...new Set(list.map((x) => x.character?.name).filter(Boolean))].sort());
   const pm = fill($('sumMap'), [...new Set(list.map((x) => x.map).filter(Boolean))].sort());
+  const pt = fill($('sumTag'), tl, '<option value="#none">(no tags)</option>');
   const val = {
     id: (x) => x.id, name: (x) => (x.name || '').toLowerCase(), char: (x) => (x.character?.name || '').toLowerCase(), map: (x) => (x.map || '').toLowerCase(),
+    tags: (x) => (x.tags || []).join(',').toLowerCase() || '￿',
     level: (x) => x.level ?? -1, minutes: (x) => x.result?.minutes ?? -1, net: (x) => x.result?.net_per_hr ?? -Infinity,
     exp: (x) => x.result?.exp_per_hr ?? -Infinity, rev: (x) => x.result?.revenue_per_hr ?? -Infinity, cost: (x) => x.result?.cost_per_hr ?? -Infinity,
   };
+  const tagOk = (x) => !pt || (pt === '#none' ? !(x.tags || []).length : (x.tags || []).some((t) => sameTag(t, pt)));
   const { k, dir } = sumSort, f = val[k] || val.id;
-  const rows = list.filter((x) => (!pc || x.character?.name === pc) && (!pm || x.map === pm))
+  const rows = list.filter((x) => (!pc || x.character?.name === pc) && (!pm || x.map === pm) && tagOk(x))
     .sort((a, b) => { const p = f(a), q = f(b); return (p < q ? -1 : p > q ? 1 : 0) * dir || b.id - a.id; });
+  order = rows.map((x) => String(x.id));
+  for (const id of [...sel]) if (!order.includes(id)) sel.delete(id);   // only what you can see is picked
   const th = (key, label, cls = '') => `<th class="${cls}" data-k="${key}">${label}${k === key ? (dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
   const lv = (x) => (x.level == null ? '–' : x.level_end != null && x.level_end !== x.level ? `${x.level}→${x.level_end}` : x.level);
-  $('summary').innerHTML = rows.length ? `<table><tr>${th('name', 'Session', 'l')}${th('char', 'Character', 'l')}${th('map', 'Map', 'l')}${th('level', 'Level')}${th('minutes', 'Minutes')}${th('rev', 'Revenue/hr')}${th('cost', 'Cost/hr')}${th('net', 'Net mesos/hr')}${th('exp', 'EXP/hr')}</tr>
-    ${rows.map((x) => `<tr class="itemrow" data-id="${x.id}"><td class="l">${esc(x.name || new Date(x.id).toLocaleString())}</td>
+  $('summary').innerHTML = rows.length ? `<table class="pick"><tr><th class="sel"><input type="checkbox" id="selAll" title="Select every session shown"></th>${th('name', 'Session', 'l')}${th('tags', 'Tags', 'l')}${th('char', 'Character', 'l')}${th('map', 'Map', 'l')}${th('level', 'Level')}${th('minutes', 'Minutes')}${th('rev', 'Revenue/hr')}${th('cost', 'Cost/hr')}${th('net', 'Net mesos/hr')}${th('exp', 'EXP/hr')}</tr>
+    ${rows.map((x) => `<tr class="itemrow" data-id="${x.id}"><td class="sel"><input type="checkbox" tabindex="-1"></td><td class="l">${esc(x.name || new Date(x.id).toLocaleString())}</td>
+      <td class="l">${(x.tags || []).map((t) => tagChip(t)).join(' ')}</td>
       <td class="l">${esc(x.character ? `${x.character.name}${x.character.job ? ` (${x.character.job})` : ''}` : '–')}</td>
       <td class="l">${esc(x.map || '–')}</td><td>${lv(x)}</td>
       <td>${fmt(x.result?.minutes, 1)}</td><td>${fmt(x.result?.revenue_per_hr)}</td><td>${fmt(x.result?.cost_per_hr)}</td><td><b>${fmt(x.result?.net_per_hr)}</b></td><td><b>${fmt(x.result?.exp_per_hr)}</b>${x.result?.pct_per_hr != null ? `<br><span class="mute small">${x.result.pct_per_hr.toFixed(1)}%/hr</span>` : ''}</td></tr>`).join('')}</table>
-    <p class="mute small">${rows.length} of ${list.length} sessions. Click a column to sort (again to reverse), a session to open it. More summary views come here later.</p>`
+    <p class="mute small">${rows.length} of ${list.length} sessions. Click a session to open it. Drag over rows (or tick the boxes, shift-click for a range) to select sessions, then tag them above; while any are selected a click selects, Esc clears. Click a column to sort.</p>`
     : `<p class="mute">${list.length ? 'No sessions match these filters.' : 'No saved sessions yet.'}</p>`;
   for (const h of $('summary').querySelectorAll('th[data-k]')) h.onclick = () => {
     const key = h.dataset.k;
-    sumSort = { k: key, dir: sumSort.k === key ? -sumSort.dir : (['name', 'char', 'map'].includes(key) ? 1 : -1) };
+    sumSort = { k: key, dir: sumSort.k === key ? -sumSort.dir : (['name', 'char', 'map', 'tags'].includes(key) ? 1 : -1) };
     store.set('sumSort', sumSort); renderSummary();
   };
-  for (const tr of $('summary').querySelectorAll('tr[data-id]')) tr.onclick = () => { showSession(tr.dataset.id); showTab('review'); };
+  const all = $('summary').querySelector('#selAll');
+  if (all) all.onclick = () => { if (sel.size === order.length) sel.clear(); else order.forEach((x) => sel.add(x)); paintSel(); };
+  // your tags: how many sessions have each, rename, delete
+  const count = (t) => list.filter((x) => (x.tags || []).some((y) => sameTag(y, t))).length;
+  $('tagMgr').innerHTML = tl.length ? tl.map((t, i) => tagChip(t, ` <span class="mute">${count(t)}</span> <button class="x" data-ren="${i}" title="Rename this tag everywhere">✎</button><button class="x" data-del="${i}" title="Delete this tag (taken off every session)">×</button>`)).join(' ')
+    : '<span class="mute small">No tags yet.</span>';
+  for (const bt of $('tagMgr').querySelectorAll('[data-ren]')) bt.onclick = () => {
+    const t = tl[+bt.dataset.ren], to = cleanTag(prompt(`Rename tag "${t}" to:`, t));
+    if (to && to !== t) retag(t, to);
+  };
+  for (const bt of $('tagMgr').querySelectorAll('[data-del]')) bt.onclick = () => {
+    const t = tl[+bt.dataset.del], n = count(t);
+    if (confirm(`Delete tag "${t}"?${n ? ` It comes off ${n} session${n > 1 ? 's' : ''}.` : ''}`)) retag(t, null);
+  };
+  renderTagOpts();
+  paintSel();
 }
 
 // ------------------------------------------------------------------ pictures
@@ -813,6 +961,7 @@ function renderNav() {
   $('sessJob').value = v.character?.job || '';
   if (document.activeElement !== $('sessName')) $('sessName').value = v.end ? v.name || '' : '';
   $('sessCount').textContent = `${list.length} saved`;
+  renderViewTags();
 }
 
 function renderGraph() {

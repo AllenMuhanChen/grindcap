@@ -209,6 +209,12 @@ web/app.js            Page = big control section (Share, Start/End/Pause/Discard
                       End (status + pages) -> compare. Pause/Resume (S.pauses [[t0,t1|null]], left out of compare
                       minutes and liveSeries x/rates), Discard. Pages auto-captured (PageWatcher), auto-finish when
                       Equip/Use/Setup/Etc seen + 4 s idle. Page tab = inventory.pageTab: items decide, but a Cash/Deco button wins unless 70% of filled slots agree (cash items are not in the item data and false-match). Start/end snapshots, live rows, pauses in localStorage.
+web/lib/tags.js       Session tags (user-made): kv "tagList" = your tags in order (case-insensitive, first spelling kept), record.tags
+                      (running session: kv "sessTags"), in the light index and the backup. Review: chips with × + "+ add tag" box
+                      (datalist; a new name makes the tag). Summary: Tags column + Tag filter (incl. "(no tags)"), "Your tags" manager
+                      (count, ✎ rename / × delete everywhere: app.retag), row selection = drag over rows (from a selected row unselects),
+                      shift-click range, box/ctrl-click toggle, plain click opens unless something is selected; sticky bar adds/removes
+                      a tag on all selected (app.tagSessions). Python review.html has no tags.
 web/review.js         Review panel: status inputs + meso field crop, price input per item row (kv "myPrices", global: wins over
                       item-data/catalog/NPC price; app.setPrice recomputes the shown session at once, all saved ones after 0.8 s), "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and

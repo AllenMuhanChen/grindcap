@@ -64,6 +64,14 @@
   #sessSel { max-width: 520px; padding: 5px; } #sessName { font: inherit; padding: 5px; width: 220px; }
   details { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; } summary { cursor: pointer; color: var(--mute); }
   [hidden] { display: none !important; }
+  .ttag { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+    background: hsl(var(--h) 70% 45% / .16); border: 1px solid hsl(var(--h) 60% 45% / .55); }
+  .ttag .x { border: 0; background: none; padding: 0 2px; font-size: 12px; color: var(--mute); }
+  .ttag .x:hover { color: var(--ink); }
+  .tbtn { font-size: 12px; padding: 2px 9px; border-radius: 999px; border-color: hsl(var(--h) 60% 45% / .55); background: hsl(var(--h) 70% 45% / .12); }
+  .bulk { position: sticky; top: 0; z-index: 2; margin: 8px 0; padding: 8px 10px; border-radius: 8px; border: 2px solid var(--acc); background: color-mix(in srgb, var(--acc) 8%, var(--card)); }
+  table.pick { user-select: none; } td.sel, th.sel { width: 26px; padding-right: 0; } td.sel input { pointer-events: none; }
+  tr.picked { background: color-mix(in srgb, var(--acc) 18%, transparent) !important; }
   .alert { margin-top: 8px; padding: 10px 14px; border-radius: 8px; font-size: 16px; font-weight: 650; color: #fff; background: var(--bad); }
   .scanhelp { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 15px; border: 2px solid var(--acc); background: color-mix(in srgb, var(--acc) 10%, var(--card)); }
 </style>
@@ -123,6 +131,12 @@
       <button id="deleteSess">Delete</button>
       <span id="sessCount" class="mute small"></span>
     </div>
+    <div class="row" style="margin-top:6px">
+      <span class="small mute">Tags</span>
+      <span id="sessTags" class="row" style="gap:4px"></span>
+      <input id="tagAdd" class="st" list="tagOpts" placeholder="+ add tag" title="Pick one of your tags or type a new one, then Enter">
+    </div>
+    <datalist id="tagOpts"></datalist>
     <div id="result"></div>
     <div id="graphWrap" hidden>
       <canvas id="graph" width="940" height="170"></canvas>
@@ -137,7 +151,16 @@
   <section id="summarySec" hidden>
     <div class="row"><b>All sessions</b>
       <label class="small">Character <select id="sumChar"></select></label>
-      <label class="small">Map <select id="sumMap"></select></label></div>
+      <label class="small">Map <select id="sumMap"></select></label>
+      <label class="small">Tag <select id="sumTag"></select></label></div>
+    <div class="row" style="margin-top:6px"><span class="small mute">Your tags</span> <span id="tagMgr"></span>
+      <input id="tagNew" class="st" placeholder="+ new tag" title="Make a tag (Enter)"></div>
+    <div id="bulk" class="bulk" hidden>
+      <div class="row"><b id="bulkCount"></b> <span class="small mute">Add:</span> <span id="bulkAdd" class="row" style="gap:4px"></span>
+        <input id="bulkNew" class="st" list="tagOpts" placeholder="new tag" title="Type a tag (new or yours) and Enter: it goes on every selected session">
+        <button id="bulkClear" title="Unselect all (Esc)">Clear selection</button></div>
+      <div id="bulkRm" class="row" style="gap:4px;margin-top:6px"></div>
+    </div>
     <div id="summary"></div>
   </section>
 
