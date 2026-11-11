@@ -1,9 +1,8 @@
 // Live net mesos/hr from the inventory while you grind. Whenever the inventory is open during a running
-// session, the page on screen and the meso field are read again. Each tab keeps its own last-seen state:
-// the start snapshot's rows, with every page read since written over the rows it shows. A tab's item
-// value change is turned into a rate over ITS OWN window (start -> when that tab was last read), and the
-// meso field likewise, so a tab you looked at 20 minutes ago still counts at the rate it had then and a
-// tab never opened since Start counts nothing (listed as not seen). Pure logic: no screen, no DOM.
+// session, the page on screen and the meso field are read again. Each part (meso field, each tab, quick slot
+// potions) has its own value over time; its rate is the change since its previous point divided by the active
+// time in between, so it moves with what you do. A part not read lately keeps the rate it last had; the net is
+// the parts added up. Changes across a pause (selling, buying potions) don't count. Pure logic: no screen, no DOM.
 import { activeMs } from './session.js';
 import { UNKNOWN } from './inventory.js';
 
@@ -59,91 +58,88 @@ function counts(rows) {
   return out;
 }
 
-/** Replays the reads (oldest first) on the start snapshot. start = the start snapshot with your fixes applied;
- * reads = [{t ms, tab, rows (liteRows), mesos}] (tab/rows may be missing: a meso-only read).
- * Returns {tabs: {tab: {rows, t, reads, skipped}}, mesos: {value, t}|null}. */
-export function replay(start, reads, fixes = null) {
-  const fix = lookFix(fixes);
-  const tabs = {};
-  for (const [t, rows] of Object.entries(start.tabs || {})) tabs[t] = { rows: rows.map((r) => r.map((s) => fix(s) || {})), t: null, reads: 0, skipped: 0 };
-  let mesos = null;
-  for (const rd of reads || []) {
-    if (rd.mesos != null) mesos = { value: rd.mesos, t: rd.t };
-    if (!rd.tab || !rd.rows) continue;
-    const page = rd.rows.map((r) => r.map(fix));
-    const cur = tabs[rd.tab];
-    if (!cur) continue;                      // a tab the Start scan didn't read: nothing to compare with
-    const off = alignPage(cur.rows, page);
-    if (off == null) { cur.skipped++; continue; }
-    cur.rows = applyPage(cur.rows, page, off);
-    cur.t = rd.t; cur.reads++;
-  }
-  return { tabs, mesos };
-}
-
-/** The live estimate at time `now` (ms). priceOf(id) -> mesos or null. counted = tabs that count (Equip, Use,
- * Setup, Etc). potionCostPerHr (optional): quick slot potion spend/hr. With it, the potions on the quick slots
- * (opts.potionNames) are counted from the quick slots (read every minute) and left out of the Use tab's change,
- * which would otherwise hold the potion use of whenever Use was last read; Use not read -> just the potion cost.
- * opts.minMinutes (5): a part (meso field or a tab) last read sooner than this after Start isn't counted: a few
- * potions or mesos over a few seconds make a huge per-hour rate (the inventory is still open right after the
- * Start scan, so the first reads come seconds after Start).
- * Returns {net_per_hr, mesos: {...}|null, tabs: [{tab, seen, t, age_min, minutes, value, per_hr, items}],
- * not_seen: [tab], unpriced: [name], potion_fallback} — net_per_hr null until anything was read. */
-export function estimate(start, reads, priceOf, pauses = [], now = Date.now(), counted = ['Equip', 'Use', 'Setup', 'Etc'], fixes = null, potionCostPerHr = null, opts = {}) {
-  const minMin = opts.minMinutes ?? 5, potNames = new Set(potionCostPerHr != null ? opts.potionNames || [] : []);
-  const st = replay(start, reads, fixes);
-  const hrs = (t) => activeMs(start.time, t, pauses) / 3.6e6;
-  const rate = (v, t) => { const h = hrs(t); return h > 0 ? v / h : null; };
-  const fix = lookFix(fixes);
-  const unpriced = new Set();
-  let net = null;
-  const add = (v) => { if (v != null) net = (net || 0) + v; };
-
-  let mesos = null;
-  if (st.mesos && start.mesos != null) {
-    const change = st.mesos.value - start.mesos;
-    const minutes = hrs(st.mesos.t) * 60, early = minutes < minMin;
-    mesos = { start: start.mesos, now: st.mesos.value, change, t: st.mesos.t, minutes, early, age_min: (now - st.mesos.t) / 6e4, per_hr: early ? null : rate(change, st.mesos.t) };
-    add(mesos.per_hr);
-  }
-
-  const tabs = [], notSeen = [];
-  let potionFallback = null;
-  const early = [];
-  for (const tab of counted) {
-    if (tab === 'Use' && potionCostPerHr != null) { potionFallback = -potionCostPerHr; add(potionFallback); }
-    const s = st.tabs[tab];
-    if (!s || s.t == null) { notSeen.push(tab); continue; }   // not read since Start (or not in the Start scan): counts nothing
-    if (hrs(s.t) * 60 < minMin) { notSeen.push(tab); early.push(tab); continue; }
-    const before = counts((start.tabs?.[tab] || []).map((r) => r.map((x) => fix(x) || {}))), after = counts(s.rows);
-    const items = [];
-    let value = 0;
-    for (const id of new Set([...Object.keys(before), ...Object.keys(after)])) {
-      const a = before[id]?.qty || 0, b = after[id]?.qty || 0;
-      const name = (after[id] || before[id]).name || id;
-      if (a === b || potNames.has(name)) continue;     // quick slot potions: counted from the quick slots
+/** Each part's value over time, from the start snapshot and the reads (oldest first). start = the start snapshot
+ * with your fixes applied; reads = [{t ms, tab, rows (liteRows), mesos}] (tab/rows missing: a meso-only read).
+ * Parts: 'Mesos' (the meso field) and every counted tab the Start scan read, valued at priceOf (unpriced items
+ * left out and listed). A tab's state = Start rows with each page written over the rows it shows (alignPage;
+ * a page that fits nowhere is skipped). opts.skipNames: items left out of the tabs (quick slot potions, which
+ * get their own part from the quick slot readings). Returns {states: {part: [{t, value}]}, unpriced: [name]}. */
+export function partStates(start, reads, priceOf, counted = ['Equip', 'Use', 'Setup', 'Etc'], fixes = null, opts = {}) {
+  const fix = lookFix(fixes), skip = new Set(opts.skipNames || []), unpriced = new Set();
+  const value = (rows) => {
+    let v = 0;
+    for (const [id, c] of Object.entries(counts(rows))) {
+      if (skip.has(c.name)) continue;
       const p = priceOf(id);
-      if (p == null) { unpriced.add(name); items.push({ id, name, change: b - a, value: null }); continue; }
-      value += (b - a) * p;
-      items.push({ id, name, change: b - a, value: (b - a) * p });
+      if (p == null) { unpriced.add(c.name || id); continue; }
+      v += c.qty * p;
     }
-    items.sort((x, y) => (y.value || 0) - (x.value || 0));
-    const per = rate(value, s.t);
-    tabs.push({ tab, seen: true, t: s.t, age_min: (now - s.t) / 6e4, minutes: hrs(s.t) * 60, value, per_hr: per, items, reads: s.reads, skipped: s.skipped });
-    add(per);
+    return v;
+  };
+  const rowsOf = {}, states = {};
+  if (start.mesos != null) states.Mesos = [{ t: start.time, value: start.mesos }];
+  for (const tab of counted) {
+    if (!start.tabs?.[tab]) continue;                       // the Start scan didn't read it: nothing to compare with
+    rowsOf[tab] = start.tabs[tab].map((r) => r.map((x) => fix(x) || {}));
+    states[tab] = [{ t: start.time, value: value(rowsOf[tab]) }];
   }
-  return { net_per_hr: net == null ? null : Math.round(net), mesos, tabs, not_seen: notSeen, too_early: early, min_minutes: minMin, unpriced: [...unpriced], potion_fallback: potionFallback };
+  for (const rd of reads || []) {
+    if (rd.mesos != null && states.Mesos) states.Mesos.push({ t: rd.t, value: rd.mesos });
+    if (!rd.tab || !rd.rows || !rowsOf[rd.tab]) continue;
+    const page = rd.rows.map((r) => r.map(fix)), off = alignPage(rowsOf[rd.tab], page);
+    if (off == null) continue;
+    rowsOf[rd.tab] = applyPage(rowsOf[rd.tab], page, off);
+    states[rd.tab].push({ t: rd.t, value: value(rowsOf[rd.tab]) });
+  }
+  return { states, unpriced: [...unpriced] };
 }
 
-/** The estimate after each read: [{min (active minutes), est, mesos (meso field alone, /hr)}] for a graph. */
-export function estimateSeries(start, reads, priceOf, pauses = [], counted, fixes = null, potionCostPerHr = null, opts = {}) {
+/** Wall-clock states [{t, value}] -> [{min (active minutes since Start), value, gap}]; gap = a pause lies between
+ * this state and the one before (what changed then, e.g. selling or buying potions, is not grinding). */
+export function activeStates(states, startTime, pauses = []) {
+  return states.map((s, i) => ({ min: activeMs(startTime, s.t, pauses) / 6e4, value: s.value,
+    gap: i > 0 && (pauses || []).some(([p0, p1]) => p0 < s.t && (p1 ?? Infinity) > states[i - 1].t) }));
+}
+
+/** Rate points of one part: change since the previous point / active time between them (mesos/hr). A point
+ * needs at least minMin active minutes since the previous one (reads come every 15 s while the inventory is
+ * open; a few mesos over seconds would be a huge rate). A pause in between restarts from the first state after
+ * it, so nothing that changed while paused counts. states: [{min, value, gap}] (activeStates). */
+export function partPoints(states, minMin = 3) {
   const out = [];
-  for (let i = 0; i < (reads || []).length; i++) {
-    const t = reads[i].t, e = estimate(start, reads.slice(0, i + 1), priceOf, pauses, t, counted, fixes, potionCostPerHr, opts);
-    if (e.net_per_hr != null) out.push({ min: activeMs(start.time, t, pauses) / 6e4, est: e.net_per_hr, mesos: e.mesos?.per_hr ?? null });
+  let anchor = states[0];
+  for (const s of states.slice(1)) {
+    if (s.gap) { anchor = s; continue; }
+    const dm = s.min - anchor.min;
+    if (dm < minMin) continue;
+    out.push({ min: s.min, rate: (s.value - anchor.value) / dm * 60, gain: s.value - anchor.value, dmin: dm });
+    anchor = s;
   }
   return out;
+}
+
+/** parts: {name: [{min, value, gap}]} -> per part its points, latest rate (how old) and session average
+ * (sum of gains / minutes covered), and the net: latest = each part's newest rate added up (an outdated part
+ * counts at the rate it last had), session = the session averages added up. total = the net after every point.
+ * nowMin = active minutes now. Parts without a point yet are listed in waiting. */
+export function liveNet(parts, nowMin, minMin = 3) {
+  const out = [], waiting = [];
+  for (const [name, states] of Object.entries(parts)) {
+    const points = partPoints(states, minMin);
+    if (!points.length) { waiting.push(name); continue; }
+    const gain = points.reduce((a, p) => a + p.gain, 0), covered = points.reduce((a, p) => a + p.dmin, 0);
+    out.push({ name, points, latest: points.at(-1).rate, last_min: points.at(-1).min, age_min: nowMin - points.at(-1).min, session: gain / covered * 60, gain, covered_min: covered });
+  }
+  const sum = (k) => (out.length ? Math.round(out.reduce((a, p) => a + p[k], 0)) : null);
+  // the net after each point: every part at its newest rate so far
+  const events = out.flatMap((p) => p.points.map((q) => ({ min: q.min, name: p.name, rate: q.rate }))).sort((a, b) => a.min - b.min);
+  const cur = {}, total = [];
+  for (const e of events) {
+    cur[e.name] = e.rate;
+    const pt = { min: e.min, est: Math.round(Object.values(cur).reduce((a, b) => a + b, 0)) };
+    if (total.length && total.at(-1).min === e.min) total[total.length - 1] = pt; else total.push(pt);
+  }
+  return { parts: out, waiting, net_latest: sum('latest'), net_session: sum('session'), total };
 }
 
 /** Same page as the last read of this tab (ids and counts) and same mesos: nothing new to keep. */

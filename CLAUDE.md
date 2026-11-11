@@ -199,19 +199,19 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
                       app.invTick polls every 2 s while running (not paused/scanning): inventory open + view still for one poll
                       + (view changed or 15 s since the last read: a stack count barely moves the signature) -> readPage + meso
                       field -> session.inv.reads [{t, tab, rows (liteRows, no pictures), mesos}] (kv invLive, record.inv, backup).
-                      Tooltip/pointer over the grid: silently tried later. replay: start snapshot's tab rows, each read written
-                      over the rows it shows at alignPage's offset (ids only, counts ignored, empty slots neutral, <= 1/5
-                      disagree, else skipped). estimate: meso field and each tab -> rate over ITS OWN window (start -> last read
-                      of it, paused time out); a tab not read since Start counts 0 and is listed; a part last read < 5 active
-                      min after Start isn't counted (too_early: the inventory is still open after the Start scan, so a few
-                      potions over seconds became a huge, frozen negative rate — Allen's "constant negative", 2026-11-10).
-                      With quick slot readings, potions (qsNames) come from the quick slot cost/hr (fresh every minute) and are
-                      left out of the Use tab's change. alignPage ties (a tab of identical stacks) go to the most same-count
-                      slots. fixes.looks apply. Rows not scrolled to keep their last-seen counts. Shown: liveStats row +
-                      #invLine (per-part rate + age), graph app.drawInvGraph (net estimate after each read, dashed = meso field
-                      alone, y axis may go below 0: drawGraph floor null) in the view (#invGraph, shown whenever reads exist) and
-                      the pop-out (canvas ig),
-                      with the End result for comparison.
+                      Tooltip/pointer over the grid: silently tried later. partStates: per part (Mesos = meso field, each tab the
+                      Start scan read) its value over time; a tab = Start rows with each page written over the rows it shows at
+                      alignPage's offset (ids only, counts break ties, empty slots neutral, <= 1/5 disagree, else skipped), valued
+                      at priceOf. Quick slot potions are their own part "Potions" (-cumulative spend from potionSeries) and left
+                      out of Use (skipNames). partPoints: rate = change since the part's previous point / active minutes between,
+                      points >= 3 active min apart (reads come every 15 s; the inventory is still open right after the Start
+                      scan, which once made a huge frozen negative), and a pause in between restarts from the first state after
+                      it (selling Etc / repotting while paused counted as income, 2026-11-10). potionSeries skips count changes
+                      across a pause too. liveNet: net now = every part at its newest rate (an outdated part keeps its last
+                      rate), session = sum of per-part gain / minutes covered; total = net after each point. Shown: liveStats row
+                      (now · session), #invLine (each part's rate + age), graph.drawLines (one line per part, thick Net, a line
+                      ends where its part was last read) in the view (#invGraph) and the pop-out (canvas ig); review compares
+                      with the End result. fixes.looks apply.
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

@@ -32,8 +32,11 @@ function rightLabels(g, items, xEnd, xBox, top, bottom, ink, bg) {
   }
   for (const b of boxes) {
     const my = b.by + h / 2;
-    g.strokeStyle = b.color; g.lineWidth = 1.5; g.beginPath(); g.moveTo(xEnd, b.y); g.lineTo(xBox, my); g.stroke();
-    g.fillStyle = b.color; g.beginPath(); g.arc(xEnd, b.y, 4, 0, 7); g.fill();
+    const xe = b.x ?? xEnd;   // a line that ends earlier (an outdated part) has its own end
+    g.strokeStyle = b.color; g.lineWidth = 1.5;
+    if (xe < xEnd - 1) { g.setLineDash([2, 4]); g.globalAlpha = 0.5; }   // not a continuation of the line: a faint pointer
+    g.beginPath(); g.moveTo(xe, b.y); g.lineTo(xBox, my); g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+    g.fillStyle = b.color; g.beginPath(); g.arc(xe, b.y, 4, 0, 7); g.fill();
     g.fillStyle = bg; g.fillRect(xBox, b.by, b.w, h);
     g.strokeStyle = b.color; g.strokeRect(xBox + 0.75, b.by + 0.75, b.w - 1.5, h - 1.5);
     g.fillStyle = ink; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.text, xBox + b.w / 2, my + 1);
@@ -134,6 +137,30 @@ export function drawPotionGraph(cv, pts) {
 }
 
 export const HP = '#eb6834', MP = '#2a78d6';
+
+/** Several rate lines on one axis (y may go below 0): lines [{label, color (null = ink), width, pts: [{min, v}]}].
+ * Each point is a dot, joined by its line; a line stops where its part was last read, so an outdated part shows
+ * as a line that ends early. Every line's newest value is boxed on the right with its name. */
+export function drawLines(cv, lines, unit, empty) {
+  const [g, W, H] = fit(cv);
+  const css = getComputedStyle(cv.ownerDocument.documentElement);
+  const ink = css.getPropertyValue('--mute') || '#888', text = css.getPropertyValue('--ink') || '#111', bg = css.getPropertyValue('--card') || '#fff';
+  lines = (lines || []).filter((l) => l.pts.length);
+  if (!lines.length) { g.fillStyle = ink; g.font = AXIS; g.fillText(empty, 8, H / 2); return; }
+  const labels = lines.map((l) => `${l.label} ${short(l.pts.at(-1).v)}`);
+  const x0 = 62, x1 = W - labelWidth(g, labels) - 22, y0 = H - 20, y1 = 22;
+  const t1 = Math.max(1, ...lines.map((l) => l.pts.at(-1).min));
+  const [lo, hi, step] = yRange(lines.flatMap((l) => l.pts.map((p) => p.v)), null);
+  const X = (m) => x0 + (x1 - x0) * m / t1, Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
+  axes(g, x0, x1, y0, y1, lo, hi, step, t1, unit, ink, Y);
+  for (const l of lines) {
+    const c = l.color || text;
+    g.strokeStyle = c; g.fillStyle = c; g.lineWidth = l.width || 1.5;
+    g.beginPath(); l.pts.forEach((p, i) => (i ? g.lineTo(X(p.min), Y(p.v)) : g.moveTo(X(p.min), Y(p.v)))); g.stroke();
+    for (const p of l.pts) { g.beginPath(); g.arc(X(p.min), Y(p.v), l.width ? 3.5 : 2.5, 0, 7); g.fill(); }
+  }
+  rightLabels(g, lines.map((l, i) => ({ y: Y(l.pts.at(-1).v), x: X(l.pts.at(-1).min), text: labels[i], color: l.color || text })), X(t1), x1 + 14, y1, y0, text, bg);
+}
 
 /** One line under a potion graph: mesos/hr over the whole session and mesos spent so far, per kind. */
 export function potionSummary(pts) {

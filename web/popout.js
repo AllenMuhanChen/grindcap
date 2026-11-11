@@ -1,11 +1,11 @@
 // Always-on-top pop-out (Chrome/Edge Document Picture-in-Picture): the old control window's job.
 // Session timer, EXP/hr, Start/End/Finish, the tab checklist while scanning, the live graph and the
 // key results, so you don't have to switch back to the browser tab.
-import { drawGraph, drawPotionGraph, potionSummary, HP, MP } from './graph.js';
+import { drawGraph, drawPotionGraph, potionSummary, drawLines, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
 
 let pip = null, api = null;
-const FULL = [380, 680];
+const FULL = [380, 730];
 // compact window: sized to its content (measured after each render, last size remembered for the next open)
 let SMALL = (() => { try { return JSON.parse(localStorage.getItem('grindcap.popSmallSize')) || [250, 140]; } catch { return [250, 140]; } })();
 let small = (() => { try { return localStorage.getItem('grindcap.popSmall') === '1'; } catch { return false; } })();
@@ -68,7 +68,7 @@ export async function openPopout(a) {
     <div class="mute" id="xph2"></div>
     <canvas id="g" width="720" height="240"></canvas>
     <div id="inv"></div>
-    <canvas id="ig" width="720" height="180" style="height:120px" hidden></canvas>
+    <canvas id="ig" width="720" height="240" style="height:170px" hidden></canvas>
     <div class="mute note" id="pot"></div>
     <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
     <div id="pgs" class="note"></div>
@@ -118,8 +118,8 @@ export function updatePopout() {
   $('pgs').innerHTML = potionSummary(pot.pts);
   const inv = api.inv ? api.inv() : null;
   $('ig').hidden = !inv;
-  if (inv && api.invSeries) drawGraph($('ig'), api.invSeries().map((p) => ({ min: p.min, rate: p.est, ema: p.est, cum: p.mesos ?? p.est })), 1, 'Net mesos/hr', 'Net mesos/hr appears once the inventory is opened 5+ min after Start.', null);
-  $('inv').innerHTML = inv && inv.net_per_hr != null ? `<b>${fmt(inv.net_per_hr)}</b> <span class="mute">net mesos/hr (inventory${inv.not_seen.length ? `; not read: ${inv.not_seen.join(', ')}` : ''})</span>` : '';
+  if (inv && api.invLines) drawLines($('ig'), api.invLines(), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active min apart.');
+  $('inv').innerHTML = inv && inv.net_latest != null ? `<b>${fmt(inv.net_latest)}</b> <span class="mute">net mesos/hr now · session ${fmt(inv.net_session)}</span>` : '';
   d.body.classList.toggle('small', small);
   $('mini').hidden = !small; $('full').hidden = small;
   $('mode').textContent = small ? 'Full view' : 'Compact'; $('mode').title = small ? 'Show the graphs, buttons and results' : 'Just the timer, EXP/hr, potion cost and scan progress';
@@ -134,7 +134,7 @@ export function updatePopout() {
       const miss = COUNTED_TABS.filter((t) => !cs.seen.has(t));
       ms.innerHTML = `${cs.kind === 'start' ? 'Start' : 'End'} scan: ` + (miss.length ? `still to do <b>${miss.join(', ')}</b>` : '<span class="ok">all tabs read, finishing</span>');
     }
-    $('minv').innerHTML = inv && inv.net_per_hr != null ? `${fmt(inv.net_per_hr)} <span class="mute">net mesos/hr</span>` : '';
+    $('minv').innerHTML = inv && inv.net_latest != null ? `${fmt(inv.net_latest)} <span class="mute">net mesos/hr</span>` : '';
     $('mpot').innerHTML = lp ? `<span style="color:${HP}">HP ${fmt(lp.ema_hp)}/hr</span> · <span style="color:${MP}">MP ${fmt(lp.ema_mp)}/hr</span>` : '';
   }
   $('start').disabled = !sharing || !!S.collect || running;

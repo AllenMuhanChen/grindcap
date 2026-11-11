@@ -149,8 +149,8 @@
       <div id="potSum" class="potsum"></div>
     </div>
     <div id="invWrap" hidden>
-      <canvas id="invGraph" width="940" height="140" style="height:140px"></canvas>
-      <div class="mute small">Net mesos/hr from the inventory: dots + line = estimate after each read, dashed = mesos picked up alone (no items).</div>
+      <canvas id="invGraph" width="940" height="230" style="height:230px"></canvas>
+      <div class="mute small">Mesos/hr from the inventory, one line per part: each dot = change since that part's previous dot / active time between them (dots 3+ min apart). A line that stops early = that part hasn't been read since. Thick line = Net, every part at its newest rate. Changes while paused don't count.</div>
       <div id="invSum" class="potsum"></div>
     </div>
     <div id="review"></div>

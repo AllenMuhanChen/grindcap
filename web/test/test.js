@@ -9,7 +9,7 @@ import { mat } from '../lib/img.js';
 import { readMap, snapScore } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
-import { alignPage, estimate, estimateSeries } from '../lib/liveinv.js';
+import { alignPage, partStates, activeStates, partPoints, liveNet } from '../lib/liveinv.js';
 import { cleanTag, ensureTag, editTags, renameIn, rangeIds } from '../lib/tags.js';
 import { statsTests } from './stats_test.js';
 import { readQuickslot, potionSeries, prices, describe, matchByCount, trackKeys } from '../lib/quickslot.js';
@@ -128,7 +128,7 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const pot = (o, bl, x = null) => [{ key: 'Del', count: o, name: 'Orange Potion' }, { key: 'End', count: bl, name: 'Blue Potion' }, { key: 'PgUp', count: 9, name: x }];
   const rows2 = [{ time: 0, potions: pot(100, 50) }, { time: 60, exp: 1 }, { time: 120, potions: pot(90, 48) }, { time: 180, potions: pot(9, 47) },
     { time: 240, potions: pot(85, 47) }, { time: 960, potions: pot(200, 45, 'Pet Food') }, { time: 1020, potions: pot(195, 45) }];
-  eq(potionSeries({ time: 0, pauses: [[300, 900]] }, rows2, prices({ 'Blue Potion': ['mp', 190] })).map((p) => [p.t, p.hp, p.mp]), [[0, 0, 0], [2, 1600, 380], [3, 1600, 570], [4, 2400, 570], [6, -16000, 950], [7, -15200, 950]], 'series with pause + misread + restock');
+  eq(potionSeries({ time: 0, pauses: [[300, 900]] }, rows2, prices({ 'Blue Potion': ['mp', 190] })).map((p) => [p.t, p.hp, p.mp]), [[0, 0, 0], [2, 1600, 380], [3, 1600, 570], [4, 2400, 570], [6, 2400, 570], [7, 3200, 570]], 'series with pause + misread (restock while paused not counted)');
   eq(describe([{ key: 'Del', count: 155, name: 'Orange Potion' }, { key: 'PgUp', count: 12, name: null }], prices()), 'Potions: Del Orange Potion 155 · PgUp unknown item 12 (not counted)', 'describe');
   const items = { 1: { name: 'Orange Potion', qty: 155 }, 2: { name: 'Lemon', qty: 248 }, 3: { name: 'Blue Potion', qty: 20 }, 4: { name: 'Orange', qty: 20 }, 5: { name: 'Snail Shell', qty: 158 } };
   eq(matchByCount([{ key: 'Del', count: 155, name: 'Orange' }, { key: 'End', count: 246, name: 'Orange Potion' }, { key: 'Ins', count: 20, name: 'Blue Potion' }, { key: 'Hm', count: 20, name: null }], items),
@@ -233,10 +233,10 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   eq(rangeIds(['1', '2', '3', '4'], '3', '1'), ['1', '2', '3'], 'range upward');
   eq(rangeIds(['1', '2'], '1', '9'), [], 'range off the list');
 }
-// Live mesos/hr from inventory reads while grinding: each tab at its own last-read time, scrolled pages aligned
+// Live mesos/hr from inventory reads while grinding: per part, change since its previous point / active time
 {
   const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fails.push(`liveinv ${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
-  const S = (id, qty) => ({ id, qty, name: `item ${id}` }), E = {};
+  const S = (id, qty, name = `item ${id}`) => ({ id, qty, name }), E = {};
   const row = (...x) => [...x, ...Array(5 - x.length).fill(E)];
   // Etc tab: 8 rows at Start; a later page shows rows 2..7 with grown stacks and a new item in an empty slot
   const etc = [row(S(1, 10), S(2, 5)), row(S(3, 1)), row(S(4, 7), S(5, 2)), row(S(6, 3)), row(S(7, 9)), row(S(8, 1)), row(S(9, 4)), row()];
@@ -245,37 +245,49 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   eq(alignPage(etc, page), 2, 'scrolled page offset');
   eq(alignPage([row(S(1, 1), S(2, 1))], [row(S(3, 1), S(4, 1))]), null, 'items moved: no offset');
   eq(alignPage([row()], [row(S(3, 1))]), 0, 'empty tab at Start');
-  const t0 = 1_000_000, min = 60000;
-  const start = { time: t0, mesos: 1000, tabs: { Etc: etc, Use: [row(S(20, 100))] } };
-  const price = (id) => ({ 4: 10, 10: 100, 20: 50 }[id] ?? null);
-  const reads = [
-    { t: t0 + 30 * min, tab: 'Etc', rows: page, mesos: 11000 },          // 30 min: +100 + 200 items, +10,000 mesos
-    { t: t0 + 60 * min, tab: 'Use', rows: [row(S(20, 80))], mesos: 21000 }, // 60 min: -20 potions, +20,000 mesos
-  ];
-  const e = estimate(start, reads, price, [], t0 + 60 * min, ['Equip', 'Use', 'Setup', 'Etc']);
-  eq(e.mesos.per_hr, 20000, 'mesos rate over its own window');
-  eq(e.tabs.map((x) => [x.tab, Math.round(x.per_hr)]), [['Use', -1000], ['Etc', 600]], 'tab rates over each tab\'s window');
-  eq(e.net_per_hr, 19600, 'net = mesos + tabs');
-  eq(e.not_seen, ['Equip', 'Setup'], 'tabs not read since Start');
-  // only the Etc read: Use stands in from the quick slot potion cost; with a 30-min pause the window halves
-  const e2 = estimate(start, reads.slice(0, 1), price, [[t0, t0 + 15 * min]], t0 + 30 * min, ['Use', 'Etc'], null, 500);
-  eq([e2.potion_fallback, Math.round(e2.mesos.per_hr), e2.net_per_hr], [-500, 40000, 40700], 'potion fallback + pauses');
-  eq(estimateSeries(start, reads, price, []).map((p) => p.est), [20600, 19600], 'series');
-  // a look you named on the review applies to live reads too ('ignore' = not counted)
-  const lk = [row({ ...S(1, 10), look: 'L1' })], lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];
-  const e3 = estimate({ time: t0, mesos: 0, tabs: { Etc: lk } }, [{ t: t0 + 60 * min, tab: 'Etc', rows: lp, mesos: 0 }], (id) => (id === 7 ? 1 : null), [], t0 + 60 * min, ['Etc'], { looks: { L9: 7 } });
-  eq(e3.tabs[0].items.map((x) => [x.id, x.change]), [['7', 30]], 'fixes on live reads');
-  // reads seconds after Start (inventory still open after the Start scan): not turned into a per-hour rate
-  const e4 = estimate(start, [{ t: t0 + 20000, tab: 'Use', rows: [row(S(20, 99))], mesos: 1100 }], price, [], t0 + 20000, ['Use', 'Etc']);
-  eq([e4.net_per_hr, e4.too_early, e4.mesos.early], [null, ['Use'], true], 'too soon after Start');
-  // quick slot potions: counted from the quick slots, left out of the Use tab (Red Potion used, Scroll gained)
-  const st5 = { time: t0, mesos: 0, tabs: { Use: [row({ id: 20, qty: 100, name: 'Red Potion' }, { id: 21, qty: 0, name: 'Scroll' })] } };
-  const r5 = [{ t: t0 + 60 * min, tab: 'Use', rows: [row({ id: 20, qty: 40, name: 'Red Potion' }, { id: 21, qty: 1, name: 'Scroll' })], mesos: 0 }];
-  const e5 = estimate(st5, r5, (id) => ({ 20: 50, 21: 700 }[id]), [], t0 + 60 * min, ['Use'], null, 2500, { potionNames: ['Red Potion'] });
-  eq([e5.tabs[0].per_hr, e5.potion_fallback, e5.net_per_hr], [700, -2500, -1800], 'potions from the quick slots');
-  // a tab of identical ore stacks: the offset with the same counts wins
   const ore = [row(S(5, 100), S(5, 100)), row(S(5, 100), S(5, 100)), row(S(5, 37), S(5, 12))];
   eq(alignPage(ore, [row(S(5, 100), S(5, 100)), row(S(5, 37), S(5, 12))]), 1, 'identical stacks: counts break the tie');
+  const t0 = 1000000, min = 60000;
+  const start = { time: t0, mesos: 1000, tabs: { Etc: etc, Use: [row(S(20, 100, 'Red Potion'), S(21, 0, 'Scroll'))] } };
+  const price = (id) => ({ 4: 10, 10: 100, 20: 50, 21: 700 }[id] ?? null);
+  // 10 s after Start (inventory still open after the scan), 30 min, 60 min; Use read at 30 min only
+  const reads = [
+    { t: t0 + 10000, tab: 'Etc', rows: etc.slice(2), mesos: 1050 },
+    { t: t0 + 30 * min, tab: 'Etc', rows: page, mesos: 11000 },                       // +300 items, +10,000 mesos
+    { t: t0 + 30 * min + 5000, tab: 'Use', rows: [row(S(20, 80, 'Red Potion'), S(21, 1, 'Scroll'))], mesos: 11000 },
+    { t: t0 + 60 * min, tab: 'Etc', rows: page, mesos: 41000 },                       // +30,000 mesos, no items
+  ];
+  const { states } = partStates(start, reads, price, ['Equip', 'Use', 'Setup', 'Etc']);
+  const parts = Object.fromEntries(Object.entries(states).map(([k, st]) => [k, activeStates(st, t0, [])]));
+  const e = liveNet(parts, 60);
+  const by = Object.fromEntries(e.parts.map((p) => [p.name, p]));
+  const use = -300 * 60 / (30 + 5 / 60);
+  eq(by.Mesos.points.map((p) => Math.round(p.rate)), [20000, 60000], 'mesos: each point = change since the previous / time (the 10 s read is not a point)');
+  eq(by.Etc.points.map((p) => Math.round(p.rate)), [600, 0], 'Etc points');
+  eq(Math.round(by.Use.latest), Math.round(use), 'Use: -20 potions + scroll over 30 min');
+  eq([e.net_latest, e.waiting], [Math.round(60000 + use), []], 'net = every part at its newest rate');
+  eq(e.total.map((p) => p.est), [20600, Math.round(20600 + use), Math.round(60000 + use)], 'net after each point');
+  // a pause in between: selling Etc + repotting while paused must not count
+  const pauses = [[t0 + 20 * min, t0 + 25 * min]];
+  const r2 = [{ t: t0 + 10 * min, tab: 'Etc', rows: etc.slice(2), mesos: 5000 },
+    { t: t0 + 26 * min, tab: 'Etc', rows: [row(), row(), row(), row(), row(), row()], mesos: 905000 },  // sold everything: +900k
+    { t: t0 + 36 * min, tab: 'Etc', rows: [row(S(4, 3)), row(), row(), row(), row(), row()], mesos: 915000 }];
+  const st2 = partStates(start, r2, price, ['Etc']).states;
+  const e2 = liveNet(Object.fromEntries(Object.entries(st2).map(([k, st]) => [k, activeStates(st, t0, pauses)])), 31);
+  const b2 = Object.fromEntries(e2.parts.map((p) => [p.name, p]));
+  eq(b2.Mesos.points.map((p) => [p.min, Math.round(p.rate)]), [[10, 24000], [31, 60000]], 'pause: the sale is not income');
+  eq(b2.Etc.points.map((p) => Math.round(p.rate)), [0, 180], 'pause: the sold items are not a loss');
+  // quick slot potions as their own part, left out of the Use tab
+  const st3 = partStates(start, reads, price, ['Use'], null, { skipNames: ['Red Potion'] }).states;
+  eq(st3.Use.map((s) => s.value), [0, 700], 'Use without the quick slot potions');
+  // repotting while paused: the quick slot count going up then is not counted as income
+  const ps = potionSeries({ time: 0, pauses: [[600, 900]] }, [0, 300, 600, 1000, 1300].map((time, i) => ({ time, potions: [{ key: 'Del', name: 'Red Potion', count: [100, 90, 80, 300, 290][i] }] })), { 'Red Potion': ['hp', 50] });
+  eq(ps.map((p) => p.hp), [0, 500, 1000, 1000, 1500], 'potions: repot while paused');
+  eq(partPoints([{ min: 0, value: 0 }, { min: 2, value: -100 }, { min: 4, value: -400 }]).map((p) => p.rate), [-6000], 'points need 3+ active min');
+  // a look you named on the review applies to live reads too
+  const lk = { time: t0, mesos: 0, tabs: { Etc: [row({ ...S(1, 10), look: 'L1' })] } };
+  const lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];
+  eq(partStates(lk, [{ t: t0 + 60 * min, tab: 'Etc', rows: lp, mesos: 0 }], (id) => (+id === 7 ? 1 : null), ['Etc'], { looks: { L9: 7 } }).states.Etc.map((s) => s.value), [0, 30], 'fixes on live reads');
 }
 // Stat window
 await statsTests(log, fails);

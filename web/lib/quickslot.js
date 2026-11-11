@@ -265,12 +265,14 @@ export function potionSeries(start, rows, table, tauMin = 5, keyNames = {}) {
   }
   const names = [...new Set(rows.flatMap((r) => r.potions.map((p) => p.name)).filter((n) => n in table))].sort();
   const usedSoFar = {};
+  // a pause between two readings: what changed then (potions bought, moved) isn't use, so that step is skipped
+  const pausedBefore = rows.map((r, i) => i > 0 && (start.pauses || []).some(([a, b]) => a < r.time && (b ?? Infinity) > rows[i - 1].time));
   for (const n of names) {
     let last = null;
     const filled = rows.map((r) => { const p = r.potions.find((q) => q.name === n); last = p ? p.count : last; return last; });
     const sm = dropMisreads(filled);
     let total = 0;
-    usedSoFar[n] = sm.map((x, i) => { if (i && x != null && sm[i - 1] != null) total += sm[i - 1] - x; return total; });
+    usedSoFar[n] = sm.map((x, i) => { if (i && x != null && sm[i - 1] != null && !pausedBefore[i]) total += sm[i - 1] - x; return total; });
   }
   const out = [];
   rows.forEach((r, i) => {
