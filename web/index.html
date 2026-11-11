@@ -71,6 +71,16 @@
   .tbtn { font-size: 12px; padding: 2px 9px; border-radius: 999px; border-color: hsl(var(--h) 60% 45% / .55); background: hsl(var(--h) 70% 45% / .12); }
   .bulk { position: sticky; top: 0; z-index: 2; margin: 8px 0; padding: 8px 10px; border-radius: 8px; border: 2px solid var(--acc); background: color-mix(in srgb, var(--acc) 8%, var(--card)); }
   table.pick { user-select: none; } td.sel, th.sel { width: 26px; padding-right: 0; } td.sel input { pointer-events: none; }
+  svg.scatter { width: 100%; height: auto; display: block; font: 12px system-ui, sans-serif; }
+  svg.scatter text { fill: var(--mute); } svg.scatter text.ttl { font-size: 13px; }
+  svg.scatter line.grid { stroke: var(--line); } svg.scatter line.zero { stroke: var(--mute); }
+  svg.scatter .mark { stroke: var(--card); stroke-width: 2; } svg.scatter .hit { fill: transparent; }
+  svg.scatter g.dot { cursor: pointer; } svg.scatter g.dot.on .mark { stroke: var(--ink); }
+  .scwrap { position: relative; } .sctip { position: absolute; z-index: 3; max-width: 250px; pointer-events: none; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
+  .sclegend { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; min-height: 26px; }
+  .sclegend .lg { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 12px; }
+  .sclegend .lg.off { opacity: .35; text-decoration: line-through; } .sclegend svg { display: block; }
+  .ramp { display: inline-block; width: 160px; height: 10px; border-radius: 5px; }
   tr.picked { background: color-mix(in srgb, var(--acc) 18%, transparent) !important; }
   .alert { margin-top: 8px; padding: 10px 14px; border-radius: 8px; font-size: 16px; font-weight: 650; color: #fff; background: var(--bad); }
   .scanhelp { margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 15px; border: 2px solid var(--acc); background: color-mix(in srgb, var(--acc) 10%, var(--card)); }
@@ -121,6 +131,7 @@
   <nav class="tabbar">
     <button id="tabReview" class="on">Session review</button>
     <button id="tabSummary">Summary</button>
+    <button id="tabScatter">Scatter</button>
   </nav>
 
   <section id="viewSec">
@@ -154,6 +165,13 @@
       <div id="invSum" class="potsum"></div>
     </div>
     <div id="review"></div>
+  </section>
+
+  <section id="scatterSec" hidden>
+    <div class="row"><b>EXP/hr vs mesos/hr</b>
+      <label class="small">Colour by <select id="scColor"></select></label>
+      <label class="small">Up <select id="scY"></select></label></div>
+    <div id="scatter"></div>
   </section>
 
   <section id="summarySec" hidden>

@@ -14,6 +14,7 @@ import * as store from './lib/store.js';
 import { readMap, snapScore } from './lib/mapname.js';
 import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys } from './lib/quickslot.js';
 import { renderReview } from './review.js';
+import { renderScatter, COLOR_BY, Y_BY } from './scatter.js';
 import { drawGraph, drawPotionGraph, potionSummary, drawLines, HP } from './graph.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
 import { liteRows, partStates, activeStates, liveNet, sameRead } from './lib/liveinv.js';
@@ -786,12 +787,29 @@ $('restoreFile').onchange = async (e) => {
 let tab = store.get('tab') || 'review';
 function showTab(t) {
   tab = t; store.set('tab', t);
-  $('tabReview').classList.toggle('on', t === 'review'); $('tabSummary').classList.toggle('on', t === 'summary');
-  $('viewSec').hidden = t !== 'review'; $('summarySec').hidden = t !== 'summary';
+  $('tabReview').classList.toggle('on', t === 'review'); $('tabSummary').classList.toggle('on', t === 'summary'); $('tabScatter').classList.toggle('on', t === 'scatter');
+  $('viewSec').hidden = t !== 'review'; $('summarySec').hidden = t !== 'summary'; $('scatterSec').hidden = t !== 'scatter';
   if (t === 'summary') renderSummary();
+  if (t === 'scatter') renderScatterTab();
 }
 $('tabReview').onclick = () => showTab('review');
 $('tabSummary').onclick = () => showTab('summary');
+$('tabScatter').onclick = () => showTab('scatter');
+
+// Scatter tab (scatter.js): colour-by and y choice kept in kv "scatterOpt"; hidden legend entries per colour-by
+const scOpt = { colorBy: 'map', y: 'net_per_hr', ...(store.get('scatterOpt') || {}) };
+const scHidden = new Set();
+$('scColor').innerHTML = COLOR_BY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+$('scY').innerHTML = Y_BY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+$('scColor').value = scOpt.colorBy; $('scY').value = scOpt.y;
+$('scColor').onchange = () => { scOpt.colorBy = $('scColor').value; scHidden.clear(); store.set('scatterOpt', scOpt); renderScatterTab(); };
+$('scY').onchange = () => { scOpt.y = $('scY').value; store.set('scatterOpt', scOpt); renderScatterTab(); };
+function renderScatterTab() {
+  const dark = !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+  renderScatter($('scatter'), store.listSessions(), { ...scOpt, hidden: scHidden, tagList: tagList(), dark },
+    (id) => { showSession(id); showTab('review'); },
+    (cat) => { if (scHidden.has(cat)) scHidden.delete(cat); else scHidden.add(cat); renderScatterTab(); });
+}
 $('sumChar').onchange = $('sumMap').onchange = $('sumTag').onchange = () => renderSummary();
 let sumSort = store.get('sumSort') || { k: 'id', dir: -1 };
 
@@ -919,6 +937,7 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sel.size
 
 /** One row per saved session; filter by character, map and tag, sort by clicking a column (newest first by default). */
 function renderSummary() {
+  if (tab === 'scatter') renderScatterTab();      // same data: keep the scatter in step with every change
   const list = store.listSessions(), tl = tagList();
   const fill = (sel, vals, extra = '') => { const pick = sel.value; sel.innerHTML = '<option value="">all</option>' + extra + vals.map((n) => `<option ${n === pick ? 'selected' : ''}>${esc(n)}</option>`).join(''); if (pick === '#none') sel.value = pick; return sel.value; };
   const pc = fill($('sumChar'), [...new Set(list.map((x) => x.character?.name).filter(Boolean))].sort());

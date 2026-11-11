@@ -244,6 +244,11 @@ web/lib/tags.js       Session tags (user-made): kv "tagList" = your tags in orde
                       (count, ✎ rename / × delete everywhere: app.retag), row selection = drag over rows (from a selected row unselects),
                       shift-click range, box/ctrl-click toggle, plain click opens unless something is selected; sticky bar adds/removes
                       a tag on all selected (app.tagSessions). Python review.html has no tags.
+web/scatter.js        "Scatter" tab next to Summary: one SVG dot per saved session (light index), x = EXP/hr, y = Net / Revenue /
+                      Mesos per hr (select), axes fitted to the data. Colour by (kv scatterOpt): map / character / class / first tag
+                      (in your tag-list order) = categorical, dataviz palette in fixed order by session count (8 slots + shapes,
+                      rest grey "Other"), legend chips hide/show (not persisted); level / minutes / date = sequential blue ramp.
+                      Hover tooltip, click opens the session. Re-rendered from renderSummary when the tab is open.
 web/review.js         Review panel: status inputs + meso field crop, price input per item row (kv "myPrices", global: wins over
                       item-data/catalog/NPC price; app.setPrice recomputes the shown session at once, all saved ones after 0.8 s), "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
