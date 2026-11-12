@@ -214,6 +214,7 @@ function keepTrack(cur, out) {
 const INV_POLL = 2000, INV_REREAD = 15000;
 S.invWatch = { sig: null, readSig: null, lastRead: 0, lastTry: 0, open: false, why: '' };
 S.trackInv = store.get('trackInv') ?? true;
+S.invSmooth = store.get('invSmooth') ?? 3;   // live mesos: moving average over this many reads per part (1 = none)
 async function invTick(now) {
   const w = S.invWatch, cur = C();
   w.lastTry = now;
@@ -245,6 +246,8 @@ async function invTick(now) {
   renderTop();
   if (S.view === cur) renderGraph();
 }
+$('invSmooth').value = S.invSmooth;
+$('invSmooth').onchange = (e) => { S.invSmooth = Math.max(1, Math.min(20, Math.round(+e.target.value) || 1)); e.target.value = S.invSmooth; store.set('invSmooth', S.invSmooth); render(); };
 $('trackInv').onchange = (e) => { S.trackInv = e.target.checked; store.set('trackInv', S.trackInv); render(); };
 
 /** Live net mesos/hr from the inventory reads of a session (lib/liveinv.liveNet; null without reads).
@@ -256,7 +259,7 @@ function invEstimate(v, now = Date.now()) {
   const { states, unpriced } = partStates(withFixes(v.start, 'start', v.fixes, nameOf), v.inv.reads, priceOf, COUNTED_TABS, v.fixes, { skipNames: pot ? pot.names : [] });
   const parts = Object.fromEntries(Object.entries(states).map(([k, st]) => [k, activeStates(st, v.start.time, v.pauses)]));
   if (pot) parts.Potions = pot.states;
-  const e = liveNet(parts, activeMs(v.start.time, now, v.pauses) / 6e4);
+  const e = liveNet(parts, activeMs(v.start.time, now, v.pauses) / 6e4, 3, S.invSmooth);
   e.unpriced = unpriced;
   return e;
 }
@@ -772,7 +775,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv', 'sessStats'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv', 'invSmooth', 'sessStats'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -1160,7 +1163,7 @@ function drawInvGraph(cv, e, live = false) {
 const PART_COLORS = { Net: null, Mesos: '#c9a227', Etc: '#2e9d5b', Use: '#8a5cd6', Equip: '#3a8fb7', Setup: '#b0569a', Potions: HP };
 function invLines(e) {
   if (!e || !e.parts.length) return [];
-  return [...e.parts.map((p) => ({ label: p.name, color: PART_COLORS[p.name] || '#888', pts: p.points.map((q) => ({ min: q.min, v: q.rate })) })),
+  return [...e.parts.map((p) => ({ label: p.name, color: PART_COLORS[p.name] || '#888', pts: p.points.map((q) => ({ min: q.min, v: q.avg })) })),
     { label: 'Net', color: null, width: 3, pts: e.total.map((q) => ({ min: q.min, v: q.est })) }];
 }
 

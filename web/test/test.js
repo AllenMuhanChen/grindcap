@@ -284,6 +284,11 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   const ps = potionSeries({ time: 0, pauses: [[600, 900]] }, [0, 300, 600, 1000, 1300].map((time, i) => ({ time, potions: [{ key: 'Del', name: 'Red Potion', count: [100, 90, 80, 300, 290][i] }] })), { 'Red Potion': ['hp', 50] });
   eq(ps.map((p) => p.hp), [0, 500, 1000, 1000, 1500], 'potions: repot while paused');
   eq(partPoints([{ min: 0, value: 0 }, { min: 2, value: -100 }, { min: 4, value: -400 }]).map((p) => p.rate), [-6000], 'points need 3+ active min');
+  // moving average over the last n points: gains added up / minutes added up (uneven intervals)
+  const sm = partPoints([{ min: 0, value: 0 }, { min: 10, value: 1000 }, { min: 15, value: 2000 }, { min: 45, value: 2000 }], 3, 2);
+  eq(sm.map((p) => Math.round(p.rate)), [6000, 12000, 0], 'raw rates');
+  eq(sm.map((p) => Math.round(p.avg)), [6000, 8000, 1714], 'moving average over 2 reads');
+  eq(liveNet({ A: [{ min: 0, value: 0 }, { min: 10, value: 1000 }, { min: 15, value: 2000 }] }, 15, 3, 2).net_latest, 8000, 'net uses the average');
   // a look you named on the review applies to live reads too
   const lk = { time: t0, mesos: 0, tabs: { Etc: [row({ ...S(1, 10), look: 'L1' })] } };
   const lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];

@@ -115,6 +115,7 @@
     <div class="row">
       <label class="small" title="Read the quick slot potions at Start and with each EXP reading"><input type="checkbox" id="trackPot"> Track potions (quick slots)</label>
       <label class="small" title="While a session runs, opening the inventory reads the page on screen and the meso field again: a live net mesos/hr including drops, each tab counted from when you last looked at it"><input type="checkbox" id="trackInv"> Live mesos from inventory</label>
+      <label class="small" title="Each part's rate is the average over its last N reads (their gains added up / their minutes added up, since reads come at uneven times). 1 = just the change since the previous read.">smooth over <input type="number" id="invSmooth" min="1" max="20" step="1" style="width:3.5em"> reads</label>
       <label class="small" title="If the stat window (S) is open during the Start or End scan, its numbers are saved with the session (shown in the review)"><input type="checkbox" id="readStats"> Read stat window (S) during scans</label>
       <span class="small mute" title="Read from the status bar at Start">Character</span>
       <input id="charName" class="st" placeholder="name" title="Character name: read at Start; type to correct it">

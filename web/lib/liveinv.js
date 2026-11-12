@@ -101,11 +101,13 @@ export function activeStates(states, startTime, pauses = []) {
     gap: i > 0 && (pauses || []).some(([p0, p1]) => p0 < s.t && (p1 ?? Infinity) > states[i - 1].t) }));
 }
 
-/** Rate points of one part: change since the previous point / active time between them (mesos/hr). A point
+/** Rate points of one part: rate = change since the previous point / active time between them (mesos/hr); avg = the
+ * moving average over the last n points (reads come at irregular times, so it's their gains added up / their minutes
+ * added up: a long interval weighs more than a short one; n = 1: avg = rate). A point
  * needs at least minMin active minutes since the previous one (reads come every 15 s while the inventory is
  * open; a few mesos over seconds would be a huge rate). A pause in between restarts from the first state after
  * it, so nothing that changed while paused counts. states: [{min, value, gap}] (activeStates). */
-export function partPoints(states, minMin = 3) {
+export function partPoints(states, minMin = 3, n = 1) {
   const out = [];
   let anchor = states[0];
   for (const s of states.slice(1)) {
@@ -115,24 +117,28 @@ export function partPoints(states, minMin = 3) {
     out.push({ min: s.min, rate: (s.value - anchor.value) / dm * 60, gain: s.value - anchor.value, dmin: dm });
     anchor = s;
   }
+  for (let i = 0; i < out.length; i++) {
+    const w = out.slice(Math.max(0, i - Math.max(1, n) + 1), i + 1);
+    out[i].avg = w.reduce((a, p) => a + p.gain, 0) / w.reduce((a, p) => a + p.dmin, 0) * 60;
+  }
   return out;
 }
 
-/** parts: {name: [{min, value, gap}]} -> per part its points, latest rate (how old) and session average
+/** parts: {name: [{min, value, gap}]} -> per part its points, latest rate (moving average over its last n points; how old) and session average
  * (sum of gains / minutes covered), and the net: latest = each part's newest rate added up (an outdated part
  * counts at the rate it last had), session = the session averages added up. total = the net after every point.
  * nowMin = active minutes now. Parts without a point yet are listed in waiting. */
-export function liveNet(parts, nowMin, minMin = 3) {
+export function liveNet(parts, nowMin, minMin = 3, n = 1) {
   const out = [], waiting = [];
   for (const [name, states] of Object.entries(parts)) {
-    const points = partPoints(states, minMin);
+    const points = partPoints(states, minMin, n);
     if (!points.length) { waiting.push(name); continue; }
     const gain = points.reduce((a, p) => a + p.gain, 0), covered = points.reduce((a, p) => a + p.dmin, 0);
-    out.push({ name, points, latest: points.at(-1).rate, last_min: points.at(-1).min, age_min: nowMin - points.at(-1).min, session: gain / covered * 60, gain, covered_min: covered });
+    out.push({ name, points, latest: points.at(-1).avg, last_min: points.at(-1).min, age_min: nowMin - points.at(-1).min, session: gain / covered * 60, gain, covered_min: covered });
   }
   const sum = (k) => (out.length ? Math.round(out.reduce((a, p) => a + p[k], 0)) : null);
   // the net after each point: every part at its newest rate so far
-  const events = out.flatMap((p) => p.points.map((q) => ({ min: q.min, name: p.name, rate: q.rate }))).sort((a, b) => a.min - b.min);
+  const events = out.flatMap((p) => p.points.map((q) => ({ min: q.min, name: p.name, rate: q.avg }))).sort((a, b) => a.min - b.min);
   const cur = {}, total = [];
   for (const e of events) {
     cur[e.name] = e.rate;

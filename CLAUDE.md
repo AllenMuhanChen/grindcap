@@ -208,7 +208,9 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
                       scan, which once made a huge frozen negative), and a pause in between restarts from the first state after
                       it (selling Etc / repotting while paused counted as income, 2026-11-10). potionSeries skips count changes
                       across a pause too. liveNet: net now = every part at its newest rate (an outdated part keeps its last
-                      rate), session = sum of per-part gain / minutes covered; total = net after each point. Shown: liveStats row
+                      rate), session = sum of per-part gain / minutes covered; total = net after each point. Rates are smoothed (2026-11-12,
+                      Allen): avg = moving average over a part's last N points (kv invSmooth, default 3, "smooth over N reads";
+                      gains summed / minutes summed, reads are irregular); latest, total and the graph lines use avg. Shown: liveStats row
                       (now · session), #invLine (each part's rate + age), graph.drawLines (one line per part, thick Net, a line
                       ends where its part was last read) in the view (#invGraph) and the pop-out (canvas ig); review compares
                       with the End result. fixes.looks apply.
