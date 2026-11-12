@@ -3,8 +3,9 @@
 // key results, so you don't have to switch back to the browser tab.
 import { drawGraph, drawPotionGraph, potionSummary, drawLines, HP, MP } from './graph.js';
 import { liveSeries, isPaused, activeMs, COUNTED_TABS } from './lib/session.js';
+import { makePanels } from './panels.js';
 
-let pip = null, api = null;
+let pip = null, api = null, mods = {};
 const FULL = [380, 730];
 // compact window: sized to its content (measured after each render, last size remembered for the next open)
 let SMALL = (() => { try { return JSON.parse(localStorage.getItem('grindcap.popSmallSize')) || [250, 140]; } catch { return [250, 140]; } })();
@@ -13,7 +14,7 @@ const fmt = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocal
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 
 const CSS = `
-  * { box-sizing: border-box; } html { background: var(--bg); }
+  * { box-sizing: border-box; } [hidden] { display: none !important; } html { background: var(--bg); }
   body { margin: 0; padding: 10px; font: 13px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
   .top { display: flex; justify-content: space-between; align-items: baseline; }
   .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -36,6 +37,16 @@ const CSS = `
   .mpot { font-size: 15px; font-weight: 600; margin-top: 2px; } body.small { padding: 6px 10px; } body.small .top b { display: none; }
   .pct { font-size: 18px; font-weight: 600; } .warn { background: var(--bad); color: #fff; border-radius: 7px; padding: 8px 10px; margin: 6px 0; font-size: 15px; font-weight: 650; }
   .scan .help { font-size: 14px; }
+  .panel { border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; background: var(--card); }
+  .panel .phead { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 8px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; white-space: nowrap; }
+  .panel .phead b { font-size: 12px; } .panel .grip { color: var(--mute); }
+  .panel .psum { display: none; flex: 1; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  .panel.folded .psum { display: inline; } .panel:not(.folded) .phead b { flex: 1; }
+  .panel .pbtns { margin-left: auto; } .panel .pbtns button { padding: 0 6px; margin-left: 2px; font-size: 12px; }
+  .panel .pbody { padding: 6px 8px; } .panel .pbody .row { margin: 0; }
+  .panel.folded .pbody { display: none; } .panel.folded .phead { border-bottom: 0; }
+  .panel.dragging { opacity: .5; } .panel.dropbefore { box-shadow: 0 -3px 0 var(--acc); } .panel.dropafter { box-shadow: 0 3px 0 var(--acc); }
+  .paddback { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; } .paddback button { padding: 1px 8px; font-size: 12px; }
 `;
 
 export async function openPopout(a) {
@@ -64,22 +75,27 @@ export async function openPopout(a) {
     </div>
     <div id="full">
     <div class="top"><span id="timer" class="timer">No session</span><span id="lv" class="mute"></span></div>
-    <div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
-    <div class="mute" id="xph2"></div>
-    <canvas id="g" width="720" height="240"></canvas>
-    <div id="inv"></div>
-    <canvas id="ig" width="720" height="240" style="height:170px" hidden></canvas>
-    <div class="mute note" id="pot"></div>
-    <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
-    <div id="pgs" class="note"></div>
-    <div class="row">
+    <div id="mexp"><div><span class="big" id="xph">–</span> <span class="mute">EXP/hr (5-min)</span> <span id="pph" class="pct"></span></div>
+      <div class="mute" id="xph2"></div>
+      <canvas id="g" width="720" height="240"></canvas></div>
+    <div id="minvw"><div id="inv"></div>
+      <canvas id="ig" width="720" height="240" style="height:170px" hidden></canvas></div>
+    <div id="mpotw"><div class="mute note" id="pot"></div>
+      <canvas id="pg" width="720" height="180" style="height:120px" hidden></canvas>
+      <div id="pgs" class="note"></div></div>
+    <div id="mctl"><div class="row">
       <button id="start" class="primary">Start</button><button id="end">End</button>
       <button id="pause">Pause</button><button id="discard">Discard</button><button id="finish" title="Stop taking pages now">Finish pages</button>
-    </div>
-    <div class="box scan" id="scan" hidden></div>
-    <div class="box" id="res" hidden></div>
+    </div></div>
+    <div class="scan" id="scan" hidden></div>
+    <div id="res" hidden></div>
     <div class="note mute" id="note"></div>
     </div>`;
+  // the full view's sections are modules: fold (▾, a folded one keeps its headline number in its title bar), move
+  // (↑/↓ or drag the title bar), remove (×, "Add back" at the bottom); kept in localStorage grindcap.popPanels
+  mods = makePanels([{ id: 'mexp', title: 'EXP/hr' }, { id: 'minvw', title: 'Live mesos/hr' }, { id: 'mpotw', title: 'Potion cost' },
+    { id: 'mctl', title: 'Buttons' }, { id: 'scan', title: 'Scan' }, { id: 'res', title: 'Session result' }],
+  { doc: d, key: 'grindcap.popPanels', closable: true, onChange: () => updatePopout() });
   d.getElementById('mode').onclick = () => {
     small = !small;
     try { localStorage.setItem('grindcap.popSmall', small ? '1' : '0'); } catch { /* private window */ }
@@ -118,6 +134,7 @@ export function updatePopout() {
   $('pgs').innerHTML = potionSummary(pot.pts);
   const inv = api.inv ? api.inv() : null;
   $('ig').hidden = !inv;
+  $('minvw').hidden = !inv; $('mpotw').hidden = !pot.pts.length && !pot.line;   // nothing to show: the module hides
   if (inv && api.invLines) drawLines($('ig'), api.invLines(), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active min apart.', true);
   $('inv').innerHTML = inv && inv.net_latest != null ? `<b>${fmt(inv.net_latest)}</b> <span class="mute">net mesos/hr now · session ${fmt(inv.net_session)}</span>` : '';
   d.body.classList.toggle('small', small);
@@ -159,7 +176,7 @@ export function updatePopout() {
   const res = S.result, box = $('res');
   box.hidden = !res;
   if (res) {
-    box.innerHTML = `<b>Session result</b><div class="kv">
+    box.innerHTML = `<div class="kv">
       <span>Net mesos/hr incl. items</span><b>${fmt(res.net_per_hr)}</b>
       <span>EXP/hr</span><b>${fmt(res.exp_per_hr)}${res.pct_per_hr != null ? ` (${res.pct_per_hr.toFixed(1)}%/hr)` : ''}</b>
       <span>Mesos/hr</span><span>${fmt(res.mesos_per_hr)}</span>
@@ -167,6 +184,15 @@ export function updatePopout() {
 `;
   }
   $('note').textContent = api.lastNote() || '';
+  // headline per module, shown in its title bar while folded
+  const sum = (id, html) => mods[id] && mods[id].setSummary(html);
+  const lp = pot.pts.at(-1);
+  sum('mexp', last ? `<b>${fmt(last.ema * 60)}</b>${last.emaPct != null ? ` · ${last.emaPct.toFixed(1)}%` : ''}` : '');
+  sum('minvw', inv && inv.net_latest != null ? `<b>${fmt(inv.net_latest)}</b> <span class="mute">now · ${fmt(inv.net_session)}</span>` : '');
+  sum('mpotw', lp ? `<span style="color:${HP}">HP ${fmt(lp.ema_hp)}</span> · <span style="color:${MP}">MP ${fmt(lp.ema_mp)}</span>` : '');
+  sum('mctl', running ? (paused ? '<span class="bad">paused</span>' : 'running') : '');
+  sum('scan', c ? `${COUNTED_TABS.filter((t) => !c.seen.has(t)).join(', ') || 'finishing'}` : '');
+  sum('res', res ? `<b>${fmt(res.net_per_hr)}</b> net · ${fmt(res.exp_per_hr)} EXP` : '');
   if (small) fitSmall();
 }
 

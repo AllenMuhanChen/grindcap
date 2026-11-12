@@ -265,7 +265,10 @@ web/review.js         Review panel: status inputs + meso field crop, price input
                       item-data/catalog/NPC price; app.setPrice recomputes the shown session at once, all saved ones after 0.8 s), "Not recognised" cards (slot picture, why, 6 closest
                       item-data guesses as buttons, name search, Don't count), items table with how each was named and
                       per-slot pictures/count fixes, captured page pictures. Fixes {looks, qty, status} -> session.withFixes.
-web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+): sharing state, timer, EXP/hr, Compact/Full view button = small mode
+web/popout.js         Always-on-top Document Picture-in-Picture window (Chrome/Edge 116+). Full view = modules via panels.makePanels
+                      (opt doc/key/closable): EXP/hr, Live mesos/hr, Potion cost, Buttons, Scan, Session result; fold (folded = headline
+                      in the title bar, setSummary), move (arrows/drag), close × + "Add back" row; localStorage grindcap.popPanels (2026-11-12,
+                      Allen: "modular on the overlay"). Timer row stays on top. sharing state, timer, EXP/hr, Compact/Full view button = small mode
                       (timer, EXP/hr + %/hr, current HP/MP mesos/hr; sized to its content by fitSmall (resize needs a click: re-fit on pointerup; size remembered in grindcap.popSmallSize); scan line with the tabs still to do while scanning; localStorage grindcap.popSmall),
                       (5-min EMA), graph (web/graph.js), Start/End/Finish/Live, tab checklist + finish countdown, result.
                       Corrections: naming a look on the review panel (learn() in app.js) is kept in localStorage
