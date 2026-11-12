@@ -52,6 +52,14 @@
   .bigrow button { font-size: 16px; padding: 10px 18px; }
   .sessline { margin-top: 10px; font-size: 16px; } .timer { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: middle; margin: 0 6px; }
   .potsum { font-size: 14px; margin-top: 4px; }
+  .panel { border: 1px solid var(--line); border-radius: 8px; margin-top: 10px; background: var(--card); }
+  .panel .phead { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; }
+  .panel .phead b { flex: 1; font-size: 14px; }
+  .panel .grip { color: var(--mute); }
+  .panel .pbtns button { padding: 1px 8px; margin-left: 3px; }
+  .panel .pbody { padding: 8px 10px; }
+  .panel.folded .pbody { display: none; } .panel.folded .phead { border-bottom: 0; }
+  .panel.dragging { opacity: .5; } .panel.dropbefore { box-shadow: 0 -3px 0 var(--acc); } .panel.dropafter { box-shadow: 0 3px 0 var(--acc); }
   #control .stats { margin: 10px 0 0; } #control .stats:empty { display: none; }
   #control .stats div { font-size: 18px; } #control .stats div > span:first-child { font-size: 12px; }
   .datarow { border-top: 1px solid var(--line); padding-top: 10px; }

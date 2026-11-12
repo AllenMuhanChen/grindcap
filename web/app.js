@@ -16,6 +16,7 @@ import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys 
 import { renderReview } from './review.js';
 import { renderScatter, COLOR_BY, Y_BY } from './scatter.js';
 import { drawGraph, drawPotionGraph, potionSummary, drawLines, HP } from './graph.js';
+import { makePanels } from './panels.js';
 import { openPopout, updatePopout, popoutOpen } from './popout.js';
 import { liteRows, partStates, activeStates, liveNet, sameRead } from './lib/liveinv.js';
 import { cleanTag, ensureTag, editTags, renameIn, rangeIds, sameTag, tagHue } from './lib/tags.js';
@@ -101,6 +102,8 @@ async function init() {
     }
     await store.reindex();
   }
+  makePanels([{ id: 'result', title: 'Results' }, { id: 'graphWrap', title: 'EXP/hr' }, { id: 'potWrap', title: 'Potion cost' },
+    { id: 'invWrap', title: 'Live mesos/hr (inventory)' }, { id: 'review', title: 'Review' }]);
   await resnapMaps();
   showTab(tab);
   recompute(C());
@@ -1132,26 +1135,27 @@ function renderNav() {
 }
 
 function renderGraph() {
-  const v = S.view, ser = liveSeries(v.live?.rows || [], 5, v.pauses);
+  const v = S.view, ser = liveSeries(v.live?.rows || [], 5, v.pauses), live = v === C() && running();   // live: last hour, follows now
+  if (S.graphFor !== v) { for (const id of ['graph', 'potGraph', 'invGraph']) $(id)._view = null; S.graphFor = v; }   // another session: default view
   $('graphWrap').hidden = !ser.length;
-  if (ser.length) drawGraph($('graph'), ser, 60, 'EXP/hr');
+  if (ser.length) drawGraph($('graph'), ser, 60, 'EXP/hr', null, 0, live);
   const pts = potPoints(v);
   $('potWrap').hidden = !pts.length;
-  if (pts.length) drawPotionGraph($('potGraph'), pts);
+  if (pts.length) drawPotionGraph($('potGraph'), pts, live);
   $('potSum').innerHTML = potionSummary(pts);
   const reads = v.inv?.reads || [];
   $('invWrap').hidden = !reads.length;
   if (reads.length) {
     const e = invEstimate(v, v.end ? v.end.time : Date.now()), tabsRead = [...new Set(reads.map((r) => r.tab).filter(Boolean))];
-    drawInvGraph($('invGraph'), e);
+    drawInvGraph($('invGraph'), e, live);
     $('invSum').innerHTML = `${reads.length} inventory read${reads.length > 1 ? 's' : ''} while grinding (${tabsRead.join(', ') || 'meso field only'}). `
       + `Net now <b>${fmt(e?.net_latest)}</b>/hr, session average <b>${fmt(e?.net_session)}</b>/hr${v.result ? `; End result ${fmt(v.result.net_per_hr)}/hr` : ''}. ${esc(invLine(e))}`;
   }
 }
 
 /** One line per part (its rate at each point) and a thick Net line (every part at its newest rate). */
-function drawInvGraph(cv, e) {
-  drawLines(cv, invLines(e), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active minutes apart.');
+function drawInvGraph(cv, e, live = false) {
+  drawLines(cv, invLines(e), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active minutes apart.', live);
 }
 const PART_COLORS = { Net: null, Mesos: '#c9a227', Etc: '#2e9d5b', Use: '#8a5cd6', Equip: '#3a8fb7', Setup: '#b0569a', Potions: HP };
 function invLines(e) {

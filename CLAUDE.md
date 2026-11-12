@@ -212,6 +212,13 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
                       (now · session), #invLine (each part's rate + age), graph.drawLines (one line per part, thick Net, a line
                       ends where its part was last read) in the view (#invGraph) and the pop-out (canvas ig); review compares
                       with the End result. fixes.looks apply.
+web/graph.js          Canvas graphs (drawGraph EXP, drawPotionGraph, drawLines inventory parts). Time window cv._view {w, end}:
+                      a running session's graphs show the last LIVE_W = 60 active min, following now; ended sessions show all.
+                      Wheel = zoom around the pointer, drag = pan (panned back = stops following), double-click = reset. y range
+                      fits the visible points only; the last visible point is labelled. Reset per shown session (S.graphFor).
+web/panels.js         makePanels: Results / EXP/hr / Potion cost / Live mesos/hr / Review each in a panel with a title bar
+                      (drag handle, up/down, collapse). Order + collapsed in localStorage grindcap.panels. A panel hides when its
+                      element is hidden or empty; expanding redraws its canvases (cv._redraw).
 web/lib/store.js      IndexedDB (db "grindcap"): kv store (current session's start/end/live/pauses/fixes/name,
                       corrections, "sessions" = light index) kept in memory + written through; "sessions" store =
                       one record per ended session {id = start time, name, start, end, fixes, live, pauses, result}.

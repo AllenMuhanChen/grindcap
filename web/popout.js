@@ -110,15 +110,15 @@ export function updatePopout() {
   $('xph').textContent = fmt(last ? last.ema * 60 : null);
   $('pph').textContent = last?.emaPct != null ? `${last.emaPct.toFixed(1)}%/hr` : '';
   $('xph2').textContent = last ? `session ${fmt(last.cum * 60)}/hr${last.pct != null ? ` (${last.pct.toFixed(1)}%/hr)` : ''} · +${fmt(last.gained)} EXP` : (running ? 'waiting for two readings…' : '');
-  drawGraph($('g'), ser, 60, 'EXP/hr');
+  drawGraph($('g'), ser, 60, 'EXP/hr', null, 0, true);
   const pot = api.potions ? api.potions() : { pts: [], line: '' };
   $('pot').textContent = pot.line;
   $('pg').hidden = !pot.pts.length;
-  if (pot.pts.length) drawPotionGraph($('pg'), pot.pts);
+  if (pot.pts.length) drawPotionGraph($('pg'), pot.pts, true);
   $('pgs').innerHTML = potionSummary(pot.pts);
   const inv = api.inv ? api.inv() : null;
   $('ig').hidden = !inv;
-  if (inv && api.invLines) drawLines($('ig'), api.invLines(), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active min apart.');
+  if (inv && api.invLines) drawLines($('ig'), api.invLines(), 'mesos/hr', 'Mesos/hr appears once a part has two reads 3+ active min apart.', true);
   $('inv').innerHTML = inv && inv.net_latest != null ? `<b>${fmt(inv.net_latest)}</b> <span class="mute">net mesos/hr now · session ${fmt(inv.net_session)}</span>` : '';
   d.body.classList.toggle('small', small);
   $('mini').hidden = !small; $('full').hidden = small;
