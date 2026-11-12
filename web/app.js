@@ -4,7 +4,7 @@
 import { loadImage, crop as cropMat, toImageData } from './lib/img.js';
 import { ocrReady } from './lib/ocr.js';
 import { readStatus, readMesosField, readCharacter, JOBS } from './lib/statusbar.js';
-import { readStats, flat as statFlat } from './lib/stats.js';
+import { readStats, flat as statFlat, withStatFixes } from './lib/stats.js';
 import { StackDigits } from './lib/digits.js';
 import { ItemDB } from './lib/itemdb.js';
 import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage, PageWatcher, LookCache, UNKNOWN } from './lib/inventory.js';
@@ -26,7 +26,7 @@ const fmt = (v, d = 0) => (v == null || Number.isNaN(v) ? '–' : Number(v).toLo
 const pctTxt = (v) => (v == null ? '' : ` <span class="mute">(${v.toFixed(1)}%/hr)</span>`);
 const hms = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const noFixes = () => ({ looks: {}, qty: {}, status: { start: {}, end: {} } });
-const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null, tags: [], inv: { reads: [] } });
+const blank = () => ({ id: null, name: null, start: null, end: null, live: { rows: [], fails: 0 }, pauses: [], fixes: noFixes(), result: null, potions: [], qsNames: {}, qsSigs: {}, lastPot: undefined, character: null, tags: [], inv: { reads: [] }, stats: null });
 
 await store.openStore();
 
@@ -38,7 +38,7 @@ const S = {
   cur: {
     id: store.get('start')?.time ?? null, name: store.get('name'), start: store.get('start'), end: store.get('end'),
     live: store.get('live') || { rows: [], fails: 0 }, pauses: store.get('pauses') || [], fixes: store.get('fixes') || noFixes(), result: null,
-    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'), tags: store.get('sessTags') || [], inv: store.get('invLive') || { reads: [] },
+    potions: store.get('potions') || [], qsNames: store.get('qsNames') || {}, qsSigs: store.get('qsSigs') || {}, lastPot: undefined, character: store.get('character'), tags: store.get('sessTags') || [], inv: store.get('invLive') || { reads: [] }, stats: store.get('sessStats') || null,
   },
   view: null,
   corrections: store.get('corrections') || [],   // icons you named; kept across sessions, exportable
@@ -53,7 +53,7 @@ function resetCur() {
   S.cur = blank();
   for (const k of ['start', 'end', 'name']) store.set(k, null);
   store.set('live', S.cur.live); store.set('pauses', []); store.set('fixes', S.cur.fixes);
-  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null); store.set('sessTags', []); store.set('invLive', S.cur.inv);
+  store.set('potions', []); store.set('qsNames', {}); store.set('qsSigs', {}); store.set('character', null); store.set('sessTags', []); store.set('invLive', S.cur.inv); store.set('sessStats', null);
   S.view = S.cur;
 }
 
@@ -150,6 +150,7 @@ async function onTick() {
     const every = Math.max(60, +$('every').value) * 1000, live = C().live;   // at least a minute: shorter gaps are mostly noise
     if (S.collect) await pageTick(now).catch((e) => warn(`Page read failed: ${e.message}`));
     else if (liveActive() && now - (live.rows.at(-1)?.t || 0) >= every && now - (live.lastTry || 0) >= every) await liveRead(now);
+    else if (liveActive() && S.readStats && !S.statsBusy && now - (S.lastStatsTry || 0) >= (C().stats?.ok ? 120000 : 30000)) { S.lastStatsTry = now; bgStats(); }
     else if (liveActive() && S.trackInv && now - (S.invWatch.lastTry || 0) >= INV_POLL) await invTick(now).catch((e) => { S.invWatch.why = `inventory read failed: ${e.message}`; });
     else if (now - S.lastGrab > 1000) { await S.cap.grab(false); S.lastGrab = now; }   // keeps the capture stats honest
   } finally { S.busy = false; }
@@ -440,10 +441,49 @@ async function tryStats(frame, c, now) {
     const n = (x) => Object.keys(statFlat(x.values)).length;
     if (c.stats && !r.ok && n(r) <= n(c.stats)) return;
     c.stats = { values: r.values, lines: r.lines, ok: r.ok, why: r.why, box: r.box, picture: picture(frame, ...r.box, 'image/png'), time: Date.now() };
+    keepStats(C(), c.stats);
     const f = statFlat(r.values);
     snapNote(`${c.kind}: stat window read: ${['str', 'dex', 'int', 'luk'].map((k) => `${k.toUpperCase()} ${f[k] ?? '?'}`).join(', ')}${r.ok ? '' : ` (${r.why}; check it in the review)`}`);
   } catch (e) { note(`stat window read failed: ${e.message}`); } finally { c.statsBusy = false; }
 }
+
+/** The session's stat window reading: the stat window can be read at any time, not only during Start/End.
+ * A reading whose stats add up wins over one that doesn't; between two such, the newer (AP spent, a level
+ * gained); otherwise the one with more fields. Saved as session.stats (kv sessStats, record.stats). */
+function keepStats(cur, st) {
+  if (!cur || !st) return false;
+  const n = (x) => Object.keys(statFlat(x?.values)).length, old = cur.stats;
+  if (old && (old.ok && !st.ok || (!old.ok && !st.ok && n(st) <= n(old)))) return false;
+  cur.stats = st;
+  if (cur === C()) store.set('sessStats', st);
+  if (isSaved(cur)) store.putSession(record(cur));
+  return true;
+}
+/** Stat window values with your fixes (session.fixes.stats); older sessions: what a Start/End scan read. */
+function sessionStats(v) {
+  if (!v.stats && !Object.keys(v.fixes?.stats || {}).length) return null;
+  return withStatFixes(v.stats, v.fixes?.stats || {});
+}
+/** One try on the current frame (own OCR worker, a few seconds; not awaited, the loop goes on). manual: say what happened. */
+async function bgStats(manual = false) {
+  if (S.statsBusy || !S.cap?.live) return;
+  S.statsBusy = true;
+  try {
+    const frame = await S.cap.grab(false);
+    if (!frame) return;
+    const r = await readStats(frame, S.ctx.gameScale);
+    if (!r) { if (manual) warn('Stat window not found: open it (S) and keep it fully on screen, then press Read stats again.'); return; }
+    const st = { values: r.values, lines: r.lines, ok: r.ok, why: r.why, box: r.box, picture: picture(frame, ...r.box, 'image/png'), time: Date.now() };
+    const cur = S.view && S.view.end && !running() && manual ? S.view : C();
+    if (manual && cur.stats && !st.ok && cur.stats.ok) { cur.stats = null; }      // asked for: the new one replaces it
+    if (keepStats(cur, st) || manual) {
+      const f = statFlat(r.values);
+      snapNote(`Stat window read: ${['str', 'dex', 'int', 'luk'].map((k) => `${k.toUpperCase()} ${f[k] ?? '?'}`).join(', ')}${r.ok ? '' : ` (${r.why}; check it in the review)`}`);
+      if (S.view === cur) recompute(cur); else render();
+    }
+  } catch (e) { note(`stat window read failed: ${e.message}`); } finally { S.statsBusy = false; }
+}
+$('readStatsNow').onclick = () => bgStats(true);
 
 async function pageTick(now) {
   const c = S.collect;
@@ -576,9 +616,9 @@ async function resnapMaps() {
 /** Map and level as fixed on the review (for the summary list). */
 function meta(v) {
   const a = withFixes(v.start, 'start', v.fixes, nameOf), b = withFixes(v.end, 'end', v.fixes, nameOf);
-  return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null, stats: a?.statValues || b?.statValues || null };
+  return { map: a?.map?.name || b?.map?.name || null, level: a?.level ?? null, level_end: b?.level ?? null, stats: sessionStats(v) || a?.statValues || b?.statValues || null };
 }
-const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], inv: v.inv || { reads: [] }, saved: v.saved || Date.now() });
+const record = (v) => ({ meta: v.start ? meta(v) : null, id: v.id, name: v.name, start: v.start, end: v.end, fixes: v.fixes, live: { rows: v.live.rows, fails: v.live.fails || 0 }, pauses: v.pauses, result: v.result, potions: v.potions || [], qsNames: v.qsNames || {}, character: v.character || null, tags: v.tags || [], inv: v.inv || { reads: [] }, stats: v.stats || null, saved: v.saved || Date.now() });
 const isSaved = (v) => v.end && v.id != null && store.listSessions().some((x) => x.id === v.id);
 
 /** Put the ended current session in the saved list. */
@@ -729,7 +769,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv', 'sessStats'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
@@ -776,7 +816,7 @@ $('restoreFile').onchange = async (e) => {
   if (runThere && !runHere) {
     for (const k of ['start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'sessTags', 'invLive']) store.set(k, kv[k] ?? null);
     Object.assign(S.cur, { id: kv.start.time, name: kv.name, start: kv.start, end: null, live: kv.live || { rows: [], fails: 0 }, pauses: kv.pauses || [],
-      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, tags: kv.sessTags || [], inv: kv.invLive || { reads: [] }, result: null });
+      fixes: kv.fixes || noFixes(), potions: kv.potions || [], qsNames: kv.qsNames || {}, character: kv.character || null, tags: kv.sessTags || [], inv: kv.invLive || { reads: [] }, stats: kv.sessStats || null, result: null });
   }
   snapNote(`Restored: ${add.length} session(s) added, ${newer.length} updated.`);
   recompute(S.view); renderStorage(); renderSummary();
@@ -1011,7 +1051,7 @@ function render() {
   const sharing = !!(S.cap && S.cap.live);
   $('share').disabled = sharing;
   $('share').textContent = sharing ? 'Sharing the game window' : 'Share MapleStory window';
-  $('saveFrame').disabled = !sharing;
+  $('saveFrame').disabled = !sharing; $('readStatsNow').disabled = !sharing || !!S.statsBusy;
   const run = running(), paused = isPaused(C().pauses);
   $('startSnap').disabled = !sharing || !!S.collect || run;
   $('endSnap').disabled = !sharing || !!S.collect || !run;

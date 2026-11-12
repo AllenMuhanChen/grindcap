@@ -238,6 +238,11 @@ web/lib/stats.js      Stat window (S), optional ("Read stat window" checkbox, kv
                       Review: "Character stats" table (start/end inputs, base+bonus shown) + the window pictures. Tested only on a
                       synthetic window drawn over game_frame.png (web/test/stats_test.js; PAGE=stats_only.html node web/test/run.mjs
                       runs just that). Python app: no stat window.
+                      2026-11-11 (Allen: "scan this at any time, don't need before and after"): one reading per SESSION (session.stats,
+                      kv sessStats, record.stats, backup): app.bgStats every 30 s while running (2 min once a reading adds up), the
+                      "Read stats" button any time (running session, else the one shown), Start/End scan reads feed it too (keepStats:
+                      ok beats not-ok, newer ok wins, else more fields). Fixes: fixes.stats; meta.stats = sessionStats first. The
+                      review shows one column (older sessions with only start/end reads keep those columns).
 web/lib/tags.js       Session tags (user-made): kv "tagList" = your tags in order (case-insensitive, first spelling kept), record.tags
                       (running session: kv "sessTags"), in the light index and the backup. Review: chips with × + "+ add tag" box
                       (datalist; a new name makes the tag). Summary: Tags column + Tag filter (incl. "(no tags)"), "Your tags" manager

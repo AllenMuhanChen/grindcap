@@ -53,22 +53,24 @@ export function renderReview(el, S, h) {
       <td class="l">${field(k, 'exp')}${snaps[k].exp_picture ? `<br><img class="meso" src="${snaps[k].exp_picture}" alt="EXP">` : ''}</td>
       <td class="l">${field(k, 'mesos')}${mesoPics(snaps[k])}</td></tr>`).join('')}
     </table><p class="mute">Type a value to correct a misread; clear it to go back to what was read.</p>`;
-  // ---- character stats (stat window, optional)
+  // ---- character stats (stat window, optional): one reading per session, taken any time the window is open
   {
     const ks = KINDS.filter((k) => snaps[k]);
-    const read = Object.fromEntries(ks.map((k) => [k, statFlat(snaps[k].stats?.values)]));
-    const cell = (kind, key) => {
-      const st = snaps[kind].stats, v = read[kind][key], fix = S.fixes.status[kind]?.stats?.[key];
-      const parts = st?.values?.[key];
+    const legacy = !S.stats && !Object.keys(S.fixes.stats || {}).length && ks.some((k) => snaps[k].stats);   // older sessions: Start/End scan reads
+    const cols = legacy ? ks.filter((k) => snaps[k].stats).map((k) => ({ kind: k, st: snaps[k].stats, fix: S.fixes.status[k]?.stats || {} }))
+      : [{ kind: 'session', st: S.stats, fix: S.fixes.stats || {} }];
+    const cell = (c, key) => {
+      const v = statFlat(c.st?.values)[key], fix = c.fix[key], parts = c.st?.values?.[key];
       const how = parts && parts.base != null ? ` (${parts.base}+${parts.bonus})` : '';
-      return `<input class="statfix" data-kind="${kind}" data-k="${key}" value="${esc(fix ?? '')}" placeholder="${esc(v ?? '–')}" title="${v == null ? 'not read' : `read: ${esc(parts?.raw || v)}`}${fix != null ? ' (you fixed it)' : ''}">${how ? `<span class="mute small">${how}</span>` : ''}`;
+      return `<input class="statfix" data-kind="${c.kind}" data-k="${key}" value="${esc(fix ?? '')}" placeholder="${esc(v ?? '–')}" title="${v == null ? 'not read' : `read: ${esc(parts?.raw || v)}`}${fix != null ? ' (you fixed it)' : ''}">${how ? `<span class="mute small">${how}</span>` : ''}`;
     };
-    const any = ks.some((k) => snaps[k].stats);
-    html += `<h3>Character stats <span class="mute small">from the stat window (S), if it was open during a scan</span></h3>`;
-    html += `<table class="stats"><tr><th class="l">Stat</th>${ks.map((k) => `<th>${k}${snaps[k].stats && !snaps[k].stats.ok ? ` <span class="bad" title="${esc(snaps[k].stats.why)}">check</span>` : ''}</th>`).join('')}</tr>
-      ${STAT_ROWS.map(([key, name]) => `<tr><td class="l">${name}</td>${ks.map((k) => `<td>${cell(k, key)}</td>`).join('')}</tr>`).join('')}</table>`;
-    html += any ? `<div class="pages">${ks.filter((k) => snaps[k].stats?.picture).map((k) => `<figure><a href="${snaps[k].stats.picture}" target="_blank"><img src="${snaps[k].stats.picture}" alt="stat window"></a><figcaption>${k}: stat window as captured</figcaption></figure>`).join('')}</div>`
-      : '<p class="mute">No stat window read in this session. Open it (S) during the Start or End scan to save your stats with the session, or type them in above.</p>';
+    const when = (c) => (c.kind === 'session' ? (c.st?.time ? new Date(c.st.time).toLocaleTimeString() : 'not read') : c.kind);
+    html += `<h3>Character stats <span class="mute small">from the stat window (S): read whenever it is open while the session runs, or press Read stats</span></h3>`;
+    html += `<table class="stats"><tr><th class="l">Stat</th>${cols.map((c) => `<th>${esc(when(c))}${c.st && !c.st.ok ? ` <span class="bad" title="${esc(c.st.why)}">check</span>` : ''}</th>`).join('')}</tr>
+      ${STAT_ROWS.map(([key, name]) => `<tr><td class="l">${name}</td>${cols.map((c) => `<td>${cell(c, key)}</td>`).join('')}</tr>`).join('')}</table>`;
+    const pics = cols.filter((c) => c.st?.picture);
+    html += pics.length ? `<div class="pages">${pics.map((c) => `<figure><a href="${c.st.picture}" target="_blank"><img src="${c.st.picture}" alt="stat window"></a><figcaption>stat window as captured${c.kind === 'session' ? '' : ` (${c.kind})`}</figcaption></figure>`).join('')}</div>`
+      : '<p class="mute">No stat window read in this session. Open it (S) while the session runs (it is picked up within a minute), or press Read stats; or type the values in above.</p>';
   }
   html += '<p class="mute small">Naming an icon here also teaches this browser: later scans name it by itself (export or clear them under "icons you named" at the bottom of the page).</p>';
 
@@ -159,9 +161,11 @@ function bind(el, S0, h0) {
       if (v === '') delete S.fixes.status[t.dataset.kind][t.dataset.k]; else S.fixes.status[t.dataset.kind][t.dataset.k] = +v;
       h.recompute();
     } else if (t.classList.contains('statfix')) {
-      const v = t.value.replace(/[^\d]/g, ''), st = S.fixes.status[t.dataset.kind];
-      st.stats = st.stats || {};
-      if (v === '') delete st.stats[t.dataset.k]; else st.stats[t.dataset.k] = +v;
+      const v = t.value.replace(/[^\d]/g, '');
+      let o;
+      if (t.dataset.kind === 'session') o = S.fixes.stats = S.fixes.stats || {};
+      else { const st = S.fixes.status[t.dataset.kind]; o = st.stats = st.stats || {}; }
+      if (v === '') delete o[t.dataset.k]; else o[t.dataset.k] = +v;
       h.recompute();
     } else if (t.classList.contains('mapfix')) {
       const v = t.value.trim();
