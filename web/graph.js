@@ -19,9 +19,9 @@ const short = (v) => (v < 0 ? '-' + short(-v) : v >= 1e6 ? `${(v / 1e6).toFixed(
 /** Current values in boxes to the right of the plot: a dot on each line's end, a leader line from the dot
  * to its box's left edge. Boxes sit at their line's height, pushed apart (never overlapping) and kept
  * inside [top, bottom]. items: [{y, text, color}]; xEnd = where the lines end; xBox = boxes' left edge. */
-function rightLabels(g, items, xEnd, xBox, top, bottom, ink, bg) {
-  g.font = TAG;
-  const h = TAG_H, gap = 4;
+function rightLabels(g, items, xEnd, xBox, top, bottom, ink, bg, sz = BIG) {
+  g.font = sz.font;
+  const h = sz.h, gap = sz.gap;
   const boxes = items.map((it) => ({ ...it, w: g.measureText(it.text).width + 14, by: it.y - h / 2 })).sort((a, b) => a.y - b.y);
   for (let i = 1; i < boxes.length; i++) boxes[i].by = Math.max(boxes[i].by, boxes[i - 1].by + h + gap);   // push down
   if (boxes.length) {
@@ -43,7 +43,9 @@ function rightLabels(g, items, xEnd, xBox, top, bottom, ink, bg) {
   }
   g.textAlign = 'left'; g.textBaseline = 'alphabetic';
 }
-const labelWidth = (g, texts) => { g.font = TAG; return Math.max(0, ...texts.map((t) => g.measureText(t).width + 14)); };
+// label box sizes: BIG for one or two lines, SMALL when many (the inventory parts) so they all fit beside the plot
+const BIG = { font: TAG, h: TAG_H, gap: 4 }, SMALL = { font: 'bold 12px system-ui', h: 18, gap: 3 };
+const labelWidth = (g, texts, sz = BIG) => { g.font = sz.font; return Math.max(0, ...texts.map((t) => g.measureText(t).width + 14)); };
 
 /** Y limits from the smoothed and session lines: their range plus 25% (at least 5% of the top), not from 0
  * (snapshot.y_range). floor = lowest allowed (null: may go negative). */
@@ -205,6 +207,12 @@ export const HP = '#eb6834', MP = '#2a78d6';
  * as a line that ends early. Every line's newest value is boxed on the right with its name. */
 export function drawLines(cv, lines, unit, empty, live = false) {
   cv._redraw = () => drawLines(cv, lines, unit, empty, live);
+  // one label box per line: grow the canvas (never below its own CSS height) until every box fits beside the plot
+  const sz = (lines || []).length > 2 ? SMALL : BIG;
+  if (cv._baseH == null) cv._baseH = parseFloat(cv.ownerDocument.defaultView.getComputedStyle(cv).height) || cv.clientHeight || 150;
+  const needH = 22 + 20 + (lines || []).length * (sz.h + sz.gap) + 4;
+  const wantH = Math.max(cv._baseH, needH);
+  if (cv.clientHeight && Math.abs(cv.clientHeight - wantH) > 1) cv.style.height = `${wantH}px`;
   const [g, W, H] = fit(cv);
   const css = getComputedStyle(cv.ownerDocument.documentElement);
   const ink = css.getPropertyValue('--mute') || '#888', text = css.getPropertyValue('--ink') || '#111', bg = css.getPropertyValue('--card') || '#fff';
@@ -215,7 +223,7 @@ export function drawLines(cv, lines, unit, empty, live = false) {
   lines = allL.map((l) => ({ ...l, pts: inWin(l.pts, t0, t1), vis: strictly(l.pts, t0, t1) })).filter((l) => l.vis.length || l.pts.length);
   const lastOf = (l) => l.vis.at(-1) || l.pts.at(-1);
   const labels = lines.map((l) => `${l.label} ${short(lastOf(l).v)}`);
-  const x0 = 62, x1 = W - labelWidth(g, labels) - 22, y0 = H - 20, y1 = 22;
+  const x0 = 62, x1 = W - labelWidth(g, labels, sz) - 22, y0 = H - 20, y1 = 22;
   const vals = lines.flatMap((l) => (l.vis.length ? l.vis : l.pts).map((p) => p.v));
   const [lo, hi, step] = yRange(vals, null);
   const X = (m) => x0 + (x1 - x0) * (m - t0) / (t1 - t0), Y = (v) => y0 - (y0 - y1) * (Math.min(Math.max(v, lo), hi) - lo) / (hi - lo);
@@ -230,7 +238,7 @@ export function drawLines(cv, lines, unit, empty, live = false) {
   }
   g.restore();
   const xr = Math.min(X(t1), X(tMax));
-  rightLabels(g, lines.map((l, i) => ({ y: Y(lastOf(l).v), x: Math.max(x0, Math.min(X(lastOf(l).min), x1)), text: labels[i], color: l.color || text })), xr, x1 + 14, y1, y0, text, bg);
+  rightLabels(g, lines.map((l, i) => ({ y: Y(lastOf(l).v), x: Math.max(x0, Math.min(X(lastOf(l).min), x1)), text: labels[i], color: l.color || text })), xr, x1 + 14, y1, y0, text, bg, sz);
 }
 
 /** One line under a potion graph: mesos/hr over the whole session and mesos spent so far, per kind. */

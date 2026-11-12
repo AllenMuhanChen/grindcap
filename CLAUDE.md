@@ -215,7 +215,8 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
 web/graph.js          Canvas graphs (drawGraph EXP, drawPotionGraph, drawLines inventory parts). Time window cv._view {w, end}:
                       a running session's graphs show the last LIVE_W = 60 active min, following now; ended sessions show all.
                       Wheel = zoom around the pointer, drag = pan (panned back = stops following), double-click = reset. y range
-                      fits the visible points only; the last visible point is labelled. Reset per shown session (S.graphFor).
+                      fits the visible points only; the last visible point is labelled. drawLines: 3+ lines use smaller label boxes and the canvas
+                      grows taller (never below its CSS height) so every part's box fits (labels were cut off in the pop-out, 2026-11-12). Reset per shown session (S.graphFor).
 web/panels.js         makePanels: Results / EXP/hr / Potion cost / Live mesos/hr / Review each in a panel with a title bar
                       (drag handle, up/down, collapse). Order + collapsed in localStorage grindcap.panels. A panel hides when its
                       element is hidden or empty; expanding redraws its canvases (cv._redraw).
