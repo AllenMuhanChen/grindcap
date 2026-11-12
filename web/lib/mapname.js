@@ -70,8 +70,10 @@ export function ratio(a, b) {
 /** A last word of I-like strokes is a Roman numeral: "Excavation Site ill" -> "Excavation Site III". */
 export function numerals(name) {
   const w = name.split(/\s+/).filter(Boolean);
-  if (w.length > 1 && /^[iIl1|!]+$/.test(w.at(-1))) w[w.length - 1] = 'I'.repeat(w.at(-1).length);
-  else if (w.length > 1 && /^[iIl1|!]*[vVxX][iIl1|!]*$/.test(w.at(-1))) w[w.length - 1] = w.at(-1).replace(/[iIl1|!]/g, 'I').toUpperCase();
+  // a stray dot/comma/quote after the strokes ("Ill.") otherwise kept it from being a numeral, and "ill" is closer to II than III
+  const last = w.length > 1 ? w.at(-1).replace(/[.,:;'"`~_-]+$/, '') : '';
+  if (w.length > 1 && /^[iIl1|!\[\]]+$/.test(last)) w[w.length - 1] = 'I'.repeat(last.length);
+  else if (w.length > 1 && /^[iIl1|!\[\]]*[vVxX][iIl1|!\[\]]*$/.test(last)) w[w.length - 1] = last.replace(/[iIl1|!\[\]]/g, 'I').toUpperCase();
   return w.join(' ');
 }
 
@@ -95,7 +97,24 @@ export function snapScore(street, name, maps, cutoff = 0.75) {
   return [br, best.streetName || '', best.name || ''];
 }
 
-/** {street, name, raw, matched} or null when no minimap is visible. */
+const numeral = (name) => (/\s([IVX]+)$/.exec(name || '') || [])[1] || '';
+const base = (name) => (name || '').replace(/\s[IVX]+$/, '');
+/** The best of several OCR readings [[snapScore, street, name]]. Readings that land on maps differing only in the
+ * Roman numeral at the end ("Remains Tomb II" / "Remains Tomb III"), scoring within 0.05 of the best: the one with
+ * more strokes wins. Thin I strokes in the minimap font merge or drop out under OCR far more often than an extra one
+ * appears, so a variant that saw III beats one that saw II (Allen, 2026-11-12: Tomb III kept reading as Tomb II). */
+export function pickBest(tries) {
+  let best = null;
+  for (const t of tries) if (!best || t[0][0] > best[0][0]) best = t;
+  if (!best) return null;
+  for (const t of tries) {
+    if (t[0][0] < best[0][0] - 0.05 || base(t[0][2]) !== base(best[0][2]) || t[0][1] !== best[0][1]) continue;
+    if (numeral(t[0][2]).length > numeral(best[0][2]).length) best = t;
+  }
+  return best;
+}
+
+/** {street, name, raw, variants (every OCR reading per line), matched} or null when no minimap is visible. */
 export async function readMap(frame, header, maps = []) {
   const h = findHeader(frame, header);
   if (!h) return null;
@@ -106,14 +125,15 @@ export async function readMap(frame, header, maps = []) {
     const c = crop(frame, x0, y + Math.trunc(a * s), right - x0, Math.trunc(b * s) - Math.trunc(a * s));
     vars.push(c.w && c.h ? await variants(c) : ['']);
   }
-  let best = null;
+  const tries = [];
   for (const st of vars[0].length ? vars[0] : ['']) for (const nm of vars[1].length ? vars[1] : ['']) {
     const r = snapScore(st, nm, maps);
-    if (r && (!best || r[0] > best[0][0])) best = [r, st, nm];
+    if (r) tries.push([r, st, nm]);
   }
+  const best = pickBest(tries);
   const street = best ? best[1] : vars[0][0] || '', name = best ? best[2] : vars[1][0] || '';
   if (!street && !name) return null;
-  const out = { street, name, raw: [street, name], matched: !!best, box: [x, y, Math.max(right - x, Math.trunc(200 * s)), Math.trunc(LINE2[1] * s)] };
+  const out = { street, name, raw: [street, name], variants: vars, matched: !!best, box: [x, y, Math.max(right - x, Math.trunc(200 * s)), Math.trunc(LINE2[1] * s)] };
   if (best) { out.street = best[0][1]; out.name = best[0][2]; }
   return out;
 }

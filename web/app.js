@@ -11,7 +11,7 @@ import { locateInventory, coveredSlots, findCursor, detectTab, pageTab, readPage
 import { Capture, ticker } from './lib/capture.js';
 import { buildSnapshot, compare, withFixes, liveSeries, isPaused, activeMs, COUNTED_TABS, SKIP_TABS } from './lib/session.js';
 import * as store from './lib/store.js';
-import { readMap, snapScore } from './lib/mapname.js';
+import { readMap, snapScore, pickBest } from './lib/mapname.js';
 import { readQuickslot, matchByCount, describe, potionSeries, prices, trackKeys } from './lib/quickslot.js';
 import { renderReview } from './review.js';
 import { renderScatter, COLOR_BY, Y_BY } from './scatter.js';
@@ -424,7 +424,7 @@ async function tryMap(frame, now) {
   try { m = await readMap(frame, S.mapHeader, S.maps); } catch (e) { note(`map read failed: ${e.message}`); }
   if (S.collect !== c) return;
   if (m && m.name) {
-    c.map = { street: m.street, name: m.name, matched: m.matched, raw: m.raw };
+    c.map = { street: m.street, name: m.name, matched: m.matched, raw: m.raw, variants: m.variants };
     c.mapPic = picture(frame, ...m.box, 'image/png');
     c.mapWarn = '';
     snapNote(`Map: ${m.name}${m.matched ? '' : ' (not found in the map list: check it in the review)'}`);
@@ -595,7 +595,12 @@ async function finishCollect() {
 function resnap(snap) {
   const m = snap?.map;
   if (!m || !m.raw || !S.maps.length) return null;
-  const r = snapScore(m.raw[0] || '', m.raw[1] || '', S.maps);
+  let r = snapScore(m.raw[0] || '', m.raw[1] || '', S.maps);
+  if (m.variants) {   // every OCR reading kept (newer snapshots): picked again like readMap does (pickBest)
+    const tries = [];
+    for (const st of m.variants[0]?.length ? m.variants[0] : ['']) for (const nm of m.variants[1]?.length ? m.variants[1] : ['']) { const q = snapScore(st, nm, S.maps); if (q) tries.push([q, st, nm]); }
+    r = pickBest(tries)?.[0] || r;
+  }
   if (!r || (r[1] === m.street && r[2] === m.name && m.matched)) return null;
   const old = m.name;
   snap.map = { ...m, street: r[1], name: r[2], matched: true };

@@ -174,7 +174,9 @@ web/data/cursors.json Mouse-pointer templates (pointing + open glove, screen px 
                       changes during a scan (pet loot) End uses the first read, Start the last (mesos_changed).
                       snapshot.exp_picture = the EXP text as captured. Both shown in the review status table.
 web/lib/mapname.js    mapname.py: minimap header (web/data/minimap_header.png) -> street/map lines, OCR variants,
-                      snapped to web/local/maps.json (export_web_data.py) by a difflib-equal ratio(). Read at the
+                      snapped to web/local/maps.json (export_web_data.py) by a difflib-equal ratio(). Variants landing on maps that differ only in the
+                      trailing numeral (within 0.05): more strokes win (mapname.pickBest; Tomb III read as II, 2026-11-12); numerals()
+                      ignores trailing punctuation ("Ill."); every OCR variant kept in snapshot.map.variants and used by resnap. Read at the
                       start of each scan, retried every 3 s on pages; missing -> "open the minimap (M)". Stored as
                       snapshot.map + map_picture, editable in the review (fixes.status[kind].map), leads the default name.
                       app.resnapMaps on every load: map.raw matched again against the current maps.json (key(): no case/punctuation),

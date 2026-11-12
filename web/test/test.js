@@ -6,7 +6,7 @@ import { locateInventory, detectTab, coveredSlots, readPage, LookCache, findCurs
 import { StackDigits } from '../lib/digits.js';
 import { ItemDB } from '../lib/itemdb.js';
 import { mat } from '../lib/img.js';
-import { readMap, snapScore } from '../lib/mapname.js';
+import { readMap, snapScore, pickBest } from '../lib/mapname.js';
 import { liveSeries, plausibleRows } from '../lib/session.js';
 import { expToNext } from '../lib/gamedata.js';
 import { alignPage, partStates, activeStates, partPoints, liveNet } from '../lib/liveinv.js';
@@ -171,6 +171,12 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
     .map(([a, b]) => snapScore(a, b, maps)?.[2]);
   const want = ['Remains <Tomb> I', 'Remains <Tomb> II', 'Remains <Tomb> IV', 'Remains <Tomb> I', 'Remains <Cliff>'];
   if (JSON.stringify(got) !== JSON.stringify(want)) fails.push(`map names with <> and numerals: got ${JSON.stringify(got)}`);
+  const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fails.push(`map ${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
+  // Tomb III read as Tomb II: a trailing dot, and variants that disagree on the strokes (more strokes win)
+  eq(snapScore('Victoria Road', 'Remains <Tomb> Ill.', maps)?.[2], 'Remains <Tomb> III', 'numeral with a trailing dot');
+  const tries = ['Remains <Tomb> II', 'Remains <Tomb> III', 'Remains <Tomb> Il'].map((nm) => [snapScore('Victoria Road', nm, maps), 'Victoria Road', nm]);
+  eq(pickBest(tries)[0][2], 'Remains <Tomb> III', 'variants: more strokes win');
+  eq(pickBest([[snapScore('Victoria Road', 'Remains <Tomb> II', maps), 'a', 'b'], [snapScore('Victoria Road', 'Excavation Site III', maps), 'a', 'c']])[0][2], 'Remains <Tomb> II', 'other map not taken');
 }
 // Live EXP around a level-up: a reading misread one level too high (or a level-down) must not spike EXP/hr
 {
