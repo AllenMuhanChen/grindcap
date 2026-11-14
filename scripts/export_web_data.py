@@ -24,6 +24,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 
+RECHARGE = ("207", "233")   # throwing stars, bullets: the slot number is what's left of one set
+
+
+def fetch_set_sizes(items: dict, items_path: Path, cfg) -> None:
+    """Set size (metaInfo.slotMax) of every throwing star / bullet: the item's price is for a whole set, so the web
+    app prices one star at price / slot_max. Classic World's data first, GMS v83 when it has none."""
+    from grindcap.itemdb import _get
+
+    opt = cfg["inventory"].get("itemdb") or {}
+    base = f"https://maplestory.io/api/{opt.get('region', 'MCW')}/{opt.get('version', '1')}"
+    todo = [iid for iid, it in items.items() if str(iid).startswith(RECHARGE) and not it.get("slot_max")]
+    for iid in todo:
+        for url in (f"{base}/item/{iid}", f"https://maplestory.io/api/GMS/83/item/{iid}"):
+            try:
+                n = (json.loads(_get(url, 20, tries=2)).get("metaInfo") or {}).get("slotMax")
+            except Exception:
+                n = None
+            if n:
+                items[iid]["slot_max"] = n
+                break
+    if todo:
+        items_path.write_text(json.dumps(items, indent=1))
+        print(f"Star/bullet set sizes: {sum(1 for i in todo if items[i].get('slot_max'))} of {len(todo)} found.")
+
+
 def fetch_prices(items: dict, items_path: Path, cfg) -> None:
     """NPC sell price for every item that doesn't have one yet. The Python app only fetched prices for
     items it had identified, so most items had none. Saved into items.json (no-price items as null, so
@@ -103,6 +128,7 @@ def main() -> int:
     items = json.loads(items_path.read_text())
     if "--no-prices" not in sys.argv:
         fetch_prices(items, items_path, cfg)
+        fetch_set_sizes(items, items_path, cfg)
     user_prices = {}
     cat_path = data / "catalog.json"
     if cat_path.exists():
@@ -116,6 +142,10 @@ def main() -> int:
         up = user_prices.get(str(iid), {})
         price = up.get("price") if up.get("price") is not None else (up.get("npc_price") or it.get("price"))
         exp_items[iid] = {"name": it["name"], "category": it.get("category"), "price": price}
+        if up.get("price") is not None:
+            exp_items[iid]["user_price"] = True        # your own price: per star for stars, never divided by the set size
+        if it.get("slot_max"):
+            exp_items[iid]["slot_max"] = it["slot_max"]
         if p.exists():
             icons[iid] = base64.b64encode(p.read_bytes()).decode()
         else:   # maplestory.io had no icon (e.g. Skeledog's Bone 4000154): still searchable by name, never auto-matched

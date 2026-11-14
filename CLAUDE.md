@@ -293,6 +293,10 @@ scripts/export_web_data.py  <catalog_dir>/itemdb + catalog prices + digits.npz -
                       export_web_data.fetch_prices fetches every missing one (8 threads, saved to items.json, --no-prices skips); no MCW price (equips,
                       e.g. Brown Piettra 1041069: meowdb says 7,000) -> same id in GMS v83, asked once (price_gms).
                       app.fillPrices asks maplestory.io in the browser for items in the shown session still without one (kv npcPrices).
+                      Throwing stars / bullets (207xxxx, 233xxxx, app.isRecharge): slot number = stars left in a set, item price = a whole
+                      set, so one star = price / slotMax (items.json slot_max via export fetch_set_sizes, else kv setSizes from
+                      fillPrices); unknown set size = no price (listed). A catalog/typed price is per star (user_price, not divided).
+                      2026-11-14: stars were valued at a whole set each.
 scripts/export_web_backup.py  grindcap-gui sessions (sessions.list_sessions + load_snapshot, fixes applied, ids no longer in
                       the catalog dropped like compare) -> a grindcap-backup file for Restore: items keyed by catalog db id
                       (else "gui:item-NNN" with the catalog price in kv "prices"), sessions.json name/map, pauses, checked
