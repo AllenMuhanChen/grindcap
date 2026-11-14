@@ -86,7 +86,7 @@ const H0 = (g) => g.canvas.clientHeight || g.canvas.height;
 
 // ---- time window, zoom and pan. cv._view = {w: minutes shown (null = all), end: right edge (null = follow the
 // newest point)}. Live graphs show the last LIVE_W minutes and follow the present; the review shows everything.
-// Mouse wheel zooms around the pointer, dragging pans, double-click goes back to the default.
+// Ctrl + mouse wheel zooms around the pointer (plain wheel scrolls the page), dragging pans, double-click goes back to the default.
 export const LIVE_W = 60;
 function xWindow(cv, tMax, live) {
   const v = cv._view || {};
@@ -109,7 +109,7 @@ function interactive(cv, geom) {
   if (cv._zoomInit) return;
   cv._zoomInit = true;
   cv.style.cursor = 'grab'; cv.style.touchAction = 'none';
-  cv.title = 'Scroll to zoom, drag to move back and forth in time, double-click for the default view';
+  cv.title = 'Ctrl + scroll to zoom, drag to move back and forth in time, double-click for the default view';
   const redraw = () => cv._redraw && cv._redraw();
   const frac = (e) => { const r = cv.getBoundingClientRect(), G = cv._geom; return Math.min(1, Math.max(0, (e.clientX - r.left - G.x0) / (G.x1 - G.x0))); };
   const set = (t0, t1) => {
@@ -120,6 +120,7 @@ function interactive(cv, geom) {
   };
   cv.addEventListener('wheel', (e) => {
     const G = cv._geom; if (!G) return;
+    if (!e.ctrlKey && !e.metaKey) return;   // a plain wheel scrolls the page (zooming on it hijacked scrolling, 2026-11-14)
     e.preventDefault();
     const f = frac(e), at = G.t0 + f * (G.t1 - G.t0), k = e.deltaY > 0 ? 1.25 : 0.8, w = (G.t1 - G.t0) * k;
     set(at - f * w, at + (1 - f) * w);

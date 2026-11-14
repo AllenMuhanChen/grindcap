@@ -279,7 +279,8 @@ const signed = (v) => `${v >= 0 ? '+' : ''}${fmt(v)}`;
 function invLine(e) {
   if (!e) return '';
   const parts = e.parts.map((p) => `${p.name}${p.name === 'Use' && e.parts.some((q) => q.name === 'Potions') ? ' (no potions)' : ''} ${signed(p.latest)}/hr (${ago(p.age_min)})`);
-  return parts.join(' · ') + (e.waiting.length ? ` · no rate yet (needs 2 reads 3+ active min apart): ${e.waiting.join(', ')}` : '')
+  const left = e.parts.filter((p) => p.spent || p.outliers).map((p) => `${p.name}${p.spent ? ` ${p.spent} ${p.name === 'Mesos' ? 'spend' : 'repot'}` : ''}${p.outliers ? ` ${p.outliers} outlier${p.outliers > 1 ? 's' : ''}` : ''}`);
+  return parts.join(' · ') + (left.length ? ` · left out: ${left.join(', ')}` : '') + (e.waiting.length ? ` · no rate yet (needs 2 reads 3+ active min apart): ${e.waiting.join(', ')}` : '')
     + (e.unpriced.length ? ` · no price: ${e.unpriced.join(', ')}` : '');
 }
 

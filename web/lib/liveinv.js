@@ -101,25 +101,44 @@ export function activeStates(states, startTime, pauses = []) {
     gap: i > 0 && (pauses || []).some(([p0, p1]) => p0 < s.t && (p1 ?? Infinity) > states[i - 1].t) }));
 }
 
-/** Rate points of one part: rate = change since the previous point / active time between them (mesos/hr); avg = the
- * moving average over the last n points (reads come at irregular times, so it's their gains added up / their minutes
- * added up: a long interval weighs more than a short one; n = 1: avg = rate). A point
+/** Rate points of one part: rate = change since the previous point / active time between them (mesos/hr). A point
  * needs at least minMin active minutes since the previous one (reads come every 15 s while the inventory is
  * open; a few mesos over seconds would be a huge rate). A pause in between restarts from the first state after
- * it, so nothing that changed while paused counts. states: [{min, value, gap}] (activeStates). */
-export function partPoints(states, minMin = 3, n = 1) {
+ * it, so nothing that changed while paused counts. states: [{min, value, gap}] (activeStates).
+ * Left out (2026-11-14, a repot while running showed +1.2M/hr and held the net up for a while):
+ * - spend: opts.spend = the sign of a change that is buying, not grinding (Mesos -1: the meso field only drops when
+ *   you buy; Potions +1: the quick slot count only jumps up when you repot). Such a point counts nowhere.
+ * - outlier: a rate far from the part's other points (leave-one-out median m and MAD: |rate - m| > max(6 x 1.4826
+ *   MAD, 3 |m|, OUTLIER_MIN)), with 2+ other points. Left out of the moving average and the net now, kept in the
+ *   session average (a rare equip drop is a spike too, but real income).
+ * avg = moving average over the last n points that count (gains added up / minutes added up: reads come at
+ * irregular times, so a long interval weighs more; n = 1: avg = rate); null on a left-out point. */
+export const OUTLIER_MIN = 100000;
+export function partPoints(states, minMin = 3, n = 1, opts = {}) {
   const out = [];
   let anchor = states[0];
   for (const s of states.slice(1)) {
     if (s.gap) { anchor = s; continue; }
     const dm = s.min - anchor.min;
     if (dm < minMin) continue;
-    out.push({ min: s.min, rate: (s.value - anchor.value) / dm * 60, gain: s.value - anchor.value, dmin: dm });
+    const gain = s.value - anchor.value;
+    out.push({ min: s.min, rate: gain / dm * 60, gain, dmin: dm, spend: !!opts.spend && Math.sign(gain) === opts.spend });
     anchor = s;
   }
-  for (let i = 0; i < out.length; i++) {
-    const w = out.slice(Math.max(0, i - Math.max(1, n) + 1), i + 1);
-    out[i].avg = w.reduce((a, p) => a + p.gain, 0) / w.reduce((a, p) => a + p.dmin, 0) * 60;
+  const med = (a) => { const b = [...a].sort((x, y) => x - y), k = b.length >> 1; return b.length % 2 ? b[k] : (b[k - 1] + b[k]) / 2; };
+  const ok = out.filter((p) => !p.spend);
+  for (const p of ok) {
+    const others = ok.filter((q) => q !== p).map((q) => q.rate);
+    if (others.length < 2) { p.outlier = false; continue; }
+    const m = med(others), mad = med(others.map((r) => Math.abs(r - m)));
+    p.outlier = Math.abs(p.rate - m) > Math.max(6 * 1.4826 * mad, 3 * Math.abs(m), OUTLIER_MIN);
+  }
+  const use = [];
+  for (const p of out) {
+    if (p.spend || p.outlier) { p.avg = null; continue; }
+    use.push(p);
+    const w = use.slice(-Math.max(1, n));
+    p.avg = w.reduce((a, q) => a + q.gain, 0) / w.reduce((a, q) => a + q.dmin, 0) * 60;
   }
   return out;
 }
@@ -128,13 +147,16 @@ export function partPoints(states, minMin = 3, n = 1) {
  * (sum of gains / minutes covered), and the net: latest = each part's newest rate added up (an outdated part
  * counts at the rate it last had), session = the session averages added up. total = the net after every point.
  * nowMin = active minutes now. Parts without a point yet are listed in waiting. */
+export const SPEND = { Mesos: -1, Potions: 1 };
 export function liveNet(parts, nowMin, minMin = 3, n = 1) {
   const out = [], waiting = [];
   for (const [name, states] of Object.entries(parts)) {
-    const points = partPoints(states, minMin, n);
+    const all = partPoints(states, minMin, n, { spend: SPEND[name] });
+    const points = all.filter((p) => p.avg != null), kept = all.filter((p) => !p.spend);
     if (!points.length) { waiting.push(name); continue; }
-    const gain = points.reduce((a, p) => a + p.gain, 0), covered = points.reduce((a, p) => a + p.dmin, 0);
-    out.push({ name, points, latest: points.at(-1).avg, last_min: points.at(-1).min, age_min: nowMin - points.at(-1).min, session: gain / covered * 60, gain, covered_min: covered });
+    const gain = kept.reduce((a, p) => a + p.gain, 0), covered = kept.reduce((a, p) => a + p.dmin, 0);
+    out.push({ name, points, all, spent: all.filter((p) => p.spend).length, outliers: all.filter((p) => p.outlier).length,
+      latest: points.at(-1).avg, last_min: points.at(-1).min, age_min: nowMin - points.at(-1).min, session: gain / covered * 60, gain, covered_min: covered });
   }
   const sum = (k) => (out.length ? Math.round(out.reduce((a, p) => a + p[k], 0)) : null);
   // the net after each point: every part at its newest rate so far

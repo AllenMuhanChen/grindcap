@@ -295,6 +295,16 @@ for (const [f, job] of [['etc_ant_tunnel.png', 'Spearman'], ['game_frame.png', '
   eq(sm.map((p) => Math.round(p.rate)), [6000, 12000, 0], 'raw rates');
   eq(sm.map((p) => Math.round(p.avg)), [6000, 8000, 1714], 'moving average over 2 reads');
   eq(liveNet({ A: [{ min: 0, value: 0 }, { min: 10, value: 1000 }, { min: 15, value: 2000 }] }, 15, 3, 2).net_latest, 8000, 'net uses the average');
+  // a repot while running: the meso field drops, the quick slot potions jump up; neither counts anywhere
+  const st = (vals) => vals.map((value, i) => ({ min: i * 5, value, gap: false }));
+  const rp = liveNet({ Mesos: st([0, 2000, 4000, -96000, -94000]), Potions: st([0, -500, -1000, 99000, 98500]) }, 20, 3, 3);
+  const pm = rp.parts.find((p) => p.name === 'Mesos'), pp = rp.parts.find((p) => p.name === 'Potions');
+  eq([pm.spent, pp.spent, Math.round(pm.latest), Math.round(pp.latest), Math.round(pm.session), Math.round(pp.session)], [1, 1, 24000, -6000, 24000, -6000], 'repot left out');
+  eq(rp.total.every((t) => Math.abs(t.est) < 50000), true, 'net never spikes on a repot');
+  // an outlier (a misread) is left out of the moving average but kept in the session average
+  const ol = partPoints(st([0, 2000, 4000, 104000, 106000, 108000]), 3, 2);
+  eq(ol.map((p) => !!p.outlier), [false, false, true, false, false], 'outlier flagged');
+  eq(Math.round(ol.at(-1).avg), 24000, 'outlier out of the moving average');
   // a look you named on the review applies to live reads too
   const lk = { time: t0, mesos: 0, tabs: { Etc: [row({ ...S(1, 10), look: 'L1' })] } };
   const lp = [row({ ...S(1, 10), look: 'L1' }, { id: 'look-9', qty: 30, name: '?', look: 'L9' })];

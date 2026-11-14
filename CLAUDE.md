@@ -212,13 +212,16 @@ web/lib/liveinv.js    Live net mesos/hr from the inventory while grinding (check
                       across a pause too. liveNet: net now = every part at its newest rate (an outdated part keeps its last
                       rate), session = sum of per-part gain / minutes covered; total = net after each point. Rates are smoothed (2026-11-12,
                       Allen): avg = moving average over a part's last N points (kv invSmooth, default 3, "smooth over N reads";
-                      gains summed / minutes summed, reads are irregular); latest, total and the graph lines use avg. Shown: liveStats row
+                      gains summed / minutes summed, reads are irregular); latest, total and the graph lines use avg. Left out (2026-11-14, a repot
+                      while running gave +1.2M/hr): spend points (Mesos falling, Potions rising: liveinv.SPEND) count nowhere;
+                      outliers (leave-one-out median/MAD, > max(6x1.4826 MAD, 3|m|, 100k/hr), 2+ other points) are out of avg/net
+                      but kept in the session average; #invLine lists them. Shown: liveStats row
                       (now · session), #invLine (each part's rate + age), graph.drawLines (one line per part, thick Net, a line
                       ends where its part was last read) in the view (#invGraph) and the pop-out (canvas ig); review compares
                       with the End result. fixes.looks apply.
 web/graph.js          Canvas graphs (drawGraph EXP, drawPotionGraph, drawLines inventory parts). Time window cv._view {w, end}:
                       a running session's graphs show the last LIVE_W = 60 active min, following now; ended sessions show all.
-                      Wheel = zoom around the pointer, drag = pan (panned back = stops following), double-click = reset. y range
+                      Ctrl+wheel = zoom around the pointer (plain wheel scrolls the page, 2026-11-14), drag = pan (panned back = stops following), double-click = reset. y range
                       fits the visible points only; the last visible point is labelled. drawLines: 3+ lines use smaller label boxes and the canvas
                       grows taller (never below its CSS height) so every part's box fits (labels were cut off in the pop-out, 2026-11-12). Reset per shown session (S.graphFor).
 web/panels.js         makePanels: Results / EXP/hr / Potion cost / Live mesos/hr / Review each in a panel with a title bar
