@@ -651,17 +651,12 @@ const nameOf = (id) => S.itemdb.name(id);
 // your prices (set on the review, kv "myPrices") win, then the item data's (your catalog price, else NPC), then
 // prices that came with grindcap-gui items that have no item-data id (kv "prices")
 const setPrice0 = (id) => S.itemdb.items[id]?.price ?? store.get('npcPrices')?.[id] ?? store.get('prices')?.[id] ?? null;
-/** Throwing stars (207xxxx) and bullets (233xxxx) are rechargeable: the slot number is how many are left in the set, and
- * the item data's price is for a whole set. One star is worth set price / set size (slotMax), as an NPC pays for a
- * partly used set (2026-11-14: stars were valued at a whole set each). Set size unknown yet: no price (listed). */
+/** Throwing stars (207xxxx) and bullets (233xxxx) are rechargeable: the slot number is how many are left, and one is
+ * worth the shop's recharge price per star (item data metaInfo.unitPrice), not the item's price (a whole set; 2026-11-14,
+ * Allen: "recharge price"). Unit price unknown yet: no price (listed). */
 const isRecharge = (id) => /^(207|233)\d{4}$/.test(String(id));
-const setSize = (id) => S.itemdb.items[id]?.slot_max ?? store.get('setSizes')?.[id] ?? null;
-const basePrice = (id) => {
-  const p = setPrice0(id);
-  if (p == null || !isRecharge(id) || S.itemdb.items[id]?.user_price) return p;
-  const n = setSize(id);
-  return n ? p / n : null;
-};
+const unitPrice = (id) => S.itemdb.items[id]?.unit_price ?? store.get('unitPrices')?.[id] ?? null;
+const basePrice = (id) => (isRecharge(id) && !S.itemdb.items[id]?.user_price ? unitPrice(id) : setPrice0(id));
 const userPrice = (id) => store.get('myPrices')?.[id] ?? null;
 const priceOf = (id) => userPrice(id) ?? basePrice(id);
 let repriceTimer = null;
@@ -692,18 +687,18 @@ function repriceAll() {
 const priceAsked = new Set();
 async function fillPrices(v) {
   const ids = [...new Set([v.start, v.end].filter(Boolean).flatMap((sn) => Object.keys(sn.items || {})))]
-    .filter((id) => /^\d+$/.test(id) && basePrice(id) == null && (!(id in (store.get('npcPrices') || {})) || (isRecharge(id) && setSize(id) == null)) && !priceAsked.has(id));
+    .filter((id) => /^\d+$/.test(id) && basePrice(id) == null && (!(id in (store.get('npcPrices') || {})) || (isRecharge(id) && unitPrice(id) == null)) && !priceAsked.has(id));
   if (!ids.length) return;
   ids.forEach((id) => priceAsked.add(id));
   let got = 0;
   for (const id of ids) {
     try {
       const meta = async (region) => { const r = await fetch(`https://maplestory.io/api/${region}/item/${id}`); return r.ok ? (await r.json())?.metaInfo || {} : undefined; };
-      if (isRecharge(id) && setSize(id) == null) {   // a star's set size, to price one star
+      if (isRecharge(id)) {   // a star: its recharge price per star
         let m = await meta('MCW/1');
-        if (m && !m.slotMax) m = (await meta('GMS/83')) || m;
-        if (m?.slotMax) { store.set('setSizes', { ...(store.get('setSizes') || {}), [id]: m.slotMax }); got++; }
-        if (id in (store.get('npcPrices') || {}) || S.itemdb.items[id]?.price != null) continue;
+        if (m && m.unitPrice == null) m = (await meta('GMS/83')) || m;
+        if (m?.unitPrice != null) { store.set('unitPrices', { ...(store.get('unitPrices') || {}), [id]: m.unitPrice }); got++; }
+        continue;
       }
       const ask = async (region) => { const m = await meta(region); return m === undefined ? undefined : m.price || null; };
       let price = await ask('MCW/1');
@@ -799,7 +794,7 @@ $('deleteSess').onclick = async () => {
 
 // ------------------------------------------------------------------ backup: everything in one file
 
-const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv', 'invSmooth', 'sessStats', 'setSizes'];
+const BACKUP_KEYS = ['myPrices', 'prices', 'npcPrices', 'start', 'end', 'live', 'pauses', 'fixes', 'name', 'potions', 'qsNames', 'character', 'corrections', 'characters', 'char', 'trackPotions', 'readStats', 'useIds', 'tagList', 'sessTags', 'invLive', 'trackInv', 'invSmooth', 'sessStats', 'unitPrices'];
 $('backup').onclick = async () => {
   const sessions = await store.allSessions();
   const kv = Object.fromEntries(BACKUP_KEYS.map((k) => [k, store.get(k)]));
